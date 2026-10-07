@@ -71,9 +71,11 @@ struct Knobs {
   int bd1Filter = 64;
   int bd1Dist = 0;
   int bd1Trigger = 0;
+  int bd1Wave = 32;  // Serge folder on the body, 0 is bypass, default 0.25
   int bd2Decay = 0;
   int bd2Tune = 0;
   int bd2Tone = 0;
+  int bd2Wave = 32;
   int sdTune = 0;
   int sdDTune = 64;
   int sdSnappy = 0;
@@ -98,15 +100,18 @@ struct Knobs {
   int htcTune = 0;
   int htcDecay = 0;
   int htcNoise = 0;  // >= 64 enables this voice's noise
-  int htcMode = 0;   // >= 64 conga
+  int htcMode = 0;
+  int htcWave = 32;   // >= 64 conga
   int mtcTune = 0;
   int mtcDecay = 0;
   int mtcNoise = 0;
   int mtcMode = 0;
+  int mtcWave = 32;
   int ltcTune = 0;
   int ltcDecay = 0;
   int ltcNoise = 0;
   int ltcMode = 0;
+  int ltcWave = 32;
   int tomNoise = 0;  // shared level, CC 84
   int cbTune = 0;
   int cbDecay = 0;
