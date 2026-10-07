@@ -10,7 +10,7 @@ const mod = new WebAssembly.Module(readFileSync(root + "build/shogun.wasm"));
 const VI = ["BD1","BD2","SD","RS","CY","OH","HH","CL","CP","LTC","MTC","HTC","CB","MA","LEAD","BASS"];
 
 function peak(kit, v) {
-  const x = new WebAssembly.Instance(mod, { env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh } }).exports;
+  const x = new WebAssembly.Instance(mod, { env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh, log: Math.log } }).exports;
   x.sg_init();
   for (let i = 0; i < x.sg_knob_count(); i++) {
     const m = new Uint8Array(x.memory.buffer); let p = x.sg_knob_name(i), s = "";
