@@ -80,6 +80,7 @@ std::int64_t gLastCounter = -1;
 
 EXPORT(sg_init) void sg_init() {
   gE = new (gStore) shogun::Engine();
+  gE->reset();  // the page sends its own kit, levels and steps; start it from the cleared state
   gKnobs = shogun::Knobs{};
   gPattern = shogun::Pattern{};
   for (int i = 0; i < kInputs; ++i) {

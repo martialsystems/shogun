@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 // Named checks from TESTPLAN.md, plus the short-voice rows in SCHEMATICS.md.
@@ -1462,6 +1463,57 @@ void testShuffleSurvivesOddLength() {
   }
 }
 
+void testInitKitIs909Steps() {
+  const char* t = "testInitKitIs909Steps";
+  shogun::Engine e;  // fresh engine, no reset()
+  const shogun::Pattern& p = e.pattern();
+  expect(std::strcmp(p.name, "909") == 0, t, "the init pattern is named 909", 0, 0);
+  expect(p.length == 16, t, "one bar of 16 steps", p.length, 16);
+  // Kick 1 and 9, snare and clap 5 and 13, open hat 3 7 11 15, closed hat on the other steps (it would choke the open hat).
+  bool map = true;
+  for (int v = 0; v < shogun::kVoiceCount; ++v) {
+    const shogun::Track& tr = p.track[v];
+    if (tr.length != 16) map = false;
+    for (int s = 0; s < shogun::kMaxSteps; ++s) {
+      bool want = false;
+      if (s < 16) {
+        switch (static_cast<shogun::Voice>(v)) {
+          case shogun::Voice::Bd1: want = s % 8 == 0; break;
+          case shogun::Voice::Sd:
+          case shogun::Voice::Cp: want = s % 8 == 4; break;
+          case shogun::Voice::Oh: want = s % 4 == 2; break;
+          case shogun::Voice::Hh: want = s % 4 != 2; break;
+          default: break;
+        }
+      }
+      if (tr.drum[s].on != want) {
+        map = false;
+        std::printf("  voice %d step %d: on=%d want %d\n", v, s + 1, tr.drum[s].on ? 1 : 0, want ? 1 : 0);
+      }
+    }
+  }
+  expect(map, t, "step map matches the 909 sheet", 0, 0);
+  const double bd1Decay = e.knobs().bd1Decay / 127.0;
+  expect(bd1Decay < 0.35, t, "BD1 Decay under 0.35", bd1Decay, 0.35);
+  expect(e.level(shogun::Voice::Bd2) == 0.0 && e.level(shogun::Voice::Ltc) == 0.0, t, "BD2 and toms at level 0",
+         e.level(shogun::Voice::Bd2), 0.0);
+  expect(near(e.master(), 0.7), t, "master 0.7", e.master(), 0.7);
+
+  // One bar at 120 BPM, INT: the open hats ring (no choke), and the mix stays under full scale.
+  shogun::TrigIn in;
+  shogun::Frame f;
+  double peak = 0;
+  double ohPeak = 0;
+  for (int n = 0; n < 16 * 6000; ++n) {
+    e.process(in, f);
+    peak = std::fmax(peak, std::fmax(std::fabs(f.mainL), std::fabs(f.mainR)));
+    if (n >= 2 * 6000 && n < 3 * 6000) ohPeak = std::fmax(ohPeak, e.ohEnv());
+  }
+  std::printf("%s: one bar peak %.6f\n", t, peak);
+  expect(ohPeak > 0.5, t, "the open hat on step 3 is not choked", ohPeak, 1.0);
+  expect(peak > 0.1 && peak < 1.0, t, "one bar plays under full scale", peak, 0.5);
+}
+
 int main() {
   testKickBendDecays();
   testBd1SoundChangesAttack();
@@ -1487,6 +1539,7 @@ int main() {
   testTomFullEnds();
   testSnareBendAtPitchZero();
   testSoloMutesOtherVoices();
+  testInitKitIs909Steps();
   if (gFails != 0) {
     std::printf("%d failed\n", gFails);
     return 1;

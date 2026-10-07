@@ -55,7 +55,77 @@ void endIfQuiet(State& st, double env) {
 
 }  // namespace
 
-Engine::Engine() { reset(); }
+// u(cc) = cc / 127. Values below are round(u * 127) from the 909 balance sheet.
+Knobs initKit() {
+  Knobs k;
+  k.bd1Tune = 28;     // 0.22
+  k.bd1Pitch = 70;    // Bend 0.55
+  k.bd1Decay = 36;    // 0.28
+  k.bd1Attack = 57;   // 0.45
+  k.bd1Dist = 19;     // 0.15
+  k.bd1Noise = 10;    // 0.08
+  k.bd1Filter = 44;   // 0.35
+  k.sdTune = 61;      // 0.48
+  k.sdDTune = 15;     // Detune 0.12
+  k.sdPitch = 44;     // Bend 0.35
+  k.sdToneDecay = 28; // Decay 0.22
+  k.sdSnDecay = 38;   // Dec 2 0.30
+  k.sdSnappy = 79;    // 0.62
+  k.sdTone = 57;      // 0.45
+  k.rsTune = 79;      // 0.62
+  k.cpData = 48;      // 4 bursts
+  k.cpAttack = 89;    // 0.7
+  k.cpDecay = 32;     // 0.25
+  k.cpFilter = 70;    // 0.55
+  k.hhDecay = 10;     // 0.08
+  k.hhTune = 89;      // 0.7, shared by the open hat
+  k.ohDecay = 43;     // 0.34
+  k.cyDecay = 70;     // 0.55
+  k.ltcTune = 38;     // 0.30
+  k.ltcDecay = 41;    // 0.32
+  k.mtcTune = 53;     // 0.42
+  k.mtcDecay = 36;    // 0.28
+  k.htcTune = 70;     // 0.55
+  k.htcDecay = 30;    // 0.24
+  return k;
+}
+
+Pattern initPattern() {
+  Pattern p;
+  p.name = "909";
+  p.length = 16;
+  for (auto& tr : p.track) tr.length = 16;
+  auto on = [&p](Voice v, int s) { p.track[static_cast<int>(v)].drum[s].on = true; };
+  for (int s = 0; s < 16; ++s) {
+    if (s % 8 == 0) on(Voice::Bd1, s);
+    if (s % 8 == 4) {
+      on(Voice::Sd, s);
+      on(Voice::Cp, s);
+    }
+    // A closed hat on the same step chokes the open hat, so the hat skips the open-hat steps.
+    if (s % 4 == 2) on(Voice::Oh, s);
+    else on(Voice::Hh, s);
+  }
+  return p;
+}
+
+Engine::Engine() {
+  reset();
+  loadInit();
+}
+
+void Engine::loadInit() {
+  static constexpr double kInitLevel[kVoiceCount] = {
+      0.85, 0.0, 0.75, 0.4, 0.35, 0.4, 0.45, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0};
+  knobs_ = initKit();
+  pattern_ = initPattern();
+  for (int i = 0; i < kVoiceCount; ++i) level_[i] = kInitLevel[i];
+  master_ = 0.7;
+  mode_ = ClockMode::Int;
+  bpm_ = 120.0;
+  stepsPerQuarter_ = 4;
+  recomputePeriod();
+}
 
 void Engine::reset() {
   mode_ = ClockMode::Int;

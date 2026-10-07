@@ -126,6 +126,10 @@ SD Tune 70, Pitch 0, Tone Decay 127, bend +12. f1 is 466.028122 Hz at n = 0 and 
 
 BD1 (example knobs) and SD on step 0, SD soloed. For 200 samples BD1 and its pair are 0, the main is the snare alone, and the snare matches an engine without solo. The counter matches too. With solo off, the next sample of BD1 and of the main matches the engine without solo. A soloed SD on a muted track is 0 on every output, even from a direct trigger.
 
+## testInitKitIs909Steps
+
+A fresh engine, no reset(). The pattern is named 909, length 16, every track length 16. BD1 is on steps 1 and 9, SD and CP on 5 and 13, OH on 3, 7, 11, and 15, HH on every other step of the 16, and nothing else is on in all 32 steps of any track. BD1 Decay is under 0.35 (36 / 127 = 0.283465). BD2 and LTC are at level 0, master 0.7. One bar at 120 BPM INT: the open hat on step 3 rings above 0.5 (no choke), and the main peaks at 0.943890, under 1.
+
 ## testDistBypassAndDrive
 
 BD1 example knobs, n = 48. Dist 0 is y = pre = 0.829514. Dist 1 is within 2e-3 of Dist 0. Dist 64 is 0.999151.
