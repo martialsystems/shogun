@@ -1,0 +1,19 @@
+#pragma once
+// Freestanding <cmath> for the WebAssembly build. sin, exp, pow and tanh are imported from the
+// page (Math.*). floor and fabs are wasm instructions. round and llround round half away from zero.
+extern "C" {
+double sin(double);
+double exp(double);
+double pow(double, double);
+double tanh(double);
+}
+namespace std {
+using ::exp;
+using ::pow;
+using ::sin;
+using ::tanh;
+inline double floor(double x) { return __builtin_floor(x); }
+inline double fabs(double x) { return __builtin_fabs(x); }
+inline double round(double x) { return x < 0 ? -__builtin_floor(-x + 0.5) : __builtin_floor(x + 0.5); }
+inline long long llround(double x) { return static_cast<long long>(round(x)); }
+}  // namespace std

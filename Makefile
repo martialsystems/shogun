@@ -4,7 +4,7 @@ CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2 -Iengine
 GRAPHFORGE_SRC ?= $(HOME)/graphforge/src
 JUCE_SRC ?= $(HOME)/jidai-collection/jidai-rack/build/fl-release/_deps/juce-src
 
-.PHONY: test clean asan law plugin install-vst
+.PHONY: test clean asan law plugin install-vst web
 
 test: build/shogun_tests law
 	./build/shogun_tests
@@ -37,6 +37,24 @@ asan: engine/shogun.cpp engine/shogun.h engine/dsp.h tests/voices.cpp
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -Iengine \
 		-o build/shogun_tests_asan engine/shogun.cpp tests/voices.cpp
 	./build/shogun_tests_asan
+
+# The web page: the engine compiled to wasm (clang with the wasm32 target and wasm-ld, no libc),
+# checked sample by sample against the native build, then inlined into web/shogun.html.
+WASM_FLAGS = --target=wasm32 -std=c++17 -O2 -nostdlib -nostdinc -isystem web/wasm/include -Iengine \
+	-fno-exceptions -fno-rtti -fno-builtin -Wall -Wextra -Werror \
+	-Wl,--no-entry -Wl,--allow-undefined -Wl,-z,stack-size=262144
+
+build/shogun.wasm: engine/shogun.cpp engine/shogun.h engine/dsp.h web/wasm/shogun_web.cpp web/wasm/include/cmath web/wasm/include/cstdint
+	mkdir -p build
+	clang++ $(WASM_FLAGS) -o $@ engine/shogun.cpp web/wasm/shogun_web.cpp
+
+build/web_parity: engine/shogun.cpp engine/shogun.h engine/dsp.h web/wasm/shogun_web.cpp tests/web_parity.cpp
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ engine/shogun.cpp web/wasm/shogun_web.cpp tests/web_parity.cpp
+
+web: build/shogun.wasm build/web_parity
+	node web/test_wasm.mjs
+	node web/build_page.mjs
 
 clean:
 	rm -rf build

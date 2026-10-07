@@ -10,6 +10,7 @@ SHOGUN is a drum computer and two note voices, specified from the first MFB Tanz
 - 2026-10-06: voice engine. Framework-free C++ in `engine/`, INT and EXT trigger paths, and the named tests in `tests/voices.cpp`.
 - 2026-10-06: clock switch pinned under `forge/`. A Trig cable cannot force EXT. Printed 48 kHz rows stay named tests.
 - 2026-10-06: placeholder VST3. Flat plate, knobs, levels, a 16-step grid, and TRIG buttons. `make plugin` builds a universal instrument. Panel art stays later.
+- 2026-10-07: engine fixes and the web panel. Clock, conga, held-note and tie fixes listed in [BUGS.md](BUGS.md), with tests. `make web` compiles the engine to WebAssembly, checks it against the native build, and writes `web/shogun.html`.
 
 ## What this is
 
@@ -38,6 +39,8 @@ The instrument this pack describes:
 | Makefile | `make test` builds the engine checks and runs the clock-switch law. `make plugin` builds the VST3 |
 | forge/ | GraphForge pin for the clock switch. Printed sample rows stay in `tests/voices.cpp` |
 | docs/SHOGUN_Design_Pack.pdf | The same documents in one PDF |
+| BUGS.md | Engine bugs fixed, engine notes, and open questions on the pack |
+| web/ | The playable panel. `web/wasm/` wraps the engine for the browser, `web/page/` is the panel source, `web/shogun.html` is the built page |
 
 Rebuild the PDF with:
 
