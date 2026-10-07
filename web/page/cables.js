@@ -22,10 +22,14 @@ function step(){for(const c of cables){if(!c.el)continue;const p=c.p,q=c.q,seg=c
     push(c,p)}}}
 function jiggle(c,amt){if(!c||!c.q)return;for(let i=1;i<N-1;i++){const s=Math.sin(Math.PI*i/(N-1));c.q[i][0]-=(Math.random()-.5)*amt*s;c.q[i][1]-=amt*s*(.6+Math.random()*.4)}}
 function repel(n,x,y,r){const dx=n[0]-x,dy=n[1]-y,d=Math.hypot(dx,dy);if(d<r){const f=(r-d)/(d||1)*.6;n[0]+=(d?dx:0)*f;n[1]+=d?dy*f:r*.6}}
-function push(c,p){const g=grab&&cables[grab.i]===c;for(let i=1;i<N-1;i++){const n=p[i];if(hov)repel(n,JACKS[hov].x,JACKS[hov].y,RR);if(ptrIn&&!g)repel(n,mx,my,RP);if(n[1]>VH-8)n[1]=VH-8}}
+// A hovered jack, or its name, pushes the cables aside. Cables stay in the bay and the hang, never over the knobs.
+function push(c,p){const g=grab&&cables[grab.i]===c;for(let i=1;i<N-1;i++){const n=p[i];if(hov){const j=JACKS[hov];repel(n,j.x,j.y,RR);repel(n,j.lx,j.ly,RR*.8)}if(ptrIn&&!g)repel(n,mx,my,RP);
+  if(n[1]>FR_B-6)n[1]=FR_B-6;if(n[1]<KB_B+8)n[1]=KB_B+8}}
 function paint(){for(const c of cables){if(!c.el)continue;const d=dstr(c.p);c.el.forEach(e=>e.setAttribute("d",d))}}
 function pt(e){const r=sv.getBoundingClientRect();mx=(e.clientX-r.left)/r.width*W;my=(e.clientY-r.top)/r.height*VH}
-function near(){let b=null,bd=17;for(const g in JACKS){const j=JACKS[g],d=Math.hypot(j.x-mx,j.y-my);if(d<bd){bd=d;b=g}}return b}
+// the jack under the pointer: its socket or its name. Jacks are only there while BAY is on.
+function near(){if(!bay)return null;let b=null,bd=17;for(const g in JACKS){const j=JACKS[g],d=Math.hypot(j.x-mx,j.y-my);if(d<bd){bd=d;b=g}}
+  if(!b&&!grab)for(const g in JACKS){const j=JACKS[g];if(Math.abs(mx-j.lx)<=j.lw&&Math.abs(my-j.ly)<=7)return g}return b}
 const jname=g=>JACKS[g].name;
 function setHov(h){hov=h;ring.innerHTML=h?`<circle cx="${JACKS[h].x}" cy="${JACKS[h].y}" r="16" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.5"/>`:"";if(grab)info.textContent="Drop on a jack to plug in · empty space to unplug · Esc to cancel";else if(h)info.textContent=jname(h)+(JACKS[h].dir=="in"?" (input)":" (output)")+" · "+JACKS[h].type}
 function plugsAt(j){const o=[];cables.forEach((c,i)=>{if(c.a==j)o.push({i,e:"a"});if(c.b==j)o.push({i,e:"b"})});return o}
@@ -44,4 +48,10 @@ function showMenu(j){const items=plugsAt(j).reverse().map(p=>{const c=cables[p.i
   const r=stage.getBoundingClientRect();menu.style.display="block";const jy=JACKS[j].y/VH*r.height,mh=menu.offsetHeight;menu.style.left=Math.max(4,Math.min(JACKS[j].x/W*r.width,r.width-220))+"px";menu.style.top=Math.max(4,jy+16+mh>r.height?jy-mh-16:jy+16)+"px";menu.dataset.j=j}
 menu.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const j=menu.dataset.j;hideMenu();if(b.dataset.n)newCable(j,true);else startGrab(+b.dataset.i,b.dataset.e,true)});
 $("clr").onclick=()=>{cables=[];build();info.textContent="Cables cleared"};
+// BAY swaps the bottom half: the sequencer, or the bay and its hang. It hides or shows the jacks and cables and never
+// adds or removes a cable; a patched cable keeps working while the bay is closed.
+let bay=false;
+function setBay(on){if(grab)cancel();hideMenu();setHov(null);down=null;bay=!!on;
+  $("seqArt").style.display=$("liveSeq").style.display=bay?"none":"";$("bayArt").style.display=cab.style.display=bay?"":"none";
+  if(DD.open)ddClose();drawAll();info.textContent=bay?"BAY · "+cables.length+" cable"+(cables.length==1?"":"s")+" · drag from a jack to a jack, drop on empty space to unplug":"BAY closed · "+cables.length+" cable"+(cables.length==1?"":"s")+" still patched"}
 

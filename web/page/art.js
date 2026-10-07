@@ -23,10 +23,13 @@ function wear(){const R=rnd(5),u=(a,b)=>a+(b-a)*R();let o="";   // mottling, edg
   return o+`<rect width="${W}" height="${H}" fill="none" filter="url(#grain)"/><rect width="${W}" height="${H}" rx="8" fill="url(#vig)"/>`}
 function screw(cx,cy){return `<g transform="translate(${cx} ${cy})"><circle r="5" fill="url(#js)" stroke="#000" stroke-width=".9"/><line x1="-3.5" x2="3.5" stroke="#1a1a1a" stroke-width="1.5"/><line y1="-3.5" y2="3.5" stroke="#1a1a1a" stroke-width="1.5"/></g>`}
 $("df").innerHTML=DEFS;
-$("panel").innerHTML=`<rect y="${H-4}" width="${W}" height="${VH-H+4}" fill="url(#cabi)"/><rect width="${W}" height="${H}" rx="8" fill="url(#pf)"/><rect x="3" y="3" width="${W-6}" height="${H-6}" rx="6" fill="none" stroke="#050506" stroke-width="2"/>`+
- `<rect x="${M}" y="${FR_T}" width="${AV}" height="${FR_B-FR_T}" fill="none" stroke="${GRN}" stroke-width="1.6"/>`+hlines.map(y=>`<line x1="${M}" y1="${y}" x2="${W-M}" y2="${y}" stroke="${GRN}" stroke-width="1.6"/>`).join("")+
- rules.map(([x,a,b])=>`<line x1="${x.toFixed(1)}" y1="${a}" x2="${x.toFixed(1)}" y2="${b}" stroke="${GRN}" stroke-width="1.6"/>`).join("")+
- `<g font-family="'Liberation Sans',Arial,Helvetica,sans-serif">${S.join("")}</g>`+wear()+[[9,9],[W-9,9],[9,H-9],[W-9,H-9]].map(p=>screw(...p)).join("");
+const FONTG=a=>`<g font-family="'Liberation Sans',Arial,Helvetica,sans-serif">${a.join("")}</g>`;
+$("panel").innerHTML=`<rect width="${W}" height="${H}" rx="8" fill="url(#pf)"/><rect x="3" y="3" width="${W-6}" height="${H-6}" rx="6" fill="none" stroke="#050506" stroke-width="2"/>`+
+ FONTG(ART.all)+`<g id="seqArt">${FONTG(ART.seq)}</g><g id="bayArt" style="display:none">${FONTG(ART.bay)}</g>`+
+ // the frame, and the heavier rule between the knob block and the bottom half
+ `<rect x="${M}" y="${FR_T}" width="${AV}" height="${FR_B-FR_T}" fill="none" stroke="${GRN}" stroke-width="1.6"/><line x1="${M}" y1="${KB_B}" x2="${W-M}" y2="${KB_B}" stroke="${GRN}" stroke-width="3.4"/>`+
+ wear()+[[9,9],[W-9,9],[9,H-9],[W-9,H-9]].map(p=>screw(...p)).join("");
 // live parts sit above the wear layer, so move them to #live in order
-document.querySelectorAll("#panel g[id^=L_]").forEach(g=>$("live").appendChild(g));
+const liveSeq=document.createElementNS(NS,"g");liveSeq.id="liveSeq";
+document.querySelectorAll("#panel g[id^=L_]").forEach(g=>{const z=g.closest("#seqArt")?liveSeq:$("live");z.appendChild(g)});$("live").appendChild(liveSeq);
 

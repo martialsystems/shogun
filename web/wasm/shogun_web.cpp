@@ -73,9 +73,26 @@ float gR[kBlock];
 int gPatch[kInputs];
 bool gLast[kInputs];
 int gClkLeft = 0;
+int gAccLeft = 0;  // ACC OUT gate, opened with CLK OUT on an accented step
 bool gKick = true;
 std::int64_t gLastCounter = -1;
 
+}  // namespace
+
+namespace {
+bool high(int mask, bool clk, bool acc) { return ((mask & 1) && clk) || ((mask & 2) && acc); }
+// True when an unmuted drum track has a loud step (accent 2) at counter c. A track plays slot c % length.
+bool accented(std::int64_t c) {
+  if (c < 0) return false;
+  const shogun::Pattern& p = gE->pattern();
+  for (int v = 0; v < static_cast<int>(shogun::Voice::Lead); ++v) {
+    const shogun::Track& t = p.track[v];
+    if (t.mute || t.length < 1) continue;
+    const shogun::DrumStep& d = t.drum[c % t.length];
+    if (d.on && d.accent >= 2) return true;
+  }
+  return false;
+}
 }  // namespace
 
 EXPORT(sg_init) void sg_init() {
@@ -87,6 +104,7 @@ EXPORT(sg_init) void sg_init() {
     gPatch[i] = 0;
     gLast[i] = false;
   }
+  gClkLeft = gAccLeft = 0;
   gE->setRunning(false);
 }
 
@@ -150,7 +168,8 @@ EXPORT(sg_trigger_note) void sg_trigger_note(int v, int note, double gain) {
 }
 EXPORT(sg_release) void sg_release(int v) { gE->release(static_cast<shogun::Voice>(v)); }
 
-// source: 0 nothing, 1 the panel's CLK OUT.
+// source: a mask of the panel's gate outputs patched into the input: 1 CLK OUT, 2 ACC OUT. A stacked input is high
+// while any of its sources is high.
 EXPORT(sg_patch) void sg_patch(int input, int source) {
   if (input < 0 || input >= kInputs) return;
   gPatch[input] = source;
@@ -166,16 +185,16 @@ EXPORT(sg_process) void sg_process(int n) {
   if (n > kBlock) n = kBlock;
   shogun::Frame f;
   for (int i = 0; i < n; ++i) {
-    const bool clk = gClkLeft > 0;
+    const bool clk = gClkLeft > 0, acc = gAccLeft > 0;
     shogun::TrigIn in;
     for (int v = 0; v < shogun::kVoiceCount; ++v) {
-      if (gPatch[v] == 1) {
-        in.volts[v] = clk ? 5.0 : 0.0;
+      if (gPatch[v] != 0) {
+        in.volts[v] = high(gPatch[v], clk, acc) ? 5.0 : 0.0;
         in.velocity[v] = 127;
       }
     }
     for (int j = kRst; j <= kClk; ++j) {
-      const bool high = gPatch[j] == 1 && clk;
+      const bool high = ::high(gPatch[j], clk, acc);
       if (high && !gLast[j]) {
         if (j == kRst) gE->restart();
         if (j == kRun) gE->setRunning(!gE->running());
@@ -188,9 +207,13 @@ EXPORT(sg_process) void sg_process(int n) {
     gL[i] = static_cast<float>(f.mainL);
     gR[i] = static_cast<float>(f.mainR);
     if (gClkLeft > 0) --gClkLeft;
-    // CLK OUT opens on each new step while the clock runs.
+    if (gAccLeft > 0) --gAccLeft;
+    // CLK OUT opens on each new step while the clock runs; ACC OUT opens with it when that step is accented.
     const std::int64_t c = gE->counter();
-    if (gE->running() && (c != gLastCounter || gKick)) gClkLeft = kClkPulse;
+    if (gE->running() && (c != gLastCounter || gKick)) {
+      gClkLeft = kClkPulse;
+      gAccLeft = accented(c) ? kClkPulse : 0;
+    }
     gKick = false;
     gLastCounter = c;
   }

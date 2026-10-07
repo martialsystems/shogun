@@ -38,6 +38,7 @@ function loadPat(b,i,at){const L=patList(b);if(!L.length){info.textContent=`Bank
   P["CLOCK:TEMPO"]=clamp((p.bpm-60)/120);P["CLOCK:SCALE"]=(p.scale==null?2:p.scale)/3;P["CLOCK:BAR"]=((p.bar||p.len)-1)/31;
   ["LTC","MTC","HTC"].forEach((k,j)=>{P[k+":MODE"]=p.tom&&p.tom[j]=="C"?1:0});
   const kn=patKnobs(p);for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}   // double-click returns a knob to the pattern's setting
+  for(const f in LINKED)syncLinked(LINKED[f][LINKED[f].length-1]);
   page=0;edit=0;dirty=false;loadKnobs();const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);
   sendClock();VOICES.forEach(v=>{sendTrack(v.k);sendSteps(v.k)});info.textContent=`Pattern ${pad3(i+1)} ${p.n} · ${p.bpm} BPM`}
 // over: the index of the user pattern to write over; otherwise the pattern goes at the end of the list
@@ -80,11 +81,12 @@ function stepCalls(k){const t=tracks[k],v=VI.indexOf(k),o=posOf(0,t.len)?t.len-p
   return out.map((s,i)=>NOTEK[k]?["sg_set_note",v,i,s.on?s.note:-1,s.acc,s.on&&s.tie?1:0]:["sg_set_drum",v,i,s.on?1:0,s.acc,s.flam,s.bend==null?-1:s.bend])}
 const sendTrack=k=>send(trackCalls(k).concat([["sg_commit"]]));
 const sendSteps=k=>send(stepCalls(k).concat([["sg_commit"]]));
-// Inside this page the only gate source is CLK OUT; it can drive every TRIG jack and RST IN, RUN IN and CLK IN.
-const INPUT={"CLOCK:RST IN":16,"CLOCK:RUN IN":17,"CLOCK:CLK IN":18};
+// Inside this page the gate sources are CLK OUT and ACC OUT; either can drive every Trig jack and RST IN, RUN IN and CLK IN.
+// An input can stack: the engine sees it high while any of its sources is high. A Trig cable never moves the INT/EXT switch.
+const INPUT={"CLOCK:RST IN":16,"CLOCK:RUN IN":17,"CLOCK:CLK IN":18},GATESRC={"SHOGUN/CLOCK:CLK OUT":1,"SHOGUN/CLOCK:ACC OUT":2};
 function cableCalls(){const src=new Array(19).fill(0);
-  cables.forEach(c=>{if(!c.a||!c.b)return;const[o,i]=JACKS[c.a].dir=="out"?[c.a,c.b]:[c.b,c.a];if(o!="SHOGUN/CLOCK:CLK OUT")return;
-    const id=i.slice(7),n=id.endsWith(":TRIG")?VI.indexOf(id.slice(0,-5)):INPUT[id];if(n!=null&&n>=0)src[n]=1});
+  cables.forEach(c=>{if(!c.a||!c.b)return;const[o,i]=JACKS[c.a].dir=="out"?[c.a,c.b]:[c.b,c.a];if(!GATESRC[o])return;
+    const id=i.slice(7),n=id.endsWith(":TRIG")?VI.indexOf(id.slice(0,-5)):INPUT[id];if(n!=null&&n>=0)src[n]|=GATESRC[o]});
   return src.map((s,n)=>["sg_patch",n,s])}
 const sendCables=()=>send(cableCalls());
 function syncAll(){const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());
@@ -108,7 +110,7 @@ function drawAll(){
   put("SCR",dots(SCR.x+8,SCR.y+6,SCR.w-16,SCR.h-12,scrText().slice(-20),20));put("TRK",dots(TRK.x+8,TRK.y+6,TRK.w-16,TRK.h-12,trkText(),8));
   const kb=(id,black)=>{const L=LIVE[id];put(id,keyBody(L.x,L.y,black,pressed==id))},ld=(id,on,c)=>{const L=LIVE[id];put(id,lamp(L.x,L.y,L.r,on,c))};
   VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});ld("LED:LEARN",MIDI.learn);
-  kb("START",false);kb("CLEAR",true);kb("UNDO",true);kb("RANDOM",true);kb("SOLO",true);ld("LED:SOLO",soloV!=null);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
+  kb("START",false);kb("CLEAR",true);kb("UNDO",true);kb("RANDOM",true);kb("SOLO",true);ld("LED:SOLO",soloV!=null&&soloV==sel);kb("BAY",true);ld("LED:BAY",bay);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
   [0,1].forEach(n=>{kb("PAGE:"+n,true);ld("LED:P"+n,page==n)});
   const o=page*16,ph=running&&counter>=0&&counter>=rot0?posOf(counter,t.len):-1;
   for(let i=0;i<16;i++){const n=o+i,st=t.steps[n],in_=n<t.len,L=LIVE["STEP:"+i];

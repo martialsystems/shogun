@@ -22,6 +22,7 @@ const kitKnobs=k=>k.knobs||patKnobs({n:k.f});
 const panelKnobs=()=>{const k={};for(const id in MAP)if(!MAP[id].master)k[id]=P[id];return k};
 function loadKit(i){const k=kitList()[i];if(!k)return;undoPush();const kn=kitKnobs(k);
   for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}
+  for(const f in LINKED)syncLinked(LINKED[f][LINKED[f].length-1]);
   curKit={n:k.n,dirty:false};dirty=true;const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);drawAll();info.textContent=`Kit ${k.n} · the steps are unchanged`}
 function saveKit(name){const rec={n:name,knobs:panelKnobs()},j=USERK.findIndex(k=>k.n==name);if(j>=0)USERK[j]=rec;else USERK.push(rec);
   store.set("shogun.kits",USERK);curKit={n:name,dirty:false};drawAll();info.textContent=`Saved kit ${name} in this browser`}
@@ -33,7 +34,7 @@ const RND={bd1Decay:[25,110],bd1Pitch:[10,110],bd1Tune:[10,80],bd1Noise:[0,70],b
   hhTune:[30,120],hhDecay:[10,70],ltcTune:[15,100],ltcDecay:[15,90],mtcTune:[15,100],mtcDecay:[15,90],htcTune:[15,100],htcDecay:[15,90],
   cbTune:[20,100],cbDecay:[15,90],maDecay:[5,60],leadTone:[20,120],bassTone:[15,110]};
 function randomVoice(){const v=VK[sel],done=[];undoPush();
-  v.knobs.forEach(([lb,p,n])=>{if(!p||n=="tog")return;const id=v.k+":"+lb,[lo,hi]=RND[p]||[0,127];P[id]=vOf(id,lo+Math.floor(Math.random()*(hi-lo+1)),STEPS[id]);sendParam(id);done.push(lb)});
+  v.knobs.forEach(([lb,p,n])=>{if(!p||n=="tog")return;const id=v.k+":"+lb,[lo,hi]=RND[p]||[0,127];P[id]=vOf(id,lo+Math.floor(Math.random()*(hi-lo+1)),STEPS[id]);syncLinked(id);sendParam(id);done.push(lb)});
   curKit.dirty=true;dirty=true;drawAll();info.textContent=`${v.t} · rolled ${done.join(", ")} · UNDO puts it back`;if(!running)audition(sel)}
 
 // Chain: a list of patterns that play one bar each, in order, while CHAIN is on. Kept in this browser.

@@ -1,13 +1,14 @@
 
 // ================= controls =================
 let kdrag=null,pressed=null;
-function ctrlAt(x,y){for(const c of CTRL){if(c.rect?Math.abs(x-c.x)<=(c.rw||c.r)&&Math.abs(y-c.y)<=(c.rh||c.r):Math.hypot(x-c.x,y-c.y)<=c.r)return c}return null}
+function ctrlAt(x,y){for(const c of CTRL){if(c.zone==(bay?"seq":"bay"))continue;if(c.rect?Math.abs(x-c.x)<=(c.rw||c.r)&&Math.abs(y-c.y)<=(c.rh||c.r):Math.hypot(x-c.x,y-c.y)<=c.r)return c}return null}
 const NOFLAM={CP:1,LEAD:1,BASS:1};
 function describe(c){const t=tracks[sel];
   if(c.kind=="knob"){const v=P[c.id];let s=c.name+" · "+(c.fmt?c.fmt(v):MAP[c.id]&&MAP[c.id].f?"CC "+ccOf(c.id,v):Math.round(v*100)+"%");
     if(c.id=="STEP:FLAM"&&NOFLAM[sel])s+=` (${VK[sel].t} has no flam)`;if(c.id=="STEP:BEND"&&!BENDK[sel])s+=` (${VK[sel].t} has no bend)`;if(c.id=="STEP:NOTE"&&!NOTEK[sel])s+=" (LEAD and BASS only)";
     if(/^(SEQ|STEP):/.test(c.id))s=VK[sel].t+" · "+s;if(/^STEP:/.test(c.id))s+=` · step ${edit+1}`;return s}
-  if(c.id=="CLOCK:SOURCE")return P[c.id]>.5?"CLOCK EXT · the pattern does not fire the voices; each drum fires from its TRIG jack, and the count keeps running":"CLOCK INT · the pattern fires the voices; TRIG jacks are not read";
+  if(c.id=="CLOCK:SOURCE")return P[c.id]>.5?"EXT · the pattern does not fire the voices; each drum fires from its Trig jack in the bay, and the count keeps running":"INT · the pattern fires the voices; the Trig jacks are ignored";
+  if(c.id=="BAY")return bay?"BAY · press for the sequencer; the cables stay patched":"BAY · press for the patch bay ("+cables.length+" cable"+(cables.length==1?"":"s")+")";
   if(c.kind=="toggle")return c.name+" · "+(P[c.id]>.5?c.marks[1]:c.marks[0]);
   if(c.voice)return VK[c.voice].t+" · "+tracks[c.voice].len+" steps"+(tracks[c.voice].mute?" · muted":"")+" · "+midiText(c.voice);
   if(c.id=="START")return running?"STOP":"START";if(c.id=="CLEAR")return "CLEAR · empty the "+VK[sel].t+" track";
@@ -15,7 +16,7 @@ function describe(c){const t=tracks[sel];
   if(c.id.startsWith("PAGE:"))return "Steps "+(c.id=="PAGE:0"?"1 to 16":"17 to 32");
   if(c.step!=null){const n=page*16+c.step,s=t.steps[n];if(n>=t.len)return `${VK[sel].t} · step ${n+1} · past the track length (${t.len})`;
     return `${VK[sel].t} · step ${n+1} · `+(s.on?(NOTEK[sel]?noteName(s.note)+(s.tie?" tied":""):["soft","medium","loud"][s.acc]):"off")+(c.kind=="acc"?" · click for soft, medium, loud":"")}
-  if(c.id=="SOLO")return soloV?`SOLO · only ${VK[soloV].t} is heard`+(tracks[soloV].mute?" (muted, so nothing)":"")+(soloV==sel?" · press to hear every track":` · press to solo ${VK[sel].t}`):`SOLO · hear only ${VK[sel].t}`;
+  if(c.id=="SOLO")return soloV?`SOLO · only ${VK[soloV].t} is heard`+(tracks[soloV].mute?" (muted, so nothing)":"")+(soloV==sel?" · press to hear every track":` · press to solo ${VK[sel].t}`):`SOLO · hear only ${VK[sel].t} (not saved with the pattern)`;
   if(c.id=="UNDO")return "UNDO the last knob or key ("+UNDO.length+") · Shift-click or Ctrl+Shift+Z redoes ("+REDO.length+")";
   if(c.id=="RANDOM")return "RANDOM · roll the "+VK[sel].t+" knobs inside their ranges (LEVEL stays)";
   if(c.id=="LEARN")return "MIDI LEARN · then pick a track and hit a pad · Shift-click resets to notes 36 to 51";
@@ -27,7 +28,7 @@ function describe(c){const t=tracks[sel];
   if(c.id=="COPY")return "Copy this pattern under a new name";
   return {PREV:"Previous pattern",NEXT:"Next pattern",SAVE:DD.naming=="PAT"?"Save as "+(DD.name.trim()||"PATTERN"):userIdx()>=0?"Save over "+chainName(curPat):"Save this pattern and its knobs under a name",
     SCR:"Pattern list",TRK:"Track list",TPREV:"Previous track",TNEXT:"Next track"}[c.id]||c.id}
-function setP(id,v){v=clamp(v);if(STEPS[id]){const n=STEPS[id]-1;v=Math.round(v*n)/n}P[id]=v;const t=tracks[sel],st=t.steps[edit];
+function setP(id,v){v=clamp(v);if(STEPS[id]){const n=STEPS[id]-1;v=Math.round(v*n)/n}P[id]=v;syncLinked(id);const t=tracks[sel],st=t.steps[edit];
   if(MAP[id]){sendParam(id);if(!MAP[id].master){dirty=true;curKit.dirty=true}}
   else if(id.startsWith("CLOCK:")){sendClock();dirty=true}
   else if(id=="SEQ:LENGTH"){t.len=1+Math.round(v*31);if(edit>=t.len)edit=t.len-1;dirty=true;sendTrack(sel)}
@@ -55,6 +56,7 @@ function press(c,e){const t=tracks[sel];
   else if(c.id=="COPY"){const p=patList(curPat.b)[curPat.i];nameStart("PAT",p?p.n:"");return}
   else if(c.id=="KSAVE"){if(DD.naming=="KIT")nameCommit();else nameStart("KIT",curKit.n=="BASIC"?"":curKit.n);return}
   else if(c.id=="UNDO"){undo(e.shiftKey);pressed=c.id;drawAll();return}
+  else if(c.id=="BAY")setBay(!bay);
   else if(c.id=="SOLO"){soloV=soloV==sel?null:sel;send([["sg_set_solo",soloV?VI.indexOf(soloV):-1]])}
   else if(c.id=="RANDOM"){randomVoice();pressed=c.id;drawAll();return}
   else if(c.id=="LEARN"){learnPress(e.shiftKey);return}
@@ -101,6 +103,6 @@ $("go").onclick=()=>setRun(!running);
 
 // ================= start =================
 function loop(){if(grab&&cables[grab.i]&&cables[grab.i].el)pins(cables[grab.i]);step();paint();drawAll();requestAnimationFrame(loop)}
-loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
+cab.style.display="none";loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
 try{navigator.permissions.query({name:"midi"}).then(r=>{if(r.state=="granted")midiInit(false)},()=>{})}catch(e){}drawAll();build();requestAnimationFrame(loop);
-window.SHOGUN={P,get tracks(){return tracks},cables,JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel}};
+window.SHOGUN={P,get tracks(){return tracks},get cables(){return cables},JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel},get bay(){return bay},setBay};

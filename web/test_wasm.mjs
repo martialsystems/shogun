@@ -42,4 +42,40 @@ for (let i = 0; i < out.length; i++) {
 const ok = out.length === native.length && worst < 1e-5 && loud > 0.1;
 console.log(`${out.length} samples, peak ${loud.toFixed(3)}, largest wasm/native difference ${worst.toExponential(2)} at ${at}`);
 console.log(ok ? "wasm matches the native engine" : "MISMATCH");
-process.exit(ok ? 0 : 1);
+
+// The bay law, on a fresh instance with an empty pattern: a cable from CLK OUT (or ACC OUT) into BD1 Trig fires BD1
+// only with the switch on EXT, and the cable never moves the switch. ACC OUT is high only on a loud step.
+async function bayPeak(mode, source, loudStep) {
+  const { instance: i2 } = await WebAssembly.instantiate(readFileSync(root + "build/shogun.wasm"), {
+    env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh },
+  });
+  const y = i2.exports;
+  y.sg_init();
+  y.sg_set_level(0, 1);
+  y.sg_set_master(1);
+  y.sg_set_tempo(120);
+  y.sg_set_mode(mode);
+  // the BD2 track carries the accent: one step of 16, at level 0 so it is never heard
+  y.sg_set_level(1, 0);
+  y.sg_set_track(1, 16, 0, 0, 0);
+  if (loudStep >= 0) y.sg_set_drum(1, loudStep, 1, 2, -1, -1);
+  y.sg_commit();
+  y.sg_patch(0, source);
+  y.sg_set_running(1);
+  let peak = 0;
+  for (let n = 0; n < 48000; n += 1024) {
+    y.sg_process(1024);
+    const L = new Float32Array(y.memory.buffer, y.sg_out_l(), 1024);
+    for (const v of L) peak = Math.max(peak, Math.abs(v));
+  }
+  return peak;
+}
+const law = [
+  ["CLK OUT into BD1 Trig, INT: silent", (await bayPeak(0, 1, -1)) < 1e-6],
+  ["CLK OUT into BD1 Trig, EXT: fires", (await bayPeak(1, 1, -1)) > 0.05],
+  ["ACC OUT into BD1 Trig, EXT, no loud step: silent", (await bayPeak(1, 2, -1)) < 1e-6],
+  ["ACC OUT into BD1 Trig, EXT, one loud step: fires", (await bayPeak(1, 2, 0)) > 0.05],
+  ["ACC OUT into BD1 Trig, INT, one loud step: silent", (await bayPeak(0, 2, 0)) < 1e-6],
+];
+for (const [name, pass] of law) console.log((pass ? "ok   " : "FAIL ") + name);
+process.exit(ok && law.every((l) => l[1]) ? 0 : 1);
