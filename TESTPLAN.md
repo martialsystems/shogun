@@ -12,7 +12,7 @@ Shared pattern for the bypass tests: 16th scale, 120 BPM, so a step is 6,000 sam
 
 Render BD1 from the example knobs, bend_st 0, from a trigger at n = 0.
 
-The frequency at n = 0 is 83.814360 Hz. The frequency at n = 2,400 is 72.957296 Hz. f_tune is 60.408707 Hz. The later frequency is closer to f_tune than the first. y at n = 48 is 0.829514. y at n = 480 is -0.855516.
+The frequency at n = 0 is 83.814360 Hz. The frequency at n = 2,400 is 72.957296 Hz. f_tune is 60.408707 Hz. The later frequency is closer to f_tune than the first. y at n = 48 is 0.604196. y at n = 480 is -0.870678.
 
 Fail if the later frequency is farther from f_tune than the frequency at the trigger, or if either printed y misses by more than 1e-5.
 
@@ -20,9 +20,9 @@ Fail if the later frequency is farther from f_tune than the frequency at the tri
 
 Same knobs, Attack raised to 127. Render two triggers.
 
-Trigger CC 0: at n = 10, y = 0.306649, transient frequency 160 Hz.
+Trigger CC 0: at n = 10, y = 0.273235, click rate 160 Hz.
 
-Trigger CC 64: at n = 10, y = 0.810392, transient frequency 1,765.184603 Hz.
+Trigger CC 64: at n = 10, y = 0.605828, click rate 1,765.184603 Hz.
 
 The two y values differ. The body tune is the same in both renders, so the difference is the attack transient.
 
@@ -42,7 +42,7 @@ Tune 60 and Tone 100, transient only, at n = 10: scaled transient 0.129116. This
 
 SD example knobs, Snappy 0 so the noise term is 0. Tune 70, D-Tune 90, Tone 64, Tone Decay 60, Pitch 30, SN Decay 50.
 
-f1 is 233.014061 Hz. f2 is 282.574688 Hz. At n = 20, t1 is 0.668428, t2 is 0.775136, and y is 0.722202.
+f1 is 233.014061 Hz. f2 is 282.574688 Hz. At n = 20, t1 is 0.899876, t2 is 0.943686, and y is 0.921953.
 
 A second render with Tone CC 0 equals t1 at n = 20. A third with Tone CC 127 equals t2 at n = 20. Both partials are present at Tone 64, and the blend knob selects between them.
 
@@ -56,7 +56,7 @@ A closed-hat trigger at sample 200 sets the open envelope to 0 on that sample. S
 
 Data CC 48, so count is 4. Trigger CC 0, so the type index is 0 and f_tr is 700 Hz. Gap is 528 samples.
 
-Four bursts start at samples 0, 528, 1,056, and 1,584. The gap in time is 11 ms, which is inside 10 to 12 ms. The unscaled transient at 5 samples after each start is 0.427195.
+Four bursts start at samples 0, 480, 1,056, and 1,584. Each gap is inside 10 to 12 ms, and no burst is nonzero before its start. At sample 1,589, burst i over burst i - 1 is exp(gap / 144) within 1e-9 relative: one noise, one fixed 3 ms curve. The same run at Decay 127 gives the same four burst samples, so Decay does not stretch them.
 
 A count of 1 produces one start and no second peak 528 samples later. The voice is not a single noise hit when count is 4: four starts exist, and they are not on the same sample.
 
@@ -68,7 +68,7 @@ Mode EXT. The shared pattern has step 0 on. No Trig edge in the first step.
 
 The BD1 output over the first 6,000 samples is 0. The clock counter still advances: after 6,000 samples the display step has moved.
 
-Then a Trig rising edge, velocity 100, at the start of the next block, with the pattern still showing an off step or an on step. The voice fires. g_vel(100) is 0.819291. y at 10 samples after that edge equals the BD1 example y at n = 10, which is 0.208746, multiplied by 0.819291.
+Then a Trig rising edge, velocity 100, at the start of the next block, with the pattern still showing an off step or an on step. The voice fires. g_vel(100) is 0.819291. y at 10 samples after that edge equals the BD1 example y at n = 10, which is 0.208595, multiplied by 0.819291.
 
 The pattern accent is index 2, whose g_accent is 1. The EXT render uses 0.819291, not 1. A flam on the pattern step does not add the extra hits at 180 samples.
 
@@ -78,7 +78,7 @@ Switch to INT on a later step without resetting the counter. The next on-step of
 
 Mode INT. Same pattern. A Trig rising edge is placed in the middle of step 1, which is off. The voice stays 0 through that step.
 
-Step 0, with no dependence on the Trig jack, fires. With accent index 2, y at 10 samples after the step boundary is 0.208746 times 1.000000.
+Step 0, with no dependence on the Trig jack, fires. With accent index 2, y at 10 samples after the step boundary is 0.208595 times 1.000000.
 
 Pulling the Trig cable, or leaving it plugged, does not change INT. The switch does.
 
@@ -94,21 +94,21 @@ A previous hit is not part of this test. The rest does not have to choke a voice
 
 ## testIndividualOutStaysInMix
 
-One BD1 hit, level 1, master 1, accent gain 1, the example hit. The BD pair's left channel at n = 48 is 0.829514. The main left channel at n = 48 is the same 0.829514. The pair is treated as patched.
+One BD1 hit, level 1, master 1, accent gain 1, the example hit. The BD pair's left channel at n = 48 is 0.604196. The main left channel at n = 48 is the same 0.604196. The pair is treated as patched.
 
-Repeat with the pair unpatched. Main left at n = 48 is still 0.829514.
+Repeat with the pair unpatched. Main left at n = 48 is still 0.604196.
 
-Master 0.5 scales the main to 0.414757 and leaves the pair at 0.829514.
+Master 0.5 scales the main to 0.302098 and leaves the pair at 0.604196.
 
 Maracas does not appear on any pair. A maracas trigger with the first noise draw appears on the main only. Each side of the main is -0.066445, the printed -0.093967 at the equal-power centre.
 
 ## testVoiceEndsWhenQuiet
 
-Trigger each drum voice once, BD1 with the example knobs and the others with default knobs. Each one sounds, then ends, then outputs exactly 0 on both main channels until a new trigger. The BD1 example ends where its body envelope crosses 1e-3: ceil(-ln(1e-3) * 48,000 * 0.136195) samples, within one sample. With Noise 127 it ends at the same sample and stays 0, because the noise rides the body envelope. BD2 at Decay 127 is still sounding after 10 s. A BD1 that has ended plays the example y(10) = 0.208746 on its next trigger.
+Trigger each drum voice once, BD1 with the example knobs and the others with default knobs. Each one sounds, then ends, then outputs exactly 0 on both main channels until a new trigger. The BD1 example ends where its body envelope crosses 1e-3: ceil(-ln(1e-3) * 48,000 * 0.136195) samples, within one sample. With Noise 127 it ends at the same sample and stays 0, because the noise rides the body envelope. BD2 at Decay 127 is still sounding after 10 s. A BD1 that has ended plays the example y(10) = 0.208595 on its next trigger.
 
 ## testDecayNoonIsShort
 
-decay_tau is 8 ms at u = 0, 75.902 ms at u = 0.5, and 720.137 ms at u = 1. With Decay 64 on BD2, CY, OH, HH, CL, MTC, CB, and MA, on the snare's Tone Decay and SN Decay together (Snappy 127), and on the clap tail (one burst), each voice ends at ceil(-ln(1e-3) * 48,000 * 0.077259) = 25,617 samples, within one sample. The cowbell outputs exactly 0 on that sample.
+decay_tau is 8 ms at u = 0, 75.902 ms at u = 0.5, and 720.137 ms at u = 1. With Decay 64 on BD2, CY, OH, HH, CL, MTC, CB, and MA, on the snare's Tone Decay and SN Decay together (Snappy 127), each voice ends at ceil(-ln(1e-3) * 48,000 * 0.077259) = 25,617 samples, within one sample. The clap tail (one burst) runs the same curve from where it opens, 528 samples after the hit, so it ends at 26,145. The cowbell outputs exactly 0 on that sample.
 
 ## testBd2FullHolds
 
@@ -130,13 +130,29 @@ BD1 (example knobs) and SD on step 0, SD soloed. For 200 samples BD1 and its pai
 
 A fresh engine, no reset(). The pattern is named 909, length 16, every track length 16. BD1 is on steps 1 and 9, SD and CP on 5 and 13, OH on 3, 7, 11, and 15, HH on every other step of the 16, and nothing else is on in all 32 steps of any track. BD1 Decay is under 0.35 (36 / 127 = 0.283465). BD2 and LTC are at level 0, master 0.7. One bar at 120 BPM INT: the open hat on step 3 rings above 0.5 (no choke), and the main peaks at 0.943890, under 1.
 
+## testBd1WaveAddsHarmonics
+
+BD1 Tune 127 (140 Hz), Pitch 0, Decay 127, Attack 0, Noise 0, one hit at velocity 1. On a 2048-point Hann spectrum of the first 2,048 samples, the third harmonic over the fundamental (peak within two bins) is 0.066573 at Dist 0 and 0.331707 at Dist 127. A sine with the same envelope reads 0.000026, under 0.01, so a sine-only body fails this test.
+
+## testBd2FmMovesSpectrum
+
+BD2 Tune 127 (100 Hz), Decay 127, from 100 ms after the hit. Tone 0 against Tone 127, 2048-point spectra: the summed difference is 0.276625 of the Tone 0 sum, over 0.2. Over one second at Tone 0 the instantaneous frequency swings from 88 Hz to 112 Hz within 0.01 Hz.
+
+## testSnareFilterDarkensNoise
+
+SD Snappy 127, SN Decay 127. Brightness is the RMS of the first difference of the ladder output over its RMS, over 2,048 samples: 0.098297 at Tone 0 and 1.294015 at Tone 127. Tone 0 is under half of Tone 127.
+
+## testHatIsInharmonic
+
+HH Tune 0, so the lowest square is 250 Hz. Share of 2048-point spectrum energy within two bins of a multiple of 250 Hz: one PolyBLEP square 0.999330, the six-square metal 0.320088, under 0.6.
+
 ## testDistBypassAndDrive
 
-BD1 example knobs, n = 48. Dist 0 is y = pre = 0.829514. Dist 1 is within 2e-3 of Dist 0. Dist 64 is 0.999151.
+BD1 example knobs, n = 48. Dist 0 is y = pre = 0.604196. Dist 1 is within 1e-2 of Dist 0, because Wave rides Dist in this pass and CC 1 moves k too. Dist 64 is 0.999826.
 
 ## testCenterPanIsNotHalf
 
-A maracas trigger puts 0.707107 times the maracas sample on each side of the main, not 0.5. At n = 0 that is -0.066445. The mid tom is equal on both TO/CO channels and on the main. With Attack 0 the clap is its tail alone, 0.707107 times the filtered first noise draw on each channel.
+A maracas trigger puts 0.707107 times the maracas sample on each side of the main, not 0.5. At n = 0 that is -0.066445. The mid tom is equal on both TO/CO channels and on the main. With Attack 0 the clap is its tail alone: 0 on both channels for the 528 samples before the tail opens, then equal on both channels and on the main.
 
 ## testShuffleSurvivesOddLength
 
