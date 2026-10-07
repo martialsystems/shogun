@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 // Named checks from TESTPLAN.md, plus the short-voice rows in SCHEMATICS.md.
 // Tolerance is 1e-5 on the printed decimals.
@@ -611,8 +612,8 @@ void testIndividualOutStaysInMix() {
   ma.process(in, f);
   const double printed = -0.093967;
   expect(near(ma.maSample(), printed), t, "maracas y0", ma.maSample(), printed);
-  expect(near(f.mainL, 0.5 * printed), t, "maracas main L", f.mainL, 0.5 * printed);
-  expect(near(f.mainR, 0.5 * printed), t, "maracas main R", f.mainR, 0.5 * printed);
+  expect(near(f.mainL, shogun::kCenterGain * printed), t, "maracas main L", f.mainL, shogun::kCenterGain * printed);
+  expect(near(f.mainR, shogun::kCenterGain * printed), t, "maracas main R", f.mainR, shogun::kCenterGain * printed);
   expect(f.bdL == 0 && f.bdR == 0 && f.sdL == 0 && f.rsR == 0, t, "not on bd/sd", f.bdL, 0);
   expect(f.hhL == 0 && f.cyR == 0 && f.cpL == 0 && f.cpR == 0, t, "not on hh/cp", f.hhL, 0);
   expect(f.toL == 0 && f.toR == 0 && f.clL == 0 && f.cbR == 0, t, "not on to/cb", f.toL, 0);
@@ -974,6 +975,122 @@ void testClockNotesAndEdges() {
   expect(f.bdL == 0.0 && f.mainL != 0.0, t, "tom reaches main", f.mainL, y * gL);
 }
 
+// Sample index of every BD1 restart, read from the instantaneous frequency jumping back up.
+std::vector<long> bd1Starts(shogun::Engine& e, long samples) {
+  shogun::TrigIn in;
+  shogun::Frame f;
+  std::vector<long> at;
+  double last = e.bd1Hz();
+  for (long i = 0; i < samples; ++i) {
+    e.process(in, f);
+    if (e.bd1Hz() > last + 1e-9) at.push_back(i);
+    last = e.bd1Hz();
+  }
+  return at;
+}
+
+void testVoiceEndsWhenQuiet() {
+  const char* t = "testVoiceEndsWhenQuiet";
+  shogun::TrigIn in;
+  shogun::Frame f;
+  // Every drum voice, default knobs and the BD1 example: it sounds, ends, then outputs exactly 0.
+  for (int v = 0; v < static_cast<int>(shogun::Voice::Lead); ++v) {
+    shogun::Engine e;
+    arm(e, v == 0 ? bd1Example() : shogun::Knobs{}, silentPattern());
+    e.setLevel(static_cast<shogun::Voice>(v), 1);
+    e.trigger(static_cast<shogun::Voice>(v));
+    bool sounded = false;
+    long endedAt = -1;
+    bool silentAfter = true;
+    for (long i = 0; i < 12L * 48000; ++i) {
+      e.process(in, f);
+      if (endedAt < 0) {
+        if (f.mainL != 0.0 || f.mainR != 0.0) sounded = true;
+        if (!e.voiceActive(static_cast<shogun::Voice>(v))) endedAt = i;
+      } else if (i > endedAt && (f.mainL != 0.0 || f.mainR != 0.0)) {
+        silentAfter = false;
+      }
+    }
+    expect(sounded, t, "voice sounded", static_cast<double>(v), 1);
+    expect(endedAt > 0, t, "voice ended", static_cast<double>(v), 1);
+    expect(silentAfter, t, "0 after the end", static_cast<double>(v), 0);
+  }
+  // BD1 example: body tau 0.785906 s, so the end is where exp(-n / (fs * tau)) crosses 1e-6.
+  shogun::Engine bd;
+  arm(bd, bd1Example(), silentPattern());
+  bd.trigger(shogun::Voice::Bd1);
+  long n = 0;
+  while (bd.voiceActive(shogun::Voice::Bd1) || n == 0) {
+    bd.process(in, f);
+    ++n;
+  }
+  const double want = std::ceil(-std::log(1e-6) * 48000.0 * (0.03 + 1.2 * 80.0 / 127.0));
+  expect(std::fabs(static_cast<double>(n) - want) <= 1.0, t, "BD1 ends at the 1e-6 crossing", n, want);
+  // A held BD2 does not end, and an ended voice plays again on the next trigger.
+  shogun::Knobs hold;
+  hold.bd2Decay = 127;
+  shogun::Engine b2;
+  arm(b2, hold, silentPattern());
+  b2.trigger(shogun::Voice::Bd2);
+  for (long i = 0; i < 10L * 48000; ++i) b2.process(in, f);
+  expect(b2.voiceActive(shogun::Voice::Bd2), t, "held BD2 keeps sounding", 0, 1);
+  bd.trigger(shogun::Voice::Bd1);
+  for (int i = 0; i <= 10; ++i) bd.process(in, f);
+  expect(near(f.bdL, 0.208884), t, "ended voice retriggers", f.bdL, 0.208884);
+}
+
+void testDistBypassAndDrive() {
+  const char* t = "testDistBypassAndDrive";
+  shogun::TrigIn in;
+  auto at48 = [&](int dist) {
+    shogun::Knobs k = bd1Example();
+    k.bd1Dist = dist;
+    shogun::Engine e;
+    arm(e, k, silentPattern());
+    e.trigger(shogun::Voice::Bd1);
+    shogun::Frame f;
+    for (int n = 0; n <= 48; ++n) e.process(in, f);
+    return f.bdL;
+  };
+  expect(near(at48(0), 0.832547), t, "Dist 0 is y = pre", at48(0), 0.832547);
+  expect(std::fabs(at48(1) - at48(0)) < 2e-3, t, "Dist 1 is next to the bypass", at48(1), at48(0));
+  expect(near(at48(64), 0.999180), t, "Dist 64 printed row", at48(64), 0.999180);
+}
+
+void testCenterPanIsNotHalf() {
+  const char* t = "testCenterPanIsNotHalf";
+  shogun::TrigIn in;
+  shogun::Frame f;
+  shogun::Knobs k;
+  k.maDecay = 55;
+  shogun::Engine e;
+  arm(e, k, silentPattern());
+  e.trigger(shogun::Voice::Ma);
+  e.process(in, f);
+  const double y = e.maSample();
+  expect(near(f.mainL, 0.707107 * y, 1e-6) && near(f.mainR, 0.707107 * y, 1e-6), t, "maracas at 0.707", f.mainL, 0.707107 * y);
+  expect(std::fabs(f.mainL - 0.5 * y) > 1e-3, t, "not 0.5", f.mainL, 0.5 * y);
+  expect(near(f.mainL, -0.066445), t, "printed maracas main", f.mainL, -0.066445);
+}
+
+void testShuffleSurvivesOddLength() {
+  const char* t = "testShuffleSurvivesOddLength";
+  // Track length 3, every step on, shuffle 15: the delay is period / 3 = 2,000 samples on odd clock steps.
+  shogun::Pattern p = silentPattern();
+  auto& bd = p.track[static_cast<int>(shogun::Voice::Bd1)];
+  bd.length = 3;
+  bd.shuffle = 15;
+  for (int s = 0; s < 3; ++s) bd.drum[s].on = true;
+  shogun::Engine e;
+  arm(e, bd1Example(), p);
+  const std::vector<long> at = bd1Starts(e, 6 * 6000);
+  const long want[] = {0, 8000, 12000, 20000, 24000, 32000};
+  expect(at.size() == 6, t, "six steps", static_cast<double>(at.size()), 6);
+  for (size_t i = 0; i < at.size() && i < 6; ++i) {
+    expect(at[i] == want[i], t, "odd clock step swings", static_cast<double>(at[i]), static_cast<double>(want[i]));
+  }
+}
+
 int main() {
   testKickBendDecays();
   testBd1SoundChangesAttack();
@@ -988,6 +1105,10 @@ int main() {
   testShortVoices();
   testShuffleAndShift();
   testClockNotesAndEdges();
+  testVoiceEndsWhenQuiet();
+  testDistBypassAndDrive();
+  testCenterPanIsNotHalf();
+  testShuffleSurvivesOddLength();
   if (gFails != 0) {
     std::printf("%d failed\n", gFails);
     return 1;

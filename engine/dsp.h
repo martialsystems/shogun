@@ -16,6 +16,10 @@ constexpr int kVoiceCount = 16;
 constexpr int kMaxSteps = 32;
 constexpr int kMaxEvents = 512;
 constexpr double kTrigThreshold = 1.0;
+// A drum voice whose envelopes are all under this ends, and outputs 0 until the next trigger.
+constexpr double kQuietEnv = 1e-6;
+// Equal-power centre: sqrt(0.5) on each side.
+constexpr double kCenterGain = 0.7071067811865476;
 
 inline double u(int cc) {
   if (cc < 0) cc = 0;

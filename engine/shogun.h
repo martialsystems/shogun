@@ -201,6 +201,8 @@ class Engine {
   int displayStep() const;
   std::int64_t sampleIndex() const { return sampleIndex_; }
   double periodSamples() const { return period_; }
+  // False before the first trigger and again once a drum voice has gone quiet.
+  bool voiceActive(Voice voice) const { return voice_[static_cast<int>(voice)].active; }
 
  private:
   struct VoiceState {
