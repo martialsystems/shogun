@@ -17,7 +17,15 @@ constexpr int kMaxSteps = 32;
 constexpr int kMaxEvents = 512;
 constexpr double kTrigThreshold = 1.0;
 // A drum voice whose envelopes are all under this ends, and outputs 0 until the next trigger.
-constexpr double kQuietEnv = 1e-6;
+constexpr double kQuietEnv = 1e-3;
+// The drum decay law: tau = 8 ms * exp(4.5 u). u = 0 is 8 ms, u = 0.5 is 75.9 ms, u = 1 is 720 ms.
+constexpr double kDecayBase = 0.008;
+constexpr double kDecaySpan = 4.5;
+// SD step bend: its envelope time is the Pitch time, but never under 80 ms while a bend is set. STAND-IN.
+constexpr double kSdBendFloor = 0.08;
+// A tom at Decay 127 rings for 4 s, then releases on a 50 ms time constant and ends. STAND-IN.
+constexpr int kTomRingSamples = 4 * 48000;
+constexpr double kTomRelease = 0.05;
 // Equal-power centre: sqrt(0.5) on each side.
 constexpr double kCenterGain = 0.7071067811865476;
 
@@ -122,6 +130,8 @@ inline double sawSample(double phase, double freq) {
 inline double midiHz(int note) {
   return 440.0 * std::pow(2.0, (static_cast<double>(note) - 69.0) / 12.0);
 }
+
+inline double decayTau(double u) { return kDecayBase * std::exp(kDecaySpan * u); }
 
 inline double expDecay(int n, double tau) {
   return std::exp(-static_cast<double>(n) / (kFs * tau));

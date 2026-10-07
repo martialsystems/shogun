@@ -194,6 +194,7 @@ class Engine {
   double bd2ScaledTransient() const { return bd2Tr_; }
   double sdF1() const { return sdF1_; }
   double sdF2() const { return sdF2_; }
+  double sdHz() const { return sdHz_; }   // tone 1 after the Pitch and bend envelopes
   double sdT1() const { return sdT1_; }
   double sdT2() const { return sdT2_; }
   double ohEnv() const { return ohEnv_; }
@@ -324,6 +325,7 @@ class Engine {
   double bd2Env_ = 0;
   double bd2Tr_ = 0;
   double sdF1_ = 0;
+  double sdHz_ = 0;
   double sdF2_ = 0;
   double sdT1_ = 0;
   double sdT2_ = 0;

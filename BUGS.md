@@ -20,7 +20,9 @@ Added for the page, not bugs: `setRunning()` and `restart()` (the engine had no 
 
 N2 (voices never end), S1 (BD1 Dist), S2 (shuffle), S4 (rests), S5 (EXT lead and bass), S7 (cymbal noise), S8 (centre pan) and S9 (clock jacks) are settled in the engine and SCHEMATICS.md.
 
-Then 64aeeb4: BD1 noise rides the body envelope, so BD1 ends under 1e-6 at any Noise setting (there is no separate noise decay). Every panned voice uses the equal-power law, 0.707 each side at centre, including MTC and the clap tail. A drum voice now ends under 1e-6 except a held BD2 or tom.
+Then 64aeeb4: BD1 noise rides the body envelope, so BD1 ends under 1e-6 at any Noise setting (there is no separate noise decay). Every panned voice uses the equal-power law, 0.707 each side at centre, including MTC and the clap tail. 
+
+Then f525218: one decay law for every drum, tau = 8 ms * exp(4.5 u) (8 ms, about 76 ms at noon, 720 ms at full), the snare's tone and noise and the clap tail included, and a voice outputs 0 under 1e-3. That settles S3 and S6 below.
 
 ## Engine notes, not changed
 
@@ -29,8 +31,11 @@ Then 64aeeb4: BD1 noise rides the body envelope, so BD1 ends under 1e-6 at any N
 - N4, no headroom. With every level at 1 the main mix peaks near 2 at Master 1. The plugin defaults Master to 0.45. The page now loads each factory pattern with its own kit and measured levels (web/page/kits.js, web/make_levels.mjs) and defaults Master to 0.65, where every factory pattern peaks under 0.9 on either side.
 - N5, default knobs. Most `Knobs` fields default to 0, so a fresh engine plays a short, low, dull kit. The page loads a kit with every pattern instead.
 
+## Design pack questions settled in f525218
+
+- S3, snare bend. The bend is a drop on top of Tune with its own envelope, never under 80 ms while a bend is set, so Pitch 0 still swoops. Bend 0 adds nothing. It is in the SD equation.
+- S6, holds. BD2 at Decay 127 holds until the next hit. A tom at Decay 127 rings for 4 s, releases and ends. No choke jack.
+
 ## Design pack questions (SCHEMATICS.md), still open
 
-- S3, snare bend. The step bend list includes SD, but the SD equations do not place it. The engine adds it to the Pitch envelope depth, so at Pitch 0 the bend is gone in about 10 ms.
-- S6, holds. BD2 and the toms at Decay 127 hold forever. Only the next hit ends them. There is no gate length or choke.
 - S10, not built yet. Per-step sound overrides, the play-mode global shuffle hold (the engine has `setGlobalShuffle`), and pattern sets.

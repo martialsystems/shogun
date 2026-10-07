@@ -43,9 +43,14 @@ void addCenter(double s, double& mainL, double& mainR) {
   mainR += s * kCenterGain;
 }
 
-// A drum voice ends once the largest of its envelopes is under kQuietEnv. It outputs 0 until the next trigger.
-void endIfQuiet(bool& active, double env) {
-  if (env < kQuietEnv) active = false;
+// A drum voice ends once the largest of its envelopes is under kQuietEnv. From that sample it outputs 0 until the next trigger.
+template <class State>
+void endIfQuiet(State& st, double env) {
+  if (env >= kQuietEnv) return;
+  st.active = false;
+  st.mono = 0;
+  st.left = 0;
+  st.right = 0;
 }
 
 }  // namespace
@@ -222,7 +227,7 @@ void Engine::clearVoices() {
   cpCount_ = 1;
   bd1Hz_ = bd1TuneHz_ = bd1TrHz_ = 0;
   bd2Env_ = bd2Tr_ = 0;
-  sdF1_ = sdF2_ = sdT1_ = sdT2_ = 0;
+  sdF1_ = sdF2_ = sdT1_ = sdT2_ = sdHz_ = 0;
   ohEnv_ = ohSample_ = hhEnv_ = 0;
   hhTau_ = 0.008;
   cyA_ = cyB_ = 0;
@@ -426,7 +431,7 @@ void Engine::process(const TrigIn& in, Frame& out) {
   fireDue();
   applyJacks(in);
   applyPending();
-  hhTau_ = 0.008 + 0.04 * u(knobs_.hhDecay);
+  hhTau_ = decayTau(u(knobs_.hhDecay));
   renderAll();
   mix(out);
   ++sampleIndex_;
@@ -451,7 +456,7 @@ void Engine::renderBd1(VoiceState& st) {
   const double fTune = 35.0 * std::pow(140.0 / 35.0, u(knobs_.bd1Tune));
   const double depth = 18.0 * u(knobs_.bd1Pitch);
   const double tauP = 0.012 + 0.25 * u(knobs_.bd1Pitch);
-  const double tauB = 0.03 + 1.2 * u(knobs_.bd1Decay);
+  const double tauB = decayTau(u(knobs_.bd1Decay));
   const int s = soundIndex(knobs_.bd1Trigger);
   const double fTr = 160.0 * std::pow(1.35, s);
   const double fc = 200.0 * std::pow(8000.0 / 200.0, u(knobs_.bd1Filter));
@@ -479,7 +484,7 @@ void Engine::renderBd1(VoiceState& st) {
   bd1TrHz_ = fTr;
   st.phase += 2.0 * kPi * f / kFs;
   st.n = n + 1;
-  endIfQuiet(st.active, std::fmax(bodyEnv, trEnv));
+  endIfQuiet(st, std::fmax(bodyEnv, trEnv));
 }
 
 void Engine::renderBd2(VoiceState& st) {
@@ -491,7 +496,7 @@ void Engine::renderBd2(VoiceState& st) {
   const double fTune = 45.0 * std::pow(100.0 / 45.0, u(knobs_.bd2Tune));
   const double fTr = 2.0 * fTune;
   double sustain = 0.0;
-  double tauB = 0.04 + 1.6 * u(knobs_.bd2Decay);
+  double tauB = decayTau(u(knobs_.bd2Decay));
   if (knobs_.bd2Decay >= 127) {
     sustain = 0.70;
     tauB = 0.40;
@@ -508,11 +513,11 @@ void Engine::renderBd2(VoiceState& st) {
   bd2Tr_ = scaled;
   st.phase += 2.0 * kPi * f / kFs;
   st.n = n + 1;
-  endIfQuiet(st.active, std::fmax(env, trEnv));
+  endIfQuiet(st, std::fmax(env, trEnv));
 }
 
 void Engine::renderSd(VoiceState& st) {
-  sdF1_ = sdF2_ = sdT1_ = sdT2_ = 0;
+  sdF1_ = sdF2_ = sdT1_ = sdT2_ = sdHz_ = 0;
   st.mono = 0;
   if (!st.active) return;
   const int n = st.n;
@@ -521,12 +526,15 @@ void Engine::renderSd(VoiceState& st) {
   const double f2 = f1 * std::pow(2.0, detune / 12.0);
   const double depth = 14.0 * u(knobs_.sdPitch);
   const double tauP = 0.01 + 0.12 * u(knobs_.sdPitch);
-  const double tauTone = 0.02 + 0.55 * u(knobs_.sdToneDecay);
-  const double tauN = 0.01 + 0.25 * u(knobs_.sdSnDecay);
+  const double tauTone = decayTau(u(knobs_.sdToneDecay));
+  const double tauN = decayTau(u(knobs_.sdSnDecay));
   const double pEnv = expDecay(n, tauP);
-  const double bendDepth = depth + st.bend;
-  const double f1n = f1 * std::pow(2.0, bendDepth * pEnv / 12.0);
-  const double f2n = f2 * std::pow(2.0, bendDepth * pEnv / 12.0);
+  // Step bend is its own drop to Tune, not a deeper Pitch: its time has an 80 ms floor, so Pitch 0 still swoops.
+  const double tauBend = std::fmax(tauP, kSdBendFloor);
+  const double bEnv = st.bend != 0.0 ? expDecay(n, tauBend) : 0.0;
+  const double st12 = (depth * pEnv + st.bend * bEnv) / 12.0;
+  const double f1n = f1 * std::pow(2.0, st12);
+  const double f2n = f2 * std::pow(2.0, st12);
   const double t1 = std::sin(st.phase) * expDecay(n, tauTone);
   const double t2 = std::sin(st.phase2) * expDecay(n, tauTone);
   double nz = 0.0;
@@ -537,12 +545,13 @@ void Engine::renderSd(VoiceState& st) {
   st.mono = y * st.gain;
   sdF1_ = f1;
   sdF2_ = f2;
+  sdHz_ = f1n;
   sdT1_ = t1;
   sdT2_ = t2;
   st.phase += 2.0 * kPi * f1n / kFs;
   st.phase2 += 2.0 * kPi * f2n / kFs;
   st.n = n + 1;
-  endIfQuiet(st.active, std::fmax(expDecay(n, tauTone), expDecay(n, tauN)));
+  endIfQuiet(st, std::fmax(expDecay(n, tauTone), expDecay(n, tauN)));
 }
 
 void Engine::renderRs(VoiceState& st) {
@@ -554,7 +563,7 @@ void Engine::renderRs(VoiceState& st) {
   const double y = std::sin(2.0 * kPi * f * static_cast<double>(n) / kFs) * env;
   st.mono = y * st.gain;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderCy(VoiceState& st) {
@@ -563,7 +572,7 @@ void Engine::renderCy(VoiceState& st) {
   if (!st.active) return;
   const int n = st.n;
   const double f0 = 180.0 * std::pow(900.0 / 180.0, u(knobs_.cyTune));
-  const double tau = 0.05 + 1.8 * u(knobs_.cyDecay);
+  const double tau = decayTau(u(knobs_.cyDecay));
   const double a = metalStack(kCyA, f0, n);
   const double b = metalStack(kCyB, f0, n);
   // Fixed noise mix, as the block diagram says.
@@ -574,7 +583,7 @@ void Engine::renderCy(VoiceState& st) {
   cyA_ = a;
   cyB_ = b;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderOh(VoiceState& st) {
@@ -585,7 +594,7 @@ void Engine::renderOh(VoiceState& st) {
   if (!st.active) return;
   const int n = st.n;
   const double fc = 250.0 * std::pow(4000.0 / 250.0, u(knobs_.hhTune));
-  const double tau = 0.04 + 1.1 * u(knobs_.ohDecay);
+  const double tau = decayTau(u(knobs_.ohDecay));
   const double env = expDecay(n, tau);
   const double stack = metalStack(kHat, fc, n);
   const double x = noiseDraw(noiseState_);
@@ -594,7 +603,7 @@ void Engine::renderOh(VoiceState& st) {
   ohEnv_ = env;
   ohSample_ = y;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderHh(VoiceState& st) {
@@ -603,7 +612,7 @@ void Engine::renderHh(VoiceState& st) {
   if (!st.active) return;
   const int n = st.n;
   const double fc = 250.0 * std::pow(4000.0 / 250.0, u(knobs_.hhTune));
-  const double tau = 0.008 + 0.04 * u(knobs_.hhDecay);
+  const double tau = decayTau(u(knobs_.hhDecay));
   const double env = expDecay(n, tau);
   const double stack = metalStack(kHat, fc, n);
   const double x = noiseDraw(noiseState_);
@@ -611,7 +620,7 @@ void Engine::renderHh(VoiceState& st) {
   st.mono = y * st.gain;
   hhEnv_ = env;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderCl(VoiceState& st) {
@@ -619,12 +628,12 @@ void Engine::renderCl(VoiceState& st) {
   if (!st.active) return;
   const int n = st.n;
   const double f = 400.0 * std::pow(3000.0 / 400.0, u(knobs_.clTune));
-  const double tau = 0.004 + 0.08 * u(knobs_.clDecay);
+  const double tau = decayTau(u(knobs_.clDecay));
   const double env = expDecay(n, tau);
   const double y = std::sin(2.0 * kPi * f * static_cast<double>(n) / kFs) * env;
   st.mono = y * st.gain;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderCp(VoiceState& st) {
@@ -638,7 +647,7 @@ void Engine::renderCp(VoiceState& st) {
   const int count = cpCount_;
   const double fTr = 700.0 * std::pow(1.28, soundIndex(knobs_.cpTrigger));
   const double fc = 400.0 * std::pow(6000.0 / 400.0, u(knobs_.cpFilter));
-  const double tau = 0.05 + 0.8 * u(knobs_.cpDecay);
+  const double tau = decayTau(u(knobs_.cpDecay));
   const int gap = static_cast<int>(std::llround(0.011 * kFs));
   double yL = 0.0;
   double yR = 0.0;
@@ -665,7 +674,7 @@ void Engine::renderCp(VoiceState& st) {
   // Quiet only after the last burst has started.
   const int lastStart = (count - 1) * gap;
   const double lastBurst = n >= lastStart ? expDecay(n - lastStart, 0.003) : 1.0;
-  endIfQuiet(st.active, std::fmax(lastBurst, expDecay(n, tau)));
+  endIfQuiet(st, std::fmax(lastBurst, expDecay(n, tau)));
 }
 
 void Engine::renderTom(VoiceState& st, int which) {
@@ -699,12 +708,14 @@ void Engine::renderTom(VoiceState& st, int which) {
   const int n = st.n;
   const double fTune = fLo * std::pow(fHi / fLo, u(tuneCc));
   double sustain = 0.0;
-  double tauB = 0.03 + 1.2 * u(decayCc);
+  double tauB = decayTau(u(decayCc));
   if (decayCc >= 127) {
     sustain = 0.55;
     tauB = 0.35;
   }
-  const double env = sustain + (1.0 - sustain) * expDecay(n, tauB);
+  // Decay 127 is a long ring, not a hold: after kTomRingSamples it releases and the voice ends. Only BD2 drones.
+  const double ring = sustain + (1.0 - sustain) * expDecay(n < kTomRingSamples ? n : kTomRingSamples, tauB);
+  const double env = n <= kTomRingSamples ? ring : ring * expDecay(n - kTomRingSamples, kTomRelease);
   const double pEnv = expDecay(n, 0.08);
   const double f = fTune * std::pow(2.0, (st.bend * pEnv) / 12.0);
   double y = std::sin(st.phase) * env;
@@ -721,7 +732,7 @@ void Engine::renderTom(VoiceState& st, int which) {
   st.phase += 2.0 * kPi * f / kFs;
   st.phase2 += 2.0 * kPi * (2.30 * f) / kFs;
   st.n = n + 1;
-  endIfQuiet(st.active, std::fmax(env, noiseCc >= 64 ? expDecay(n, 0.12) : 0.0));
+  endIfQuiet(st, std::fmax(env, noiseCc >= 64 ? expDecay(n, 0.12) : 0.0));
 }
 
 void Engine::renderCb(VoiceState& st) {
@@ -729,12 +740,12 @@ void Engine::renderCb(VoiceState& st) {
   if (!st.active) return;
   const int n = st.n;
   const double f = 300.0 * std::pow(1200.0 / 300.0, u(knobs_.cbTune));
-  const double tau = 0.01 + 0.40 * u(knobs_.cbDecay);
+  const double tau = decayTau(u(knobs_.cbDecay));
   const double env = expDecay(n, tau);
   const double y = 0.5 * (squareWave(f, n) + squareWave(1.015 * f, n)) * env;
   st.mono = y * st.gain;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderMa(VoiceState& st) {
@@ -742,13 +753,13 @@ void Engine::renderMa(VoiceState& st) {
   st.mono = 0;
   if (!st.active) return;
   const int n = st.n;
-  const double tau = 0.02 + 0.30 * u(knobs_.maDecay);
+  const double tau = decayTau(u(knobs_.maDecay));
   const double env = expDecay(n, tau);
   const double y = onePole(st.lp, noiseDraw(noiseState_), 1500.0) * env;
   st.mono = y * st.gain;
   maSample_ = y;
   st.n = n + 1;
-  endIfQuiet(st.active, env);
+  endIfQuiet(st, env);
 }
 
 void Engine::renderLeadBass(VoiceState& st, bool bass) {

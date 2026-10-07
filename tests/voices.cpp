@@ -104,8 +104,8 @@ void testKickBendDecays() {
   expect(near(ftune, 60.408707), t, "f_tune", ftune, 60.408707);
   expect(near(f2400, 72.957296), t, "f(2400)", f2400, 72.957296);
   expect(std::fabs(f2400 - ftune) < std::fabs(f0 - ftune), t, "decay toward tune", f2400, f0);
-  expect(near(y48, 0.832547), t, "y(48)", y48, 0.832547);
-  expect(near(y480, -0.907532), t, "y(480)", y480, -0.907532);
+  expect(near(y48, 0.829514), t, "y(48)", y48, 0.829514);
+  expect(near(y480, -0.855516), t, "y(480)", y480, -0.855516);
 
   // Step bend is an extra depth. CC 64 is 0.094488 semitones, not a center detent.
   shogun::Engine bent;
@@ -159,9 +159,9 @@ void testBd1SoundChangesAttack() {
       tune64 = b.bd1TuneHz();
     }
   }
-  expect(near(y0, 0.306787), t, "trigger 0 y", y0, 0.306787);
+  expect(near(y0, 0.306649), t, "trigger 0 y", y0, 0.306649);
   expect(near(tr0, 160.0), t, "trigger 0 f_tr", tr0, 160.0);
-  expect(near(y64, 0.810530), t, "trigger 64 y", y64, 0.810530);
+  expect(near(y64, 0.810392), t, "trigger 64 y", y64, 0.810392);
   expect(near(tr64, 1765.184603), t, "trigger 64 f_tr", tr64, 1765.184603);
   expect(near(tune0, tune64, 0.0), t, "body tune matches", tune0, tune64);
   expect(std::fabs(y0 - y64) > 0.1, t, "attacks differ", y0, y64);
@@ -201,7 +201,7 @@ void testBd2CanHold() {
   expect(near(env, 0.0), t, "decay 0", env, 0.0);
 
   renderBd2(126, 60, 0, 96000, env, tr);
-  expect(near(env, 0.292599), t, "decay 126", env, 0.292599);
+  expect(near(env, 0.056280), t, "decay 126", env, 0.056280);
   expect(env < 0.5, t, "126 is not a hold", env, 0.5);
 
   renderBd2(0, 60, 100, 10, env, tr);
@@ -236,9 +236,9 @@ void testSnareTwoTones() {
   renderSd(64, f1, f2, t1, t2, y);
   expect(near(f1, 233.014061), t, "f1", f1, 233.014061);
   expect(near(f2, 282.574688), t, "f2", f2, 282.574688);
-  expect(near(t1, 0.671594), t, "t1", t1, 0.671594);
-  expect(near(t2, 0.778808), t, "t2", t2, 0.778808);
-  expect(near(y, 0.725623), t, "blend", y, 0.725623);
+  expect(near(t1, 0.668428), t, "t1", t1, 0.668428);
+  expect(near(t2, 0.775136), t, "t2", t2, 0.775136);
+  expect(near(y, 0.722202), t, "blend", y, 0.722202);
 
   double y0, y127;
   renderSd(0, f1, f2, t1, t2, y0);
@@ -264,7 +264,7 @@ void testHatChoke() {
     openOnly.process(in, f);
     if (n == 200) env200 = openOnly.ohEnv();
   }
-  expect(near(env200, 0.995412), t, "open env at 200", env200, 0.995412);
+  expect(near(env200, 0.985052), t, "open env at 200", env200, 0.985052);
 
   shogun::Engine choked;
   arm(choked, k, silentPattern());
@@ -279,7 +279,7 @@ void testHatChoke() {
     if (n == 210) hhAt10 = choked.hhEnv();
   }
   expect(openDead, t, "open stays 0 after choke", openDead ? 0.0 : 1.0, 0.0);
-  expect(near(choked.hhTau(), 0.020598), t, "closed tau", choked.hhTau(), 0.020598);
+  expect(near(choked.hhTau(), 0.033008), t, "closed tau", choked.hhTau(), 0.033008);
   expect(hhAt10 > 0.9, t, "closed hat keeps decaying", hhAt10, 0.99);
 
   choked.trigger(shogun::Voice::Oh);
@@ -391,7 +391,7 @@ void testExtBypassIgnoresPattern() {
   expect(a.displayStep() == 2, t, "display moved", static_cast<double>(a.displayStep()), 2);
   expect(a.periodSamples() == 6000.0, t, "period", a.periodSamples(), 6000.0);
 
-  const double wantVel = 0.208884 * 0.819291;
+  const double wantVel = 0.208746 * 0.819291;
   double yA = 0;
   double yB = 0;
   const std::int64_t counterBeforeSwitch = a.counter();
@@ -423,13 +423,13 @@ void testExtBypassIgnoresPattern() {
       break;
     }
     if (i == 24010) {
-      expect(near(fa.bdL, 0.208884), t, "next on-step", fa.bdL, 0.208884);
-      expect(near(fb.bdL, 0.208884), t, "next on-step pair", fb.bdL, 0.208884);
+      expect(near(fa.bdL, 0.208746), t, "next on-step", fa.bdL, 0.208746);
+      expect(near(fb.bdL, 0.208746), t, "next on-step pair", fb.bdL, 0.208746);
     }
   }
   expect(near(yA, wantVel), t, "ext velocity y", yA, wantVel);
   expect(near(yB, wantVel), t, "ext velocity y pair", yB, wantVel);
-  expect(std::fabs(yA - 0.208884) > 1e-4, t, "not pattern accent", yA, 0.208884);
+  expect(std::fabs(yA - 0.208746) > 1e-4, t, "not pattern accent", yA, 0.208746);
 
   shogun::Pattern flamOn = bypassPattern();
   flamOn.track[static_cast<int>(shogun::Voice::Bd1)].drum[0].flam = true;
@@ -506,10 +506,10 @@ void testIntIgnoresTrigJacks() {
     if (fp.bdL != fh.bdL || fp.mainL != fh.mainL) matchHeld = false;
     if (i == 10) y10 = fp.bdL;
   }
-  expect(near(y10, 0.208884), t, "step 0 accent", y10, 0.208884);
+  expect(near(y10, 0.208746), t, "step 0 accent", y10, 0.208746);
   expect(matchPulse, t, "mid-step jack ignored", matchPulse ? 0.0 : 1.0, 0.0);
   expect(matchHeld, t, "plugged cable ignored", matchHeld ? 0.0 : 1.0, 0.0);
-  expect(std::fabs(y10 - 0.208884 * 0.819291) > 1e-3, t, "not the jack velocity", y10, 0.208884);
+  expect(std::fabs(y10 - 0.208746 * 0.819291) > 1e-3, t, "not the jack velocity", y10, 0.208746);
 }
 
 void testRestIsSilent() {
@@ -575,8 +575,8 @@ void testIndividualOutStaysInMix() {
     }
   }
   expect(patched.pairPatched(shogun::Pair::Bd), t, "flag stored", 1, 1);
-  expect(near(pair, 0.832547), t, "patched pair", pair, 0.832547);
-  expect(near(main, 0.832547), t, "patched main", main, 0.832547);
+  expect(near(pair, 0.829514), t, "patched pair", pair, 0.829514);
+  expect(near(main, 0.829514), t, "patched main", main, 0.829514);
 
   shogun::Engine open;
   arm(open, bd1Example(), silentPattern());
@@ -586,7 +586,7 @@ void testIndividualOutStaysInMix() {
     open.process(in, f);
     if (n == 48) main = f.mainL;
   }
-  expect(near(main, 0.832547), t, "unpatched main", main, 0.832547);
+  expect(near(main, 0.829514), t, "unpatched main", main, 0.829514);
 
   shogun::Engine half;
   arm(half, bd1Example(), silentPattern());
@@ -601,8 +601,8 @@ void testIndividualOutStaysInMix() {
       halfMain = f.mainL;
     }
   }
-  expect(near(halfPair, 0.832547), t, "master leaves pair", halfPair, 0.832547);
-  expect(near(halfMain, 0.416273), t, "master scales main", halfMain, 0.416273);
+  expect(near(halfPair, 0.829514), t, "master leaves pair", halfPair, 0.829514);
+  expect(near(halfMain, 0.414757), t, "master scales main", halfMain, 0.414757);
 
   shogun::Knobs mk;
   mk.maDecay = 55;
@@ -638,7 +638,7 @@ void testShortVoices() {
   arm(e, cl, silentPattern());
   e.trigger(shogun::Voice::Cl);
   for (int n = 0; n <= 12; ++n) e.process(in, f);
-  expect(near(f.clL, 0.972835), t, "clave", f.clL, 0.972835);
+  expect(near(f.clL, 0.972955), t, "clave", f.clL, 0.972955);
 
   shogun::Knobs cb;
   cb.cbTune = 48;
@@ -646,7 +646,7 @@ void testShortVoices() {
   arm(e, cb, silentPattern());
   e.trigger(shogun::Voice::Cb);
   for (int n = 0; n <= 15; ++n) e.process(in, f);
-  expect(near(f.cbR, 0.405275), t, "cowbell", f.cbR, 0.405275);
+  expect(near(f.cbR, 0.404500), t, "cowbell", f.cbR, 0.404500);
 
   shogun::Knobs cy;
   cy.cyTune = 64;
@@ -658,9 +658,9 @@ void testShortVoices() {
   expect(near(e.cyStackA(), 0.187710), t, "cymbal A", e.cyStackA(), 0.187710);
   expect(near(e.cyStackB(), 0.382957), t, "cymbal B", e.cyStackB(), 0.382957);
   const double blend = (1.0 - 70.0 / 127.0) * e.cyStackA() + (70.0 / 127.0) * e.cyStackB();
-  const double env = std::exp(-30.0 / (48000.0 * (0.05 + 1.8 * (90.0 / 127.0))));
+  const double env = std::exp(-30.0 / (48000.0 * shogun::decayTau(90.0 / 127.0)));
   const double yNoNoise = env * blend;
-  expect(near(yNoNoise, 0.295187), t, "cymbal without noise", yNoNoise, 0.295187);
+  expect(near(yNoNoise, 0.294377), t, "cymbal without noise", yNoNoise, 0.294377);
   expect(std::fabs(f.cyR - yNoNoise) > 1e-6, t, "cymbal noise is in the bus", f.cyR, yNoNoise);
 
   shogun::Knobs tom;
@@ -719,7 +719,7 @@ void testShuffleAndShift() {
     if (i == 7076) onTime = f.bdL;
   }
   expect(early == 0.0, t, "odd step waits", early, 0.0);
-  expect(near(onTime, 0.208884), t, "shuffle fire", onTime, 0.208884);
+  expect(near(onTime, 0.208746), t, "shuffle fire", onTime, 0.208746);
   expect(shuf.track[static_cast<int>(shogun::Voice::Bd1)].shuffle == 8, t, "pattern shuffle unchanged", 8, 8);
 
   shogun::Engine held;
@@ -731,7 +731,7 @@ void testShuffleAndShift() {
     held.process(in, f);
     if (i == 6010) heldY = f.bdL;
   }
-  expect(near(heldY, 0.208884), t, "global shuffle override", heldY, 0.208884);
+  expect(near(heldY, 0.208746), t, "global shuffle override", heldY, 0.208746);
   expect(shuf.track[static_cast<int>(shogun::Voice::Bd1)].shuffle == 8, t, "override does not write", 8, 8);
 
   shogun::Pattern shifted = silentPattern();
@@ -749,7 +749,7 @@ void testShuffleAndShift() {
     if (i == 1450) at = f.bdL;
   }
   expect(before == 0.0, t, "shift holds the step", before, 0.0);
-  expect(near(at, 0.208884), t, "shift of 1440", at, 0.208884);
+  expect(near(at, 0.208746), t, "shift of 1440", at, 0.208746);
 
   shogun::Engine host;
   arm(host, bd1Example(), silentPattern());
@@ -782,7 +782,7 @@ void testClockNotesAndEdges() {
   arm(evenE, bd1Example(), even);
   evenE.setMode(shogun::ClockMode::Int);
   for (int i = 0; i <= 10; ++i) evenE.process(in, f);
-  expect(near(f.bdL, 0.208884), t, "even step is not shuffled", f.bdL, 0.208884);
+  expect(near(f.bdL, 0.208746), t, "even step is not shuffled", f.bdL, 0.208746);
 
   shogun::Pattern cyc = silentPattern();
   cyc.track[static_cast<int>(shogun::Voice::Bd1)].length = 2;
@@ -792,7 +792,7 @@ void testClockNotesAndEdges() {
   arm(cycE, bd1Example(), cyc);
   cycE.setMode(shogun::ClockMode::Int);
   for (int i = 0; i <= 12010; ++i) cycE.process(in, f);
-  expect(near(f.bdL, 0.208884), t, "track length cycles", f.bdL, 0.208884);
+  expect(near(f.bdL, 0.208746), t, "track length cycles", f.bdL, 0.208746);
 
   shogun::Pattern muted = bypassPattern();
   muted.track[static_cast<int>(shogun::Voice::Bd1)].mute = true;
@@ -812,7 +812,7 @@ void testClockNotesAndEdges() {
   arm(d, dist, silentPattern());
   d.trigger(shogun::Voice::Bd1);
   for (int n = 0; n <= 48; ++n) d.process(in, f);
-  expect(std::fabs(f.bdL - 0.832547) > 1e-4, t, "dist is a clip", f.bdL, 0.832547);
+  expect(std::fabs(f.bdL - 0.829514) > 1e-4, t, "dist is a clip", f.bdL, 0.829514);
 
   shogun::Engine edge;
   arm(edge, bd1Example(), silentPattern());
@@ -820,7 +820,7 @@ void testClockNotesAndEdges() {
   in.volts[static_cast<int>(shogun::Voice::Bd1)] = 1.0;
   in.velocity[static_cast<int>(shogun::Voice::Bd1)] = -1;
   for (int n = 0; n <= 10; ++n) edge.process(in, f);
-  expect(near(f.bdL, 0.208884), t, "edge at 1 V uses velocity 127", f.bdL, 0.208884);
+  expect(near(f.bdL, 0.208746), t, "edge at 1 V uses velocity 127", f.bdL, 0.208746);
 
   shogun::Engine low;
   arm(low, bd1Example(), silentPattern());
@@ -1016,7 +1016,7 @@ void testClockFixes() {
   shogun::TrigIn in;
   shogun::Frame f;
   for (int i = 0; i <= 5538 + 10; ++i) at.process(in, f);
-  expect(near(f.bdL, 0.208884), t, "step 1 at floor(5538.46)", f.bdL, 0.208884);
+  expect(near(f.bdL, 0.208746), t, "step 1 at floor(5538.46)", f.bdL, 0.208746);
 
   // E2: a tempo change while running moves the next step by the new period, no burst and no stall.
   shogun::Engine up;
@@ -1050,7 +1050,7 @@ void testClockFixes() {
   expect(tr.counter() == 1, t, "stopped holds the counter", static_cast<double>(tr.counter()), 1);
   tr.setRunning(true);
   for (int i = 0; i <= 10; ++i) tr.process(in, f);
-  expect(tr.counter() == 0 && near(f.bdL, 0.208884), t, "start plays step 1 now", f.bdL, 0.208884);
+  expect(tr.counter() == 0 && near(f.bdL, 0.208746), t, "start plays step 1 now", f.bdL, 0.208746);
 
   // External clock: pulses move the counter, the period does not.
   shogun::Engine ext;
@@ -1060,7 +1060,7 @@ void testClockFixes() {
   expect(ext.counter() == 0, t, "external clock waits for a pulse", static_cast<double>(ext.counter()), 0);
   ext.clockPulse();
   for (int i = 0; i <= 10; ++i) ext.process(in, f);
-  expect(ext.counter() == 1 && near(f.bdL, 0.208884), t, "a pulse is one step", f.bdL, 0.208884);
+  expect(ext.counter() == 1 && near(f.bdL, 0.208746), t, "a pulse is one step", f.bdL, 0.208746);
 }
 
 void testVoiceFixes() {
@@ -1160,7 +1160,7 @@ void testVoiceEndsWhenQuiet() {
     expect(endedAt > 0, t, "voice ended", static_cast<double>(v), 1);
     expect(silentAfter, t, "0 after the end", static_cast<double>(v), 0);
   }
-  // BD1 example: body tau 0.785906 s, so the end is where exp(-n / (fs * tau)) crosses 1e-6.
+  // BD1 example: body tau 0.136195 s, so the end is where exp(-n / (fs * tau)) crosses 1e-3.
   shogun::Engine bd;
   arm(bd, bd1Example(), silentPattern());
   bd.trigger(shogun::Voice::Bd1);
@@ -1169,8 +1169,8 @@ void testVoiceEndsWhenQuiet() {
     bd.process(in, f);
     ++n;
   }
-  const double want = std::ceil(-std::log(1e-6) * 48000.0 * (0.03 + 1.2 * 80.0 / 127.0));
-  expect(std::fabs(static_cast<double>(n) - want) <= 1.0, t, "BD1 ends at the 1e-6 crossing", n, want);
+  const double want = std::ceil(-std::log(1e-3) * 48000.0 * shogun::decayTau(80.0 / 127.0));
+  expect(std::fabs(static_cast<double>(n) - want) <= 1.0, t, "BD1 ends at the 1e-3 crossing", n, want);
   // With Noise up, the noise rides the body envelope: BD1 ends at the same crossing and is 0 after it.
   shogun::Knobs noisy = bd1Example();
   noisy.bd1Noise = 127;
@@ -1199,7 +1199,7 @@ void testVoiceEndsWhenQuiet() {
   expect(b2.voiceActive(shogun::Voice::Bd2), t, "held BD2 keeps sounding", 0, 1);
   bd.trigger(shogun::Voice::Bd1);
   for (int i = 0; i <= 10; ++i) bd.process(in, f);
-  expect(near(f.bdL, 0.208884), t, "ended voice retriggers", f.bdL, 0.208884);
+  expect(near(f.bdL, 0.208746), t, "ended voice retriggers", f.bdL, 0.208746);
 }
 
 void testDistBypassAndDrive() {
@@ -1215,9 +1215,9 @@ void testDistBypassAndDrive() {
     for (int n = 0; n <= 48; ++n) e.process(in, f);
     return f.bdL;
   };
-  expect(near(at48(0), 0.832547), t, "Dist 0 is y = pre", at48(0), 0.832547);
+  expect(near(at48(0), 0.829514), t, "Dist 0 is y = pre", at48(0), 0.829514);
   expect(std::fabs(at48(1) - at48(0)) < 2e-3, t, "Dist 1 is next to the bypass", at48(1), at48(0));
-  expect(near(at48(64), 0.999180), t, "Dist 64 printed row", at48(64), 0.999180);
+  expect(near(at48(64), 0.999151), t, "Dist 64 printed row", at48(64), 0.999151);
 }
 
 void testCenterPanIsNotHalf() {
@@ -1258,6 +1258,141 @@ void testCenterPanIsNotHalf() {
   expect(near(f.cpL, want, 1e-6) && near(f.cpR, want, 1e-6), t, "clap tail at 0.707", f.cpL, want);
 }
 
+// Decay law: tau = 8 ms * exp(4.5 u) on every drum decay, and a voice is 0 once its envelope is under 1e-3.
+void testDecayNoonIsShort() {
+  const char* t = "testDecayNoonIsShort";
+  expect(near(shogun::decayTau(0.0), 0.008), t, "decay 0 is 8 ms", shogun::decayTau(0.0), 0.008);
+  expect(near(shogun::decayTau(0.5), 0.075902), t, "noon is 76 ms", shogun::decayTau(0.5), 0.075902);
+  expect(near(shogun::decayTau(1.0), 0.720137), t, "full is 720 ms", shogun::decayTau(1.0), 0.720137);
+  // Decay 64 on each knob: the voice ends where exp(-n / (fs * tau)) crosses 1e-3, about 0.53 s, not seconds later.
+  shogun::TrigIn in;
+  shogun::Frame f;
+  const double tau64 = shogun::decayTau(64.0 / 127.0);
+  const long want = static_cast<long>(std::ceil(-std::log(1e-3) * 48000.0 * tau64));
+  struct Case { shogun::Voice v; const char* name; void (*set)(shogun::Knobs&); };
+  const Case cases[] = {
+      {shogun::Voice::Bd2, "bd2", [](shogun::Knobs& k) { k.bd2Decay = 64; }},
+      {shogun::Voice::Cy, "cymbal", [](shogun::Knobs& k) { k.cyDecay = 64; }},
+      {shogun::Voice::Oh, "open hat", [](shogun::Knobs& k) { k.ohDecay = 64; }},
+      {shogun::Voice::Hh, "closed hat", [](shogun::Knobs& k) { k.hhDecay = 64; }},
+      {shogun::Voice::Cl, "claves", [](shogun::Knobs& k) { k.clDecay = 64; }},
+      {shogun::Voice::Mtc, "mid tom", [](shogun::Knobs& k) { k.mtcDecay = 64; }},
+      {shogun::Voice::Cb, "cowbell", [](shogun::Knobs& k) { k.cbDecay = 64; }},
+      {shogun::Voice::Ma, "maracas", [](shogun::Knobs& k) { k.maDecay = 64; }},
+      // The snare's tone and noise and the clap tail use the same curve.
+      {shogun::Voice::Sd, "snare tone and noise", [](shogun::Knobs& k) { k.sdToneDecay = 64; k.sdSnDecay = 64; k.sdSnappy = 127; }},
+      {shogun::Voice::Cp, "clap tail", [](shogun::Knobs& k) { k.cpDecay = 64; k.cpData = 0; }},
+  };
+  for (const Case& c : cases) {
+    shogun::Knobs k;
+    c.set(k);
+    shogun::Engine e;
+    arm(e, k, silentPattern());
+    e.trigger(c.v);
+    long n = 0;
+    for (; n < 10L * 48000; ++n) {
+      e.process(in, f);
+      if (!e.voiceActive(c.v)) break;
+    }
+    expect(std::fabs(static_cast<double>(n - want)) <= 1.0, t, c.name, static_cast<double>(n), static_cast<double>(want));
+  }
+  // The sample where the envelope goes under 1e-3 is already 0.
+  shogun::Knobs k;
+  k.cbDecay = 64;
+  shogun::Engine e;
+  arm(e, k, silentPattern());
+  e.trigger(shogun::Voice::Cb);
+  for (long n = 0; n <= want; ++n) e.process(in, f);
+  expect(f.cbR == 0.0 && f.mainR == 0.0, t, "0 under 1e-3", f.cbR, 0.0);
+}
+
+// BD2 at Decay 127 is the steady tone: it holds until the next hit.
+void testBd2FullHolds() {
+  const char* t = "testBd2FullHolds";
+  shogun::TrigIn in;
+  shogun::Frame f;
+  shogun::Knobs h;
+  h.bd2Decay = 127;
+  shogun::Engine b2;
+  arm(b2, h, silentPattern());
+  b2.trigger(shogun::Voice::Bd2);
+  for (int n = 0; n <= 480000; ++n) b2.process(in, f);
+  expect(b2.voiceActive(shogun::Voice::Bd2), t, "still sounding at 10 s", 1.0, 1.0);
+  expect(near(b2.bd2Env(), 0.7), t, "at the sustain", b2.bd2Env(), 0.7);
+  b2.trigger(shogun::Voice::Bd2);
+  b2.process(in, f);
+  expect(near(b2.bd2Env(), 1.0), t, "the next hit restarts it", b2.bd2Env(), 1.0);
+}
+
+// A tom at Decay 127 rings for 4 s, releases on 50 ms and ends. It does not hold.
+void testTomFullEnds() {
+  const char* t = "testTomFullEnds";
+  shogun::TrigIn in;
+  shogun::Frame f;
+  shogun::Knobs k;
+  k.ltcTune = 40;
+  k.ltcDecay = 127;
+  shogun::Engine e;
+  arm(e, k, silentPattern());
+  e.trigger(shogun::Voice::Ltc);
+  for (int n = 0; n <= 192000; ++n) e.process(in, f);
+  expect(near(e.ltcEnv(), 0.550005), t, "rings at 4 s", e.ltcEnv(), 0.550005);
+  expect(e.voiceActive(shogun::Voice::Ltc), t, "still sounding at 4 s", 1.0, 1.0);
+  for (int n = 192001; n <= 194400; ++n) e.process(in, f);
+  expect(near(e.ltcEnv(), 0.202335), t, "50 ms into the release", e.ltcEnv(), 0.202335);
+  long endedAt = -1;
+  for (int n = 194401; n <= 240000 && endedAt < 0; ++n) {
+    e.process(in, f);
+    if (!e.voiceActive(shogun::Voice::Ltc)) endedAt = n;
+  }
+  expect(endedAt == 207144, t, "ends under 1e-3 at 4.32 s", static_cast<double>(endedAt), 207144.0);
+
+  shogun::Engine again;
+  arm(again, k, silentPattern());
+  again.trigger(shogun::Voice::Ltc);
+  for (int n = 0; n <= 96000; ++n) again.process(in, f);
+  again.trigger(shogun::Voice::Ltc);
+  again.process(in, f);
+  expect(near(again.ltcEnv(), 1.0), t, "the next hit replaces the ring", again.ltcEnv(), 1.0);
+}
+
+// S3: the SD step bend is a drop to Tune with its own time. Pitch 0 with a bend still swoops: the time has an 80 ms floor.
+void testSnareBendAtPitchZero() {
+  const char* t = "testSnareBendAtPitchZero";
+  shogun::TrigIn in;
+  shogun::Frame f;
+  shogun::Knobs k;
+  k.sdTune = 70;
+  k.sdPitch = 0;
+  k.sdToneDecay = 127;
+  shogun::Engine e;
+  arm(e, k, silentPattern());
+  e.trigger(shogun::Voice::Sd, 1.0, 12.0);
+  e.process(in, f);
+  expect(near(e.sdHz(), 466.028122), t, "bend +12 starts an octave up", e.sdHz(), 466.028122);
+  for (int n = 1; n <= 3840; ++n) e.process(in, f);
+  // n = 3840 is 80 ms: the bend is at 1/e. On the Pitch time (10 ms at Pitch 0) it would be 233.068249.
+  expect(near(e.sdHz(), 300.694079), t, "pitch 0 still swoops at 80 ms", e.sdHz(), 300.694079);
+
+  shogun::Engine flat;
+  arm(flat, k, silentPattern());
+  flat.trigger(shogun::Voice::Sd);
+  bool atTune = true;
+  for (int n = 0; n <= 4000; ++n) {
+    flat.process(in, f);
+    if (!near(flat.sdHz(), 233.014061)) atTune = false;
+  }
+  expect(atTune, t, "bend 0 adds nothing", flat.sdHz(), 233.014061);
+
+  // A Pitch time longer than the floor wins, and the bend adds on top of the Pitch depth.
+  k.sdPitch = 127;
+  shogun::Engine deep;
+  arm(deep, k, silentPattern());
+  deep.trigger(shogun::Voice::Sd, 1.0, 12.0);
+  for (int n = 0; n <= 6240; ++n) deep.process(in, f);
+  expect(near(deep.sdHz(), 404.878529), t, "pitch 127 time wins", deep.sdHz(), 404.878529);
+}
+
 void testShuffleSurvivesOddLength() {
   const char* t = "testShuffleSurvivesOddLength";
   // Track length 3, every step on, shuffle 15: the delay is period / 3 = 2,000 samples on odd clock steps.
@@ -1296,6 +1431,10 @@ int main() {
   testDistBypassAndDrive();
   testCenterPanIsNotHalf();
   testShuffleSurvivesOddLength();
+  testDecayNoonIsShort();
+  testBd2FullHolds();
+  testTomFullEnds();
+  testSnareBendAtPitchZero();
   if (gFails != 0) {
     std::printf("%d failed\n", gFails);
     return 1;
