@@ -122,6 +122,10 @@ LTC Tune 40, Decay 127. At 4 s (n = 192,000) it is 0.550005 and still sounding. 
 
 SD Tune 70, Pitch 0, Tone Decay 127, bend +12. f1 is 466.028122 Hz at n = 0 and 300.694079 Hz at n = 3,840. With bend 0, f1 stays 233.014061 Hz. With Pitch 127, at n = 6,240, f1 is 404.878529 Hz.
 
+## testSoloMutesOtherVoices
+
+BD1 (example knobs) and SD on step 0, SD soloed. For 200 samples BD1 and its pair are 0, the main is the snare alone, and the snare matches an engine without solo. The counter matches too. With solo off, the next sample of BD1 and of the main matches the engine without solo. A soloed SD on a muted track is 0 on every output, even from a direct trigger.
+
 ## testDistBypassAndDrive
 
 BD1 example knobs, n = 48. Dist 0 is y = pre = 0.829514. Dist 1 is within 2e-3 of Dist 0. Dist 64 is 0.999151.

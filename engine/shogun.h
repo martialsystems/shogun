@@ -160,6 +160,9 @@ class Engine {
   void setKnobs(const Knobs& knobs);
   void setLevel(Voice voice, double level);
   void setMaster(double master);
+  // Solo one voice (a Voice index), or -1 for off. Not part of the pattern; the clock switch is not touched.
+  void setSolo(int voice);
+  int solo() const { return solo_; }
   void setPairPatched(Pair pair, bool patched);
   // s in 0..15 overrides every track. Pass -1 to use the pattern values again.
   void setGlobalShuffle(int s);
@@ -283,6 +286,7 @@ class Engine {
   Pattern pattern_{};
   Knobs knobs_{};
   double level_[kVoiceCount]{};
+  int solo_ = -1;
   double master_ = 1.0;
   bool pairPatched_[static_cast<int>(Pair::Count)]{};
   int globalShuffle_ = -1;

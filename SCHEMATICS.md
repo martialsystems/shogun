@@ -149,6 +149,8 @@ STAND-IN. Every centred voice, p = 0, is 0.707107 on each side, which is sqrt(0.
 
 The voice sample is after the accent or velocity gain and after the instrument level. Hard left adds that sample to the left channel of the pair and of the main, and adds 0 to the right. Hard right is the swap. A panned voice uses gL and gR on both the pair and the main. The master multiplies the main only. Pair jacks are before the master.
 
+Solo. One voice at a time can be soloed, or none. While a voice is soloed, only that voice reaches its pair and the main. Every other voice still triggers and runs its envelopes, and outputs 0, so when solo is turned off each one is heard where it would have been. A muted track stays silent when it is soloed: mute wins. Solo is not stored in the pattern, and it does not change the INT and EXT switch.
+
 CHOICE: the main mix is that sum whether or not a pair jack is patched. Maracas, lead, and bass have no pair.
 
 ## Flam table

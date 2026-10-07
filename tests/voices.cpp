@@ -1250,6 +1250,57 @@ void testSnareBendAtPitchZero() {
   expect(near(deep.sdHz(), 404.878529), t, "pitch 127 time wins", deep.sdHz(), 404.878529);
 }
 
+// Solo: only the soloed voice reaches its pair and the main. The others still run and come back in place. Mute wins.
+void testSoloMutesOtherVoices() {
+  const char* t = "testSoloMutesOtherVoices";
+  shogun::TrigIn in;
+  shogun::Frame f;
+  shogun::Frame r;
+  shogun::Pattern p = silentPattern();
+  p.track[static_cast<int>(shogun::Voice::Bd1)].drum[0].on = true;
+  p.track[static_cast<int>(shogun::Voice::Sd)].drum[0].on = true;
+  shogun::Knobs k = bd1Example();
+  k.sdToneDecay = 127;
+  shogun::Engine ref;
+  arm(ref, k, p);
+  ref.setLevel(shogun::Voice::Sd, 1);
+  shogun::Engine e;
+  arm(e, k, p);
+  e.setLevel(shogun::Voice::Sd, 1);
+  e.setSolo(static_cast<int>(shogun::Voice::Sd));
+  bool othersOut = true;
+  bool soloAsBefore = true;
+  for (int n = 0; n < 200; ++n) {
+    ref.process(in, r);
+    e.process(in, f);
+    if (f.bdL != 0.0 || f.mainL != f.sdL || f.mainR != 0.0) othersOut = false;
+    if (!near(f.sdL, r.sdL, 1e-12)) soloAsBefore = false;
+  }
+  expect(othersOut, t, "only the snare reaches the main", f.bdL, 0.0);
+  expect(soloAsBefore, t, "the soloed voice is unchanged", f.sdL, r.sdL);
+  expect(e.counter() == ref.counter(), t, "the clock runs on", static_cast<double>(e.counter()), static_cast<double>(ref.counter()));
+  e.setSolo(-1);
+  ref.process(in, r);
+  e.process(in, f);
+  expect(r.bdL != 0.0 && near(f.bdL, r.bdL, 1e-12), t, "solo off: BD1 is back where it would be", f.bdL, r.bdL);
+  expect(near(f.mainL, r.mainL, 1e-12), t, "solo off: the mix returns", f.mainL, r.mainL);
+
+  // Mute wins over solo on the same track.
+  shogun::Pattern muted = p;
+  muted.track[static_cast<int>(shogun::Voice::Sd)].mute = true;
+  shogun::Engine m;
+  arm(m, k, muted);
+  m.setLevel(shogun::Voice::Sd, 1);
+  m.setSolo(static_cast<int>(shogun::Voice::Sd));
+  m.trigger(shogun::Voice::Sd);
+  bool silent = true;
+  for (int n = 0; n < 200; ++n) {
+    m.process(in, f);
+    if (!audioSilent(f)) silent = false;
+  }
+  expect(silent, t, "a muted solo is silent", f.mainL, 0.0);
+}
+
 void testShuffleSurvivesOddLength() {
   const char* t = "testShuffleSurvivesOddLength";
   // Track length 3, every step on, shuffle 15: the delay is period / 3 = 2,000 samples on odd clock steps.
@@ -1290,6 +1341,7 @@ int main() {
   testBd2FullHolds();
   testTomFullEnds();
   testSnareBendAtPitchZero();
+  testSoloMutesOtherVoices();
   if (gFails != 0) {
     std::printf("%d failed\n", gFails);
     return 1;

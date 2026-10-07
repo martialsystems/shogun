@@ -117,6 +117,8 @@ void Engine::setLevel(Voice voice, double level) {
 
 void Engine::setMaster(double master) { master_ = master; }
 
+void Engine::setSolo(int voice) { solo_ = (voice >= 0 && voice < kVoiceCount) ? voice : -1; }
+
 void Engine::setPairPatched(Pair pair, bool patched) {
   const int i = static_cast<int>(pair);
   if (i < 0 || i >= static_cast<int>(Pair::Count)) return;
@@ -751,23 +753,30 @@ void Engine::renderAll() {
 
 void Engine::mix(Frame& out) const {
   out = Frame{};
-  const double bd1 = voice_[static_cast<int>(Voice::Bd1)].mono * level_[static_cast<int>(Voice::Bd1)];
-  const double bd2 = voice_[static_cast<int>(Voice::Bd2)].mono * level_[static_cast<int>(Voice::Bd2)];
-  const double sd = voice_[static_cast<int>(Voice::Sd)].mono * level_[static_cast<int>(Voice::Sd)];
-  const double rs = voice_[static_cast<int>(Voice::Rs)].mono * level_[static_cast<int>(Voice::Rs)];
-  const double cy = voice_[static_cast<int>(Voice::Cy)].mono * level_[static_cast<int>(Voice::Cy)];
-  const double oh = voice_[static_cast<int>(Voice::Oh)].mono * level_[static_cast<int>(Voice::Oh)];
-  const double hh = voice_[static_cast<int>(Voice::Hh)].mono * level_[static_cast<int>(Voice::Hh)];
-  const double cl = voice_[static_cast<int>(Voice::Cl)].mono * level_[static_cast<int>(Voice::Cl)];
-  const double cpL = voice_[static_cast<int>(Voice::Cp)].left * level_[static_cast<int>(Voice::Cp)];
-  const double cpR = voice_[static_cast<int>(Voice::Cp)].right * level_[static_cast<int>(Voice::Cp)];
-  const double ltc = voice_[static_cast<int>(Voice::Ltc)].mono * level_[static_cast<int>(Voice::Ltc)];
-  const double mtc = voice_[static_cast<int>(Voice::Mtc)].mono * level_[static_cast<int>(Voice::Mtc)];
-  const double htc = voice_[static_cast<int>(Voice::Htc)].mono * level_[static_cast<int>(Voice::Htc)];
-  const double cb = voice_[static_cast<int>(Voice::Cb)].mono * level_[static_cast<int>(Voice::Cb)];
-  const double ma = voice_[static_cast<int>(Voice::Ma)].mono * level_[static_cast<int>(Voice::Ma)];
-  const double lead = voice_[static_cast<int>(Voice::Lead)].mono * level_[static_cast<int>(Voice::Lead)];
-  const double bass = voice_[static_cast<int>(Voice::Bass)].mono * level_[static_cast<int>(Voice::Bass)];
+  // Solo: only the soloed voice reaches the pairs and the main, and only if its track is not muted. Every voice
+  // still renders, so the others keep advancing and come back where they are when solo is off.
+  double lv[kVoiceCount];
+  for (int v = 0; v < kVoiceCount; ++v) {
+    const bool heard = solo_ < 0 || (v == solo_ && !pattern_.track[v].mute);
+    lv[v] = heard ? level_[v] : 0.0;
+  }
+  const double bd1 = voice_[static_cast<int>(Voice::Bd1)].mono * lv[static_cast<int>(Voice::Bd1)];
+  const double bd2 = voice_[static_cast<int>(Voice::Bd2)].mono * lv[static_cast<int>(Voice::Bd2)];
+  const double sd = voice_[static_cast<int>(Voice::Sd)].mono * lv[static_cast<int>(Voice::Sd)];
+  const double rs = voice_[static_cast<int>(Voice::Rs)].mono * lv[static_cast<int>(Voice::Rs)];
+  const double cy = voice_[static_cast<int>(Voice::Cy)].mono * lv[static_cast<int>(Voice::Cy)];
+  const double oh = voice_[static_cast<int>(Voice::Oh)].mono * lv[static_cast<int>(Voice::Oh)];
+  const double hh = voice_[static_cast<int>(Voice::Hh)].mono * lv[static_cast<int>(Voice::Hh)];
+  const double cl = voice_[static_cast<int>(Voice::Cl)].mono * lv[static_cast<int>(Voice::Cl)];
+  const double cpL = voice_[static_cast<int>(Voice::Cp)].left * lv[static_cast<int>(Voice::Cp)];
+  const double cpR = voice_[static_cast<int>(Voice::Cp)].right * lv[static_cast<int>(Voice::Cp)];
+  const double ltc = voice_[static_cast<int>(Voice::Ltc)].mono * lv[static_cast<int>(Voice::Ltc)];
+  const double mtc = voice_[static_cast<int>(Voice::Mtc)].mono * lv[static_cast<int>(Voice::Mtc)];
+  const double htc = voice_[static_cast<int>(Voice::Htc)].mono * lv[static_cast<int>(Voice::Htc)];
+  const double cb = voice_[static_cast<int>(Voice::Cb)].mono * lv[static_cast<int>(Voice::Cb)];
+  const double ma = voice_[static_cast<int>(Voice::Ma)].mono * lv[static_cast<int>(Voice::Ma)];
+  const double lead = voice_[static_cast<int>(Voice::Lead)].mono * lv[static_cast<int>(Voice::Lead)];
+  const double bass = voice_[static_cast<int>(Voice::Bass)].mono * lv[static_cast<int>(Voice::Bass)];
 
   addHardLeft(bd1, out.bdL, out.mainL);
   addHardRight(bd2, out.bdR, out.mainR);
