@@ -165,15 +165,44 @@ offsets = 0, gap, 2*gap, ... while the list length is hits
 
 Index 0 is samples 0 and 180. Index 15 is 0, 720, 1,440, 2,160, and 2,880. Each offset fires the voice again. A new fire restarts that voice's envelopes. Offsets may cross into the next step.
 
+## Wave
+
+BD1, BD2, LTC, MTC, and HTC each have a Wave knob. Hats, clap, cymbal, and maracas do not. Wave is the Serge middle-section folder: six identical cells in series, ported from martialsystems/serge_middle (the cell, its Lambert W solver, and its drive peak table), not a second waveshaper.
+
+Each cell, for v not 0, with VT = 0.02585, Is = 2.52e-9, eta = 1.68, R = 33,000:
+
+```
+z     = (Is * R) / (eta * VT) * exp(|v| / (eta * VT))
+v_out = sign(v) * (|v| - 2 * eta * VT * W(z))         # v_out(0) = 0
+C6(v) = C(C(C(C(C(C(v))))))
+```
+
+W is the principal Lambert W, solved by Halley on w + ln(w) - ln(z) = 0 so the exponential is never formed. The residual is under 1e-12 through 6 V and at 48 V.
+
+```
+g(cc)    = 0              at CC 0, the bypass
+g(cc)    = 0.5 + 3.5 * (cc - 1) / 126    CC 1 to 127, 0.5 to 4. STAND-IN taper
+fold(x)  = x                                        if wave_cc = 0
+fold(x)  = (4.379272 * P(1) / P(g)) * C6(5 * g * x)  otherwise
+```
+
+x is the body oscillator, sin(phase), about +/-1, scaled to +/-5 V times g before the cells. P(g) is the serge_middle peak of |C6(v)| for |v| <= 5 g, linear between its 53 knots, so a full-scale x peaks at 1 after the cells at every g and Wave does not change the peak level. Default Wave is CC 32 (0.25), g = 1.361111.
+
+The fold acts on the oscillator, before the body envelope, so the decay law and the 1e-3 end are untouched. On BD1 the Dist clip comes after Wave. The 4x oversampler, the 10 Hz DC block, and the knob smoother of serge_middle are not in this pass. A folded sine is odd, so it has no DC.
+
+Measured on a held body at velocity 1, the share of spectrum energy above 1.5 times the fundamental is under 0.005 at Wave 0, 0.388 at the default, and 0.033 at CC 127. The folds sit in the bottom 5.2 V of the cell's input (fold roots 0.73, 1.55, 2.43, 3.34, 4.27, 5.22 V). Past that each cell is close to an inverter, so at g = 4 most of the 20 V swing passes through and, after the peak is brought back to 1, the folds are a ripple near each zero crossing. The densest setting is the low end of the knob.
+
+The init kit at the default Wave: one BD1 hit peaks at 0.963 against 0.964 at Wave 0, and its RMS over 0.5 s is 0.106 against 0.155 (3.3 dB lower).
+
 ## BD1
 
 ```
-trig --> pitch envelope --> sine body ----+
-      --> transient[s], 4 ms --------------+--> sum --> tanh clip --> gain
-      --> noise --> one-pole lowpass ------+
+trig --> pitch and bend envelopes --> sine --> Wave -+
+      --> click[s], 1 ms ----------------------------+--> sum --> tanh clip --> gain
+      --> noise burst on the body env --> one-pole --+
 ```
 
-The clip is bypassed at Dist 0.
+Density pass, STAND-IN coefficients, not a Vermona capture. The clip is bypassed at Dist 0.
 
 Decay does not reach a steady tone. The body envelope falls to 0 for every knob value.
 
@@ -181,24 +210,32 @@ Decay does not reach a steady tone. The body envelope falls to 0 for every knob 
 f_tune = 35 * (140/35) ^ u(tune)          # 35 Hz to 140 Hz
 depth  = 18 * u(pitch)                    # semitones, 0 to 18
 tau_p  = 0.012 + 0.25 * u(pitch)          # seconds
+tau_bend = max(tau_p, 0.08)               # the step bend's own time, 80 ms floor
 tau_b  = decay_tau(u(decay))             # 8 ms to 720 ms
 s      = min(15, floor(trigger_cc * 16 / 128))
 f_tr   = 160 * (1.35 ^ s)
-tau_tr = 0.004
 fc     = 200 * (8000/200) ^ u(filter)     # 200 Hz to 8,000 Hz
 drive  = 9 * u(dist)                     # 0 at Dist 0, which is the bypass
 
+shape(ph, k) = tanh(k * sin(ph)) / tanh(k)
+
 p_env[n] = exp(-n / (fs * tau_p))
-f[n]     = f_tune * 2 ^ (((depth + bend_st) * p_env[n]) / 12)
-body[n]  = sin(phase[n]) * exp(-n / (fs * tau_b))
-tr[n]    = sin(2 * pi * f_tr * n / fs) * exp(-n / (fs * tau_tr))
-noise    = u(noise_cc) * lowpass(x[n], fc) * exp(-n / (fs * tau_b))
-pre[n]   = body[n] + u(attack) * tr[n] + noise
+b_env[n] = exp(-n / (fs * tau_bend))      # 0 for every n when bend_st = 0
+f[n]     = f_tune * 2 ^ ((depth * p_env[n] + bend_st * b_env[n]) / 12)
+body[n]  = fold(sin(phase[n])) * exp(-n / (fs * tau_b))      # Wave, above
+click[n] = wave_s(n) * (1 - n / 48) ^ 2   for n < 48, else 0
+burst[n] = x[n] * exp(-n / (fs * tau_b)) * exp(-n / (fs * 0.015))
+noise    = u(noise_cc) * lowpass(burst[n], fc)
+pre[n]   = body[n] + u(attack) * click[n] + noise
 y[n]     = pre[n]                                   if dist_cc = 0
 y[n]     = tanh(drive * pre[n]) / tanh(drive)       if dist_cc > 0
 ```
 
-phase advances by `2 * pi * f[n] / fs` after the sample is taken. n is samples since the trigger. bend_st is the step bend in semitones. It decays with p_env, on the same time constant as the Pitch knob. INT step bend is `bend_st = 12 * (2 * u(bend_cc) - 1)`. CC 0 is -12 semitones, CC 127 is +12, and CC 64 is 12 * (128/127 - 1) = 0.094488 semitones. STAND-IN. EXT forces bend_st to 0. The noise rides the body envelope, so the whole voice is silent once the body is under 1e-3. There is no separate noise decay. The printed BD1 example uses bend_st = 0, noise CC 0, and dist CC 0, so y = pre and the noise term is 0. drive = 9u starts at 0.070866 for CC 1, where tanh(drive * pre) / tanh(drive) is within 0.2% of pre, so CC 0 to CC 1 does not jump.
+The click is 1 ms, one of 16 shapes. s mod 4 picks the wave and s sets its rate f_tr: 0 is sin(2 pi f_tr n / fs), 1 is tanh(6 sin(2 pi f_tr n / fs)) / tanh(6), 2 is cos(2 pi f_tr n / fs), a hard tick, and 3 is a saw, 2 * frac(f_tr * n / fs) - 1. STAND-IN.
+
+The noise is a short burst under the body envelope, then the one-pole. The burst is 0 wherever the body is, so the voice is silent once the body is under 1e-3. There is no separate noise decay knob.
+
+phase advances by `2 * pi * f[n] / fs` after the sample is taken. n is samples since the trigger. bend_st is the step bend in semitones. Like the snare, it is its own drop to Tune: its time is the Pitch time, but never under 80 ms while a bend is set. INT step bend is `bend_st = 12 * (2 * u(bend_cc) - 1)`. CC 0 is -12 semitones, CC 127 is +12, and CC 64 is 12 * (128/127 - 1) = 0.094488 semitones. STAND-IN. EXT forces bend_st to 0. The printed BD1 example uses bend_st = 0, noise CC 0, dist CC 0, and the default Wave, CC 32, so y = pre. drive = 9u starts at 0.070866 for CC 1, where tanh(drive * pre) / tanh(drive) is within 0.2% of pre, so CC 0 to CC 1 does not jump.
 
 Example knobs: Attack 64, Decay 80, Pitch 40, Tune 50, Noise 0, Filter 64, Dist 0, Trigger 0.
 
@@ -215,22 +252,22 @@ f_tr      = 160 Hz
 | n | f Hz | y |
 | --- | --- | --- |
 | 0 | 83.814360 | 0.000000 |
-| 10 | 83.751440 | 0.208746 |
-| 48 | 83.514083 | 0.829514 |
-| 480 | 80.998689 | -0.855516 |
-| 2,400 | 72.957296 | -0.446905 |
+| 10 | 83.751440 | 0.055968 |
+| 48 | 83.514083 | 0.040808 |
+| 480 | 80.998689 | -0.482608 |
+| 2,400 | 72.957296 | 0.044642 |
 
-The instantaneous frequency at n = 2,400 is closer to f_tune than the frequency at n = 0. That is the pitch envelope decaying.
+The instantaneous frequency at n = 2,400 is closer to f_tune than the frequency at n = 0. That is the pitch envelope decaying. The small y values are the fold: at n = 48 sin(phase) is about 0.5, which is 3.4 V into the cells, close to a fold root.
 
-Same knobs, Dist 64: drive = 4.535433, and at n = 48, pre = 0.829514 gives y = 0.999151.
+Same knobs, Dist 64: drive = 4.535433, and at n = 48 y = 0.183040.
 
-Same knobs, Attack 127, sample n = 10: Trigger 0 gives s = 0, f_tr = 160, y = 0.306649. Trigger 64 gives s = 8, f_tr = 1,765.184603, y = 0.810392. The attack sample changed because the transient frequency changed.
+Same knobs, Attack 127, sample n = 10: Trigger 0 gives s = 0, a sine click at f_tr = 160, y = 0.120608. Trigger 64 gives s = 8, a sine click at f_tr = 1,765.184603, y = 0.453201. The attack sample changed because the click rate changed.
 
 ## BD2
 
 ```
-trig --> sine body, envelope toward sustain or toward 0 --> out
-      --> octave sine, 5 ms, level = tone ---------------->
+trig --> sine with slow FM --> Wave, envelope toward sustain or toward 0 --> out
+      --> octave sine, 5 ms, level = tone --------------------------------->
 ```
 
 No noise, no filter, no clip, no 16-type transient. The body can hold.
@@ -239,6 +276,8 @@ No noise, no filter, no clip, no 16-type transient. The body can hold.
 f_tune = 45 * (100/45) ^ u(tune)          # 45 Hz to 100 Hz
 f_tr   = 2 * f_tune
 tau_tr = 0.005
+f_m    = 40 * (200/40) ^ u(tone)          # FM rate, 40 Hz to 200 Hz
+i      = 0.12 * f_tune                    # FM depth in Hz, STAND-IN
 
 if decay_cc >= 127:
     sustain = 0.70
@@ -248,23 +287,26 @@ else:
     tau_b   = decay_tau(u(decay))
 
 env[n]  = sustain + (1 - sustain) * exp(-n / (fs * tau_b))
-body[n] = sin(phase[n]) * env[n]
+f[n]    = f_tune * 2 ^ (bend_st * exp(-n / (fs * 0.08)) / 12) + i * sin(2 * pi * f_m * n / fs)
+body[n] = fold(sin(phase[n])) * env[n]      # BD2 Wave
 tr[n]   = sin(2 * pi * f_tr * n / fs) * exp(-n / (fs * tau_tr))
 y[n]    = body[n] + u(tone) * tr[n]
 ```
 
-Pitch bend, when the step has one, uses the BD1 pitch-envelope shape with tau_p = 0.08 s STAND-IN and depth_st = 12 * (2 * u(bend_cc) - 1). The Tune knob is the resting frequency. The example below has no bend.
+fold is the Wave folder on BD2's own knob. The slow FM lets it bark: the pitch swings f_tune by 12% at the Tone rate, and it keeps swinging while Decay 127 holds. Tone sets both the FM rate and the octave transient level.
+
+Pitch bend, when the step has one, uses tau_p = 0.08 s STAND-IN and depth_st = 12 * (2 * u(bend_cc) - 1). The Tune knob is the resting frequency. The example below has no bend.
 
 Hold check, envelope only: Decay 127 at n = 0 is 1.000000, at n = 480 is 0.992593, at n = 96,000 (2 s) is 0.702021, against sustain 0.700000. Decay 0 at n = 96,000 is 0.000000 within 1e-5. Decay 126 at n = 96,000 is 0.056280 and is not a hold. Only CC 127 holds.
 
-Tone example, Tune 60, Tone 100, n = 10, envelopes of the transient only: f_tune = 65.621948 Hz, f_tr = 131.243897 Hz, u(tone) * tr = 0.129116.
+Tone example, Tune 60, Tone 100, n = 10, envelopes of the transient only: f_tune = 65.621948 Hz, f_tr = 131.243897 Hz, u(tone) * tr = 0.129116. f_m = 141.244575 Hz, and f at n = 10 is 67.077722 Hz.
 
 ## SD
 
 ```
-trig --> pitch envelope --> sine tone 1 --+
-                         --> sine tone 2 --+--> blend --> out
-      --> noise envelope ------------------>
+trig --> pitch envelope --> shaped tone 1 --+
+                         --> shaped tone 2 --+--> blend --> out
+      --> noise --> 4-pole low-pass, ducked --> noise envelope -->
 ```
 
 ```
@@ -281,9 +323,11 @@ p_env[n] = exp(-n / (fs * tau_p))
 b_env[n] = exp(-n / (fs * tau_bend))       # 0 for every n when bend_st = 0
 f1[n] = f1 * 2 ^ ((depth * p_env[n] + bend_st * b_env[n]) / 12)
 f2[n] = f2 * 2 ^ ((depth * p_env[n] + bend_st * b_env[n]) / 12)
-t1[n] = sin(phase1) * exp(-n / (fs * tau_tone))
-t2[n] = sin(phase2) * exp(-n / (fs * tau_tone))
-nz[n] = u(snappy) * x[n] * exp(-n / (fs * tau_n))
+fc_n  = 1000 * (12000/1000) ^ u(tone)     # noise low-pass, 1 kHz to 12 kHz
+t1[n] = shape(phase1, 2) * exp(-n / (fs * tau_tone))
+t2[n] = shape(phase2, 2) * exp(-n / (fs * tau_tone))
+lp[n] = ladder(duck[n] * x[n], fc_n)
+nz[n] = u(snappy) * lp[n] * exp(-n / (fs * tau_n))
 y[n]  = (1 - u(tone)) * t1[n] + u(tone) * t2[n] + nz[n]
 ```
 
@@ -297,7 +341,9 @@ tau_tone  = 0.067049 s
 blend     = 0.503937
 ```
 
-At n = 20, t1 = 0.668428, t2 = 0.775136, y = 0.722202. Both tones are in the sum. Tone CC 0 would output t1. Tone CC 127 would output t2.
+shape(ph, k) = tanh(k * sin(ph)) / tanh(k), a sine bent toward square, here at a fixed k = 2, STAND-IN. SD has no Wave knob. The noise goes through a 4-pole low-pass, four one-poles at g = 1 - exp(-2 pi fc_n / fs) with feedback 1.6 from the last pole, output times 2.6 so the pass band is unity. Tone sets its cutoff, so Tone 0 is dark. Resonance can pump: a peak follower on |lp| (instant attack, 10 ms release) ducks the noise input, duck = 1 - 0.25 * min(1, follow). It is a stand-in compressor, not a real one. Snappy is the noise level, on the short decay curve.
+
+At n = 20, t1 = 0.899876, t2 = 0.943686, y = 0.921953. Both tones are in the sum. Tone CC 0 would output t1. Tone CC 127 would output t2.
 
 Step bend on SD is a pitch drop on top of Tune with its own envelope. It is not a deeper Pitch knob, and there is no second oscillator. While bend_st is not 0 its time is the Pitch time, but never under 80 ms, so Pitch 0 with a bend still swoops. bend_st = 0 adds nothing, and the floor does nothing. Tune 70, Pitch 0, bend_st = +12: f1[0] = 466.028122 Hz, and at n = 3,840 (80 ms) f1 = 300.694079 Hz. On the Pitch time alone (10 ms at Pitch 0) it would already be 233.068249 Hz, the same as Tune within 0.06 Hz. Pitch 127 and bend_st = +12: tau_bend is tau_p = 0.13 s, and at n = 6,240 f1 = 404.878529 Hz.
 
@@ -318,48 +364,42 @@ Tune 40: f = 516.298233 Hz. At n = 8, y = 0.507608.
 ## CY
 
 ```
-trig --> metallic stack A --+
-      --> metallic stack B --+--> blend --> decay --> out
-      --> noise, fixed mix 0.15 -->
+trig --> six squares, inharmonic --+--> mix --> band-pass --> decay --> out
+      --> noise ------------------+
 ```
 
-Two stacks. Each partial is a sine plus its third harmonic when 3f is under the Nyquist rate, which is the first two terms of a square. Ratios are STAND-IN.
+The metal is six band-limited squares (PolyBLEP) at inharmonic ratios, averaged. No sample. STAND-IN ratios, mix, band, and makeup:
 
 ```
-ratios_a = 1.00, 1.52, 1.87, 2.41
-ratios_b = 1.00, 1.34, 1.71, 2.05
-f0  = 180 * (900/180) ^ u(tune)            # 180 Hz to 900 Hz
-tau = decay_tau(u(decay))
+ratios = 1, 1.4471, 1.6170, 1.9265, 2.5028, 2.6637
+f0     = 180 * (900/180) ^ u(tune)          # 180 Hz to 900 Hz
+mix    = 0.1 + 0.8 * u(tone)                # noise share, metal against noise
+tau    = decay_tau(u(decay))
+
+metal[n] = mean over r of square(f0 * r, n)
+y[n]     = 2.0 * bandpass((1 - mix) * metal[n] + mix * x[n], 5,500 Hz, Q 0.8) * exp(-n / (fs * tau))
 ```
 
-For each ratio r, one partial is sin(2 * pi * f0 * r * n / fs). When 3 * f0 * r is under the Nyquist rate, add one third of the sine at 3 * f0 * r. Divide that partial by its weight: 1, or 1 + 1/3 when the third is present. The stack sample is the mean of the four partials. Then:
+Each square starts at phase 0 on the trigger. The band-pass is the RBJ constant 0 dB peak form. Tune moves the stack, not the noise level. Tone is the mix.
 
-```
-y[n] = exp(-n / (fs * tau)) * (
-         (1 - u(tone)) * stack_a[n]
-       + u(tone) * stack_b[n]
-       + 0.15 * x[n] )
-```
-
-The noise mix is fixed at 0.15 for every Tune, STAND-IN. The numeric row below uses the stacks only, noise omitted, so the row does not depend on generator position.
-
-Tune 64, Tone 70, Decay 90: f0 = 405.050673 Hz, tau = 0.194109 s, blend = 0.551181. At n = 30, stack A = 0.187710, stack B = 0.382957, y = 0.294377.
+Tune 64: f0 = 405.050673 Hz. Tone 70: mix = 0.540945.
 
 ## OH and HH
 
 One colour, two decays, one choke.
 
 ```
-f_c    = 250 * (4000/250) ^ u(hh_tune)     # 250 Hz to 4,000 Hz, CC 73
+f0     = 250 * (1000/250) ^ u(hh_tune)     # 250 Hz to 1,000 Hz, CC 73
 tau_oh = decay_tau(u(oh_decay))
 tau_hh = decay_tau(u(hh_decay))
+y[n]   = 2.5 * bandpass(0.65 * metal[n] + 0.35 * x[n], 8,000 Hz, Q 1.0) * exp(-n / (fs * tau))
 ```
 
-Each hat is a metallic stack at f_c with ratios 1.00, 1.47, 1.80, 2.33, built like a CY stack, plus noise at mix 0.25 * x[n], times its own exp decay. STAND-IN ratios.
+Each hat is the CY six-square metal at f0, mixed with noise at a fixed 0.35 share, through a band-pass at 8 kHz, times its own exp decay. STAND-IN mix, band, and makeup. Tune moves the stack, not the noise level. No hat filter knob.
 
 A closed-hat trigger sets the open-hat envelope to 0 on that sample, and the open hat stays at 0 until the next open trigger. It does not shorten the closed hat.
 
-Example colour, HH Tune 60: f_c = 926.436359 Hz. OH Decay 100: tau_oh = 0.276649 s. HH Decay 40: tau_hh = 0.033008 s. An open hat that has run 200 samples has envelope 0.985052. On the closed trigger that envelope is 0.
+Example colour, HH Tune 60: f0 = 481.257820 Hz. OH Decay 100: tau_oh = 0.276649 s. HH Decay 40: tau_hh = 0.033008 s. An open hat that has run 200 samples has envelope 0.985052. On the closed trigger that envelope is 0.
 
 ## CL
 
@@ -374,45 +414,44 @@ Tune 50, Decay 30: f = 884.244363 Hz, tau = 0.023160 s. At n = 12, y = 0.972955.
 ## CP
 
 ```
-trig --> N short sines, 11 ms apart, panned --> stereo
-      --> filtered noise tail -----------------> both channels
+trig --> noise --> high-pass --> N bursts, 3 ms, 10 to 12 ms apart, panned --> stereo
+                            --> one-pole low-pass, delayed tail --------------> both channels
 ```
 
 ```
 s      = min(15, floor(trigger_cc * 16 / 128))     # CC 77, ASSUMED type
 count  = 1 + floor(data_cc * 8 / 128)              # 1 to 8, ASSUMED, no CC
-gap    = round(0.011 * fs)                         # 528 samples, 11 ms
-f_tr   = 700 * (1.28 ^ s)
-tau_tr = 0.003
+f_hp   = 300 * (1.2 ^ s)                           # 300 Hz to 4,622 Hz
+gaps   = 480, 576, 528, 504, 552, 576, 480         # samples, 10 ms to 12 ms
+tau_tr = 0.003                                     # fixed, Decay never stretches a burst
 fc     = 400 * (6000/400) ^ u(filter)
 tau    = decay_tau(u(decay))
+
+hp[n]      = x[n] - lowpass(x[n], f_hp)
+burst_i[n] = hp[n] * exp(-n_b / (fs * tau_tr))     # n_b = n - start_i, 0 before the start
+tail[n]    = lowpass(hp[n], fc) * exp(-(n - t_0) / (fs * tau)) for n >= t_0, else 0
+t_0        = start_(count-1) + 528
 ```
 
-Burst i, i from 0 to count-1, starts at sample i * gap. Its own n_b = n - i * gap, and it is 0 when n_b < 0.
-
-```
-burst_i[n] = sin(2 * pi * f_tr * n_b / fs) * exp(-n_b / (fs * tau_tr))
-```
-
-Pan of burst i, count > 1: `p = -1 + 2 * i / (count - 1)`. One burst uses p = 0. The tail is noise through the one-pole at fc, times exp(-n / (fs * tau)), times 0.707107 on each channel, the centre of the pan law. The tail is the manual's reverb tail rendered as a noise decay. It is not a room.
+Burst i starts at the sum of the first i gaps: 0, 480, 1,056, 1,584, 2,088, 2,640, 3,216, 3,696. Each burst is the same high-passed noise under its own fixed 3 ms decay. Pan of burst i, count > 1: `p = -1 + 2 * i / (count - 1)`. One burst uses p = 0. The tail is one filtered delay: the same high-passed noise through the one-pole at fc, opening one gap (11 ms) after the last burst starts and decaying on the drum law, times 0.707107 on each channel. The one-pole runs from the hit, so it is settled when the tail opens. STAND-IN.
 
 ```
 yL[n] = u(attack) * sum_i burst_i[n] * gL(p_i) + tail[n] * 0.707107
 yR[n] = u(attack) * sum_i burst_i[n] * gR(p_i) + tail[n] * 0.707107
 ```
 
-Data CC 48 gives count 4. gap is 528. With Trigger 0, f_tr = 700 Hz. The transient at 5 samples after each burst start, before Attack scaling, is 0.427195. Burst starts are samples 0, 528, 1,056, and 1,584.
+Data CC 48 gives count 4. At any one sample, burst i over burst i - 1 is exp(gap / 144): the bursts share one noise and one 3 ms curve.
 
 ## LTC, MTC, HTC
 
 Each voice:
 
 ```
-trig --> sine body, BD2-style hold --> out
+trig --> sine with slow FM --> Wave, ring --> out
       --> noise, if that voice's switch is on, shared level
 ```
 
-Tom mode is one sine at f_tune. Conga mode adds a second sine at 2.30 * f_tune, gain 0.35. ASSUMED. The manuals say the switch changes tom and conga and do not describe the waveform.
+Tom mode is the sine through that tom's own Wave folder, with the BD2 FM term at a quieter depth and a fixed rate: f[n] = f_tune * bend + 0.04 * f_tune * sin(2 * pi * 50 * n / fs). STAND-IN. Conga mode adds a second sine at 2.30 * f_tune, gain 0.35. ASSUMED. The manuals say the switch changes tom and conga and do not describe the waveform.
 
 ```
 LTC f = 70 * (180/70) ^ u(tune)
@@ -437,7 +476,7 @@ There is no choke jack. The next hit replaces the ring, as for every drum voice.
 
 Noise, when the voice switch is on (CC at or above 64): `u(tom_noise) * x[n] * exp(-n / (fs * 0.12))`. The 0.12 s noise decay is STAND-IN and shared. tom_noise is CC 84.
 
-LTC Tune 40: f = 94.251191 Hz. Decay 127 at n = 96,000: envelope 0.551484, sustain 0.550000. At n = 192,000 (4 s) it is 0.550005. 50 ms into the release, at n = 194,400, it is 0.202335. It is under 1e-3 at n = 207,144 (4.32 s), and the tom ends there. TOM_NOISE 33: level 0.259843. On the first noise draw that is -0.136958, and on the TO/CO left channel at p = -0.7 it is -0.133176.
+LTC Tune 40: f_tune = 94.251191 Hz (f[0], before the FM moves). Decay 127 at n = 96,000: envelope 0.551484, sustain 0.550000. At n = 192,000 (4 s) it is 0.550005. 50 ms into the release, at n = 194,400, it is 0.202335. It is under 1e-3 at n = 207,144 (4.32 s), and the tom ends there. TOM_NOISE 33: level 0.259843. On the first noise draw that is -0.136958, and on the TO/CO left channel at p = -0.7 it is -0.133176.
 
 Bend uses the BD2 bend paragraph.
 
@@ -531,7 +570,7 @@ Knob CC is round(u * 127).
 | CL, MA, CB | default | 0 |
 | Lead, bass | default, no steps | 1 |
 
-Every knob not listed keeps its Knobs default. Master 0.7, 120 BPM, 16ths, INT.
+Every knob not listed keeps its Knobs default, including Wave at CC 32 on BD1, BD2, and the toms. Master 0.7, 120 BPM, 16ths, INT.
 
 Pattern "909", length 16, every track length 16, accent 2 on every step:
 

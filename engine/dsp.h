@@ -127,6 +127,62 @@ inline double sawSample(double phase, double freq) {
   return acc / weight;
 }
 
+// Shaped tone: a sine bent toward square, then soft-clipped. tanh(k sin) / tanh(k), so the peak stays 1 at any k.
+// The snare tones and the BD1 square click use it at a fixed k. The body voices use the Wave folder instead. STAND-IN.
+constexpr double kSdWave = 2.0;
+inline double shapedSine(double phase, double k) { return std::tanh(k * std::sin(phase)) / std::tanh(k); }
+
+// Slow FM on BD2 and the toms: f = f0 + i * sin(2 pi fm t). STAND-IN depths, in units of f0.
+constexpr double kBd2FmIndex = 0.12;
+constexpr double kTomFmIndex = 0.04;
+constexpr double kTomFmHz = 50.0;
+
+inline double frac(double x) { return x - std::floor(x); }
+
+// PolyBLEP correction for a step at phase 0, t and dt in cycles.
+inline double polyBlep(double t, double dt) {
+  if (t < dt) {
+    const double x = t / dt;
+    return x + x - x * x - 1.0;
+  }
+  if (t > 1.0 - dt) {
+    const double x = (t - 1.0) / dt;
+    return x * x + x + x + 1.0;
+  }
+  return 0.0;
+}
+
+// Band-limited square, +1 then -1, phase from the sample count so it starts at 0 on the trigger.
+inline double blepSquare(double freq, int n) {
+  const double dt = freq / kFs;
+  const double t = frac(dt * static_cast<double>(n));
+  double y = t < 0.5 ? 1.0 : -1.0;
+  y += polyBlep(t, dt);
+  y -= polyBlep(frac(t + 0.5), dt);
+  return y;
+}
+
+// Six squares at inharmonic ratios, the metal of the hats and cymbal. STAND-IN ratios.
+constexpr double kMetalRatios[6] = {1.0, 1.4471, 1.6170, 1.9265, 2.5028, 2.6637};
+inline double metalSquares(double f0, int n) {
+  double acc = 0.0;
+  for (int i = 0; i < 6; ++i) acc += blepSquare(f0 * kMetalRatios[i], n);
+  return acc / 6.0;
+}
+
+// RBJ band-pass, 0 dB peak. z holds x1, x2, y1, y2.
+inline double bandPass(double z[4], double x, double fc, double q) {
+  const double w0 = 2.0 * kPi * fc / kFs;
+  const double alpha = std::sin(w0) / (2.0 * q);
+  const double a0 = 1.0 + alpha;
+  const double y = (alpha * x - alpha * z[1] + 2.0 * std::cos(w0) * z[2] - (1.0 - alpha) * z[3]) / a0;
+  z[1] = z[0];
+  z[0] = x;
+  z[3] = z[2];
+  z[2] = y;
+  return y;
+}
+
 inline double midiHz(int note) {
   return 440.0 * std::pow(2.0, (static_cast<double>(note) - 69.0) / 12.0);
 }

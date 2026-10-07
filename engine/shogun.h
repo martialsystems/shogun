@@ -72,9 +72,11 @@ struct Knobs {
   int bd1Filter = 64;
   int bd1Dist = 0;
   int bd1Trigger = 0;
+  int bd1Wave = 32;  // Serge folder on the body, 0 is bypass, default 0.25
   int bd2Decay = 0;
   int bd2Tune = 0;
   int bd2Tone = 0;
+  int bd2Wave = 32;
   int sdTune = 0;
   int sdDTune = 64;
   int sdSnappy = 0;
@@ -99,15 +101,18 @@ struct Knobs {
   int htcTune = 0;
   int htcDecay = 0;
   int htcNoise = 0;  // >= 64 enables this voice's noise
-  int htcMode = 0;   // >= 64 conga
+  int htcMode = 0;
+  int htcWave = 32;   // >= 64 conga
   int mtcTune = 0;
   int mtcDecay = 0;
   int mtcNoise = 0;
   int mtcMode = 0;
+  int mtcWave = 32;
   int ltcTune = 0;
   int ltcDecay = 0;
   int ltcNoise = 0;
   int ltcMode = 0;
+  int ltcWave = 32;
   int tomNoise = 0;  // shared level, CC 84
   int cbTune = 0;
   int cbDecay = 0;
@@ -211,6 +216,9 @@ class Engine {
   double sdF2() const { return sdF2_; }
   double sdHz() const { return sdHz_; }   // tone 1 after the Pitch and bend envelopes
   double sdT1() const { return sdT1_; }
+  double sdNoise() const { return sdNoise_; }  // ladder output before Snappy and its envelope
+  double hhStack() const { return hhStack_; }  // the six-square metal of the last hat rendered, before noise and band-pass
+  double bd2Hz() const { return bd2Hz_; }
   double sdT2() const { return sdT2_; }
   double ohEnv() const { return ohEnv_; }
   double ohSample() const { return ohSample_; }
@@ -242,6 +250,8 @@ class Engine {
     double phase = 0;
     double phase2 = 0;
     double lp = 0;
+    double z[4]{};      // filter state: SD ladder poles, hat and cymbal band-pass, clap high-pass
+    double follow = 0;  // SD ring follower for the duck
     double gain = 1;
     double bend = 0;
     double env = 0;
@@ -298,6 +308,7 @@ class Engine {
   void renderMa(VoiceState& st);
   void renderLeadBass(VoiceState& st, bool bass);
   void mix(Frame& out) const;
+  static double ladder4(VoiceState& st, double x, double fc);
 
   static int clampLength(int length);
 
@@ -345,6 +356,9 @@ class Engine {
   double sdF2_ = 0;
   double sdT1_ = 0;
   double sdT2_ = 0;
+  double sdNoise_ = 0;
+  double hhStack_ = 0;
+  double bd2Hz_ = 0;
   double ohEnv_ = 0;
   double ohSample_ = 0;
   double hhEnv_ = 0;
