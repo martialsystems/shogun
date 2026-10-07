@@ -47,5 +47,5 @@ function scrText(){if(DD.naming=="PAT")return pad3(patList(bankView).length+1)+"
   const p=patList(curPat.b)[curPat.i];return p?pad3(curPat.i+1)+" "+p.n.toUpperCase()+(dirty?"*":""):""}
 const kitText=()=>DD.naming=="KIT"?DD.name+"_":DD.open=="KIT"?"FIND "+DD.query+"_":curKit.n.toUpperCase()+(curKit.dirty?"*":"");
 const trkText=()=>DD.open=="TRK"?("FIND "+DD.query+"_").slice(-8):VK[sel].t;
-function selTrack(k){sel=k;if(edit>=tracks[sel].len)edit=0;loadKnobs();if(view=="voice")showZones();drawAll();info.textContent=describe(CTRL.find(c=>c.voice==k))}
+function selTrack(k){sel=k;if(edit>=tracks[sel].len)edit=0;loadKnobs();drawAll();info.textContent=describe(CTRL.find(c=>c.voice==k))}
 function stepTrack(d){const i=VOICES.findIndex(v=>v.k==sel);selTrack(VOICES[(i+d+VOICES.length)%VOICES.length].k)}

@@ -35,7 +35,7 @@ p.legal{font-size:.8rem;margin-top:16px}
 </style>
 <div class="wrap">
 <div class="bar">
-  <span class="tabs" id="tabs" role="tablist" aria-label="Rack view"><button class="tab on" role="tab" aria-selected="true" data-v="rack">RACK</button><button class="tab" role="tab" aria-selected="false" data-v="lfo">LFO</button><button class="tab" role="tab" aria-selected="false" data-v="voice">VOICE</button></span>
+  <span class="tabs" id="tabs" role="tablist" aria-label="Rack view"><button class="tab on" role="tab" aria-selected="true" data-v="rack">RACK</button><button class="tab" role="tab" aria-selected="false" data-v="lfo">LFO</button></span>
   <button class="t" id="go">Start</button>
   <span class="grp"><span>Cable color</span><span id="sws" class="grp"></span></span>
   <button class="t" id="clr">Clear cables</button>
@@ -44,7 +44,7 @@ p.legal{font-size:.8rem;margin-top:16px}
 <div id="info" aria-live="polite">Press START (or Space) to play. Click a voice's name to select its track, then click the step keys. BAY opens the patch bay.</div>
 <div class="sc"><div id="stage"><svg id="sv"><defs id="df"></defs><g id="panel"></g><g id="live"></g><g id="cab" style="filter:drop-shadow(3px 5px 4px rgba(0,0,0,.6))"></g><g id="ring"></g><g id="dd"></g></svg><div id="menu"></div></div></div>
 <p><b>SHOGUN</b> is the drum computer of the Martial Systems Jidai Collection: fourteen drum voices and two note voices, a sequencer of 1 to 32 steps per track, and a patch bay styled like BUSHIDO's and RONIN's. The sound is the SHOGUN engine itself, compiled for the browser. TEST, next to the TRACK screen, plays the selected voice once.
-<b>Tabs:</b> RACK is the instrument: the face, the sequencer and, with BAY, the patch bay. LFO and VOICE replace it under the same top bar. Switching tabs never stops the sound or unplugs a cable. <b>LFO:</b> one tempo-synced LFO for the rack. DIVISION picks 1/1 to 1/32, with dotted and triplet 1/8 and 1/16; the rate is BPM / 60 × steps per beat, so 1/16 at 120 BPM is 8 Hz. It starts again from PHASE when the transport starts. SHAPE is sine, triangle, saw, square or sample and hold (a new random level each cycle). AMOUNT scales the output: at full it swings 0 to 5 V around 2.5 V, and at 0 it is 0 V. The scope draws two cycles of the shape as set; the red dot is where the LFO is now. Its only output is the LFO OUT jack in the bay: patch it with a cable. <b>VOICE:</b> pick a voice and get large knobs for it alone, the same controls as on the face, plus BD 1 and CLAP TRANSIENT.
+<b>Tabs:</b> RACK is the instrument: the face, the sequencer and, with BAY, the patch bay. LFO replaces it under the same top bar. Switching tabs never stops the sound or unplugs a cable. <b>LFO:</b> one tempo-synced LFO for the rack. DIVISION picks 1/1 to 1/32, with dotted and triplet 1/8 and 1/16; the rate is BPM / 60 × steps per beat, so 1/16 at 120 BPM is 8 Hz. It starts again from PHASE when the transport starts. SHAPE is sine, triangle, saw, square or sample and hold (a new random level each cycle). AMOUNT scales the output: at full it swings 0 to 5 V around 2.5 V, and at 0 it is 0 V. The scope draws two cycles of the shape as set; the red dot is where the LFO is now. Its only output is the LFO OUT jack in the bay: patch it with a cable.
 <b>One editor:</b> the top bar, the knobs and the sequencer are always there. The <b>BAY</b> key opens the patch bay under the sequencer and the panel grows to hold it. Closing the bay shrinks the panel back and hides the jacks and cables; it does not unplug anything, and a patched cable keeps working.
 <b>Voices:</b> every voice is on the face with its name, its lamp and two rows of knobs. Click a voice's name to select its track (or use the TRACK screen); the lamp shows which track is selected. The open and closed hat share one TUNE. WAVE on BD 1, BD 2 and the toms is the folder on the body (0 is bypass). The toms each have a NOISE switch and a TOM/CGA switch; TOMS NOISE sets the noise level for all three.
 <b>Sequencer:</b> in TRACK, LENGTH sets the selected track from 1 to 32 steps, SHUFFLE delays its odd steps (16 settings), SHIFT moves the whole track later (up to 30 ms) and MUTE silences it. The 16 step keys are a page: 1-16 and 17-32 switch pages, and steps past the track's length are dimmed. Click a step key to turn it on or off. The ACC lamp under a step is its accent: dim green soft, green medium, red loud; click it to change. CLEAR empties the selected track. The last step key you clicked is the edit step (EDIT): FLAM picks one of 16 flams or none, BEND sets a pitch bend on BD 1, BD 2, the snare and the toms, and NOTE and TIE set the note and the tie on LEAD and BASS. The line under a step shows its flam and bend, or its note.
@@ -83,9 +83,9 @@ function shogunHost(bytes,rate,post){
 // cable hang below the sequencer, and the panel grows to hold them.
 const NS="http://www.w3.org/2000/svg",W=1600,M=14,AV=W-2*M,FR_T=68,BAND=164,INK="#f4f3ee",GRN="#4aa862",JR=9;
 // BAY off: the panel ends under the sequencer (H_SEQ). BAY on: the bay (two jack rows) and its hang are added below it and
-// the panel grows to H. The LFO and VOICE tabs replace the face with their own page (H_LFO, H_VOICE) under the same top bar.
+// the panel grows to H. The LFO tab replaces the face with its own page (H_LFO) under the same top bar.
 const KB_T=FR_T,KB_B=KB_T+2*BAND,SEQ_H=146,SEQ_B=KB_B+SEQ_H,BAY_T=SEQ_B,BAY_B=BAY_T+92,BAY2_B=BAY_B+78,FR_B=BAY2_B+110,H=FR_B+14,H_SEQ=SEQ_B+14;
-const H_LFO=FR_T+262+14,H_VOICE=FR_T+262+14;
+const H_LFO=FR_T+262+14;
 let VH=H_SEQ;   // the height in view now
 const $=id=>document.getElementById(id),sv=$("sv"),cab=$("cab"),ring=$("ring"),info=$("info"),menu=$("menu"),stage=$("stage");
 sv.setAttribute("viewBox",`0 0 ${W} ${VH}`);
@@ -100,8 +100,7 @@ const VI=["BD1","BD2","SD","RS","CY","OH","HH","CL","CP","LTC","MTC","HTC","CB",
 // ================= the instrument =================
 // knobs: [label, engine param, positions, id] (positions = a stepped control; "tog" = an OFF/ON switch; id defaults to the
 // label and keeps the names saved patterns use). LEVEL is the linear level. Only knobs the engine has are drawn.
-// WAVE is the folder on the body (0 is bypass). hide: engine knobs with no knob on this face (a kit still sets them; the
-// VOICE tab has a knob for each).
+// WAVE is the folder on the body (0 is bypass). hide: engine knobs a kit still sets that have no knob on this face.
 const VOICES=[
  {k:"BD1",t:"BD 1",b:0,knobs:[["TUNE","bd1Tune"],["BEND","bd1Pitch",0,"PITCH"],["DECAY","bd1Decay"],["ATTACK","bd1Attack"],["DIST","bd1Dist"],["NOISE","bd1Noise"],["FILTER","bd1Filter"],["WAVE","bd1Wave"],["LEVEL"]],hide:[["SOUND","bd1Trigger",16]]},
  {k:"BD2",t:"BD 2",b:0,knobs:[["TUNE","bd2Tune"],["DECAY","bd2Decay"],["TONE","bd2Tone"],["WAVE","bd2Wave"],["LEVEL"]]},
@@ -120,10 +119,10 @@ const VOICES=[
  {k:"LEAD",t:"LEAD",b:1,note:1,knobs:[["TONE","leadTone"],["LEVEL"]]},
  {k:"BASS",t:"BASS",b:1,note:1,knobs:[["TONE","bassTone"],["LEVEL"]]}];
 const VK=Object.fromEntries(VOICES.map(v=>[v.k,v])),NOTEK={LEAD:1,BASS:1},BENDK={BD1:1,BD2:1,SD:1,LTC:1,MTC:1,HTC:1};
-const P={},DEF={},CTRL=[],JACKS={},LIVE={},MAP={},ALIAS={};   // panel values 0..1, defaults, hit regions, jacks, live svg groups, panel id -> engine target, alias -> panel id
+const P={},DEF={},CTRL=[],JACKS={},LIVE={},MAP={};   // panel values 0..1, defaults, hit regions, jacks, live svg groups, panel id -> engine target
 // Static art and live parts go to a zone, shown or hidden as a whole: top (the top bar), face, seq, baykey (the RACK tab),
-// bay (the RACK tab with BAY on), lfo, voice, and v_<voice> (the VOICE tab with that voice picked). Z is the zone being drawn.
-const ART={},LZ={};let Z,S,AL=false;   // AL: knobs and switches being drawn are aliases of face controls (the VOICE tab)
+// bay (the RACK tab with BAY on) and lfo (the LFO tab). Z is the zone being drawn.
+const ART={},LZ={};let Z,S;
 const zone=z=>{Z=z;S=ART[z]=ART[z]||[]};zone("face");
 const ctl=o=>{o.zone=Z;CTRL.push(o);return o};
 const T=(x,y,s,z=11,anchor="middle",fill=INK,ls=.5)=>S.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${z}" font-weight="700" letter-spacing="${ls}" text-anchor="${anchor}" fill="${fill}">${s}</text>`);
@@ -133,9 +132,7 @@ const rule=(x1,y1,x2,y2,w=1.6)=>S.push(`<line x1="${x1.toFixed(1)}" y1="${y1}" x
 function ticks(cx,cy,r,n=11){for(let i=0;i<n;i++){const a=(-135+270*i/(n-1)-90)*Math.PI/180,l=i==0||i==n-1||i==(n-1)/2?4:2.5;
   S.push(`<line x1="${(cx+(r+4)*Math.cos(a)).toFixed(1)}" y1="${(cy+(r+4)*Math.sin(a)).toFixed(1)}" x2="${(cx+(r+4+l)*Math.cos(a)).toFixed(1)}" y2="${(cy+(r+4+l)*Math.sin(a)).toFixed(1)}" stroke="${INK}" stroke-width="1.1"/>`)}}
 const STEPS={};   // stepped controls: id -> positions
-// An alias (AL) draws a second knob for the same panel value: it sets nothing, and its hit region moves the real control.
-function knob(id,label,cx,cy,def,opt={}){const r=opt.r||14,lid=AL?id+"@"+Z:id;if(AL)ALIAS[lid]=id;else{P[id]=DEF[id]=def;if(opt.n)STEPS[id]=opt.n}
-  const n=opt.n||STEPS[id];ticks(cx,cy,r,n&&n<=16?n:11);live(lid);LIVE[lid]={x:cx,y:cy,r};
+function knob(id,label,cx,cy,def,opt={}){const r=opt.r||14;P[id]=DEF[id]=def;if(opt.n)STEPS[id]=opt.n;ticks(cx,cy,r,opt.n&&opt.n<=16?opt.n:11);live(id);LIVE[id]={x:cx,y:cy,r};
   if(opt.marks)opt.marks.forEach((m,i)=>{const a=(-135+270*i/(opt.marks.length-1)-90)*Math.PI/180;T(cx+(r+16)*Math.cos(a),cy+(r+16)*Math.sin(a)+3,m,8.5)});
   if(label)T(cx,cy+r+(opt.ly||19),label,opt.lz||10);ctl({id,kind:"knob",x:cx,y:cy,r:r+8,name:opt.name||id,fmt:opt.fmt})}
 function key(id,cx,cy,label,lamp){S.push(`<rect x="${cx-17}" y="${cy-17}" width="34" height="34" rx="4" fill="#050505" stroke="#262826" stroke-width="1.2"/>`);live(id);LIVE[id]={x:cx,y:cy};
@@ -144,8 +141,8 @@ function ledAt(l,cx,cy,r=4.5){S.push(`<circle cx="${cx}" cy="${cy}" r="${r+2}" f
 // A jack is drawn on the bay page only. Its name under it is part of its hover area (lx, ly).
 function jack(id,label,cx,cy,dir,type,name){S.push(`<circle cx="${cx}" cy="${cy}" r="${JR+1.5}" fill="#000" opacity=".55"/><circle cx="${cx}" cy="${cy}" r="${JR}" fill="url(#js)" stroke="#2a2a2c" stroke-width=".9"/><circle cx="${cx}" cy="${cy}" r="${JR-2.6}" fill="url(#jn)"/><circle cx="${cx}" cy="${cy}" r="${JR-5}" fill="#030303"/>`);
   T(cx,cy+24.5,label,9.5);JACKS["SHOGUN/"+id]={x:cx,y:cy,lx:cx,ly:cy+21,lw:Math.max(14,label.length*3.6),dir,type,name}}
-function toggle(id,cx,cy,marks,def,name){const lid=AL?id+"@"+Z:id;if(AL)ALIAS[lid]=id;else P[id]=DEF[id]=def;S.push(`<rect x="${cx-15}" y="${cy-8}" width="30" height="16" rx="3" fill="#050505" stroke="#262826"/><rect x="${cx-10}" y="${cy-2}" width="20" height="4" rx="2" fill="#000"/><circle cx="${cx}" cy="${cy}" r="5" fill="url(#jn)" stroke="#111" stroke-width=".8"/>`);
-  T(cx-21,cy+4,marks[0],9,"end");T(cx+21,cy+4,marks[1],9,"start");live(lid);LIVE[lid]={x:cx,y:cy};ctl({id,kind:"toggle",x:cx,y:cy,r:18,marks,name:name||id})}
+function toggle(id,cx,cy,marks,def,name){P[id]=DEF[id]=def;S.push(`<rect x="${cx-15}" y="${cy-8}" width="30" height="16" rx="3" fill="#050505" stroke="#262826"/><rect x="${cx-10}" y="${cy-2}" width="20" height="4" rx="2" fill="#000"/><circle cx="${cx}" cy="${cy}" r="5" fill="url(#jn)" stroke="#111" stroke-width=".8"/>`);
+  T(cx-21,cy+4,marks[0],9,"end");T(cx+21,cy+4,marks[1],9,"start");live(id);LIVE[id]={x:cx,y:cy};ctl({id,kind:"toggle",x:cx,y:cy,r:18,marks,name:name||id})}
 const lcdBox=(x,y,w,h)=>S.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="#0a0a0b" stroke="#2a2a2c" stroke-width="1.2"/><rect x="${x+4}" y="${y+4}" width="${w-8}" height="${h-8}" rx="1.5" fill="url(#lcd)"/>`);
 const LCD={};function lcd(id,x,y,w,label,chars){lcdBox(x,y,w,28);LCD[id]={x:x+6,y:y+6,w:w-12,h:16,n:chars};live("LCD:"+id);if(label)T(x+w/2,y+43,label,10)}
 const ccOf=(id,v)=>{const n=STEPS[id];if(!n)return Math.round(v*127);const i=Math.round(v*(n-1));return Math.floor(i*128/n)};   // a stepped control sends the lowest controller value of its position
@@ -279,35 +276,6 @@ let lfoV=0,lfoP=0,lfoT=-1,lfoCyc=0,lfoLastP=0;
  [0,1].forEach(i=>T(sx+34+(sw-62)*(i+.5)/2,sy+sh+15,"CYCLE "+(i+1),9.5,"middle","#9a9a90",.5));
  live("LFO:SCOPE");LIVE["LFO:SCOPE"]={x:sx+34,y:sy+10,w:sw-62,h:sh-20}}
 function lfoShapeAt(i,p,k){if(i==1)return 1-4*Math.abs(p-.5);if(i==2)return 2*p-1;if(i==3)return p<.5?1:-1;if(i==4)return[.55,-.7,.2,-.15,.9][k%5];return Math.sin(2*Math.PI*p)}
-
-// ================= the VOICE tab: pick a device, then a voice; large knobs for that voice only =================
-// Every knob here is the same control as on the face (or a kit-only control the face does not show: BD 1 and CLAP
-// TRANSIENT, the WAVE folders). The face on the RACK tab is unchanged.
-zone("voice");
-const VPX=330,VPW=(W-M-14-VPX)/16;
-{const y0=FR_T;T(M+18,y0+27,"VOICE",14,"start",INK,1.5);T(M+86,y0+27,"PICK A DEVICE, THEN A VOICE · THESE ARE THE SAME CONTROLS AS THE FACE",10,"start","#9a9a90",.4);
- rule(M,y0+40,W-M,y0+40);T(M+18,y0+68,"DEVICE",10.5,"start");lcdBox(M+76,y0+50,130,30);live("VDEV");
- T(VPX-12,y0+68,"VOICE",10.5,"end");live("VSEL");
- VOICES.forEach((v,i)=>ctl({id:"VSEL:"+v.k,kind:"sel",voice:v.k,x:VPX+VPW*(i+.5),y:y0+65,rw:VPW/2-2,rh:15,rect:1}));
- rule(M,y0+96,W-M,y0+96)}
-const VEXTRA={BD1:[["SOUND","TRANSIENT",x=>"transient "+(1+Math.round(x*15))+" of 16"]],CP:[["SOUND","TRANSIENT",x=>"transient "+(1+Math.round(x*15))+" of 16"]]};
-const VCV={BD1:"CV IN · BD1 PITCH adds to TUNE: 5 V is about a fourth up",BD2:"CV IN · BD2 PITCH adds to TUNE: 5 V is about a fourth up",
-  SD:"CV IN · SD PITCH adds to TUNE (5 V is about a fourth up) · SD SNAPPY adds to SNAPPY (5 V is the whole knob)",
-  LTC:"CV IN · TOM PITCH adds to TUNE on all three toms: 5 V is about a fourth up",OH:"CV IN · HAT DECAY adds to DECAY on both hats (5 V is the whole knob, on the same short decay curve)"};
-VCV.MTC=VCV.HTC=VCV.LTC;VCV.HH=VCV.OH;
-AL=true;
-VOICES.forEach(v=>{zone("v_"+v.k);const y0=FR_T,cy=y0+164,items=[];
-  v.knobs.forEach(([lb,p,n,idn])=>{const id=v.k+":"+(idn||lb);if(!p)return;items.push(n=="tog"?{tog:id,lb,marks:["OFF","ON"],name:v.t+" · NOISE"}:{id,lb})});
-  (VEXTRA[v.k]||[]).forEach(([h,lb,fmt])=>items.push({id:v.k+":"+h,lb,fmt,name:v.t+" · "+lb}));
-  if(v.tog){items.push({tog:v.k+":MODE",lb:"TOM / CGA",marks:["TOM","CGA"],name:v.t+" · TOM or CONGA"});items.push({id:"TOMS:NOISE",lb:"NOISE LVL"})}
-  items.push({id:v.k+":LEVEL",lb:"LEVEL"});
-  const sp=Math.min(150,(AV-40)/items.length),x0=W/2-sp*(items.length-1)/2;
-  items.forEach((it,i)=>{const cx=x0+sp*i;
-    if(it.tog){toggle(it.tog,cx,cy,it.marks,0,it.name);T(cx,cy+44,it.lb,11.5);return}
-    const fc=CTRL.find(c=>c.id==it.id&&c.kind=="knob");
-    knob(it.id,it.lb,cx,cy,0,{r:30,lz:11.5,ly:26,n:STEPS[it.id],name:it.name||(fc&&fc.name),fmt:it.fmt||(fc&&fc.fmt)})});
-  T(M+18,y0+252,VCV[v.k]||"No CV input on this voice",10.5,"start","#9a9a90",.3)});
-AL=false;
 
 // ================= panel art =================
 const DEFS='<linearGradient id="pf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#181918"/><stop offset="1" stop-color="#0c0d0c"/></linearGradient>'+
@@ -506,7 +474,7 @@ function put(id,html){if(drawn[id]===html)return;drawn[id]=html;lv(id).innerHTML
 const lcdPut=(id,text)=>{const L=LCD[id];put("LCD:"+id,dots(L.x,L.y,L.w,L.h,text,L.n))};
 function drawAll(){
   drawViews();
-  for(const id in LIVE){const pv=P[ALIAS[id]||id];if(pv==null)continue;const L=LIVE[id];if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*pv));else{const r=pv>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
+  for(const id in P){const L=LIVE[id];if(!L)continue;if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*P[id]));else{const r=P[id]>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
   const t=tracks[sel],bar=1+Math.round(P["CLOCK:BAR"]*31);
   lcdPut("BPM",bpmOf(P["CLOCK:TEMPO"]).toFixed(0).padStart(3," "));lcdPut("POS",counter>=0&&counter>=rot0?String(posOf(counter,bar)+1).padStart(2," "):"--");lcdPut("LEN",String(t.len).padStart(2," "));lcdPut("EDIT",String(edit+1).padStart(2," "));
   put("KIT",dots(KITR.x+8,KITR.y+6,KITR.w-16,KITR.h-12,kitText().slice(-12),12));put("CHN",dots(CHN.x+8,CHN.y+6,CHN.w-16,CHN.h-12,chainText(),8));
@@ -522,7 +490,7 @@ function drawAll(){
     const a=LIVE["ACC:"+i];put("ACC:"+i,lamp(a.x,a.y,a.r,st.on,["s","g","r"][st.acc]));
     const k=LIVE["LK:"+i];put("LK:"+i,`<text x="${k.x}" y="${k.y}" font-size="9" font-weight="700" text-anchor="middle" fill="${INK}" opacity="${in_?1:.4}">${st.on?lockText(st):""}</text>`);const p=LIVE["PH:"+i];put("PH:"+i,lamp(p.x,p.y,5,ph==n))}}
 
-// the LFO and VOICE tabs: their screens, the scope and the voice picker (drawn only while their tab is up)
+// the LFO tab: its screens and the scope (drawn only while the tab is up)
 function drawViews(){
   if(view=="lfo"){const d=lfoDiv(),i=lfoShapeI();lcdPut("LDIV",d[0].padStart(5," "));lcdPut("LSHAPE",LSHAPE[i]);lcdPut("LPHASE",P["LFO:PHASE"].toFixed(2));
     lcdPut("LAMT",String(Math.round(P["LFO:AMOUNT"]*100)).padStart(3," ")+" ");lcdPut("LRATE",(lfoHz().toFixed(2)+" HZ").padStart(8," "));
@@ -534,11 +502,7 @@ function drawViews(){
     if(lfoT>=0){const q=lfoP+lfoHz()*(performance.now()-lfoT)/1000,p=q-Math.floor(q);if(p<lfoLastP-.5)lfoCyc^=1;lfoLastP=p;
       mk=`<circle cx="${xy(lfoCyc,p).split(",")[0]}" cy="${xy(lfoCyc,p).split(",")[1]}" r="5" fill="#ff4a36" stroke="#2a0805" stroke-width="1"/>`}
     put("LFO:SCOPE",`<polyline points="${pts.join(" ")}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="miter" opacity=".9"/>`+mk+
-      `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}
-  if(view=="voice"){put("VDEV",dots(M+80,FR_T+54,122,22,"SHOGUN",8));const y=FR_T+65;let s="";
-    VOICES.forEach((v,i)=>{const cx=VPX+VPW*(i+.5),on=v.k==sel;
-      s+=`<rect x="${(cx-VPW/2+2).toFixed(1)}" y="${y-15}" width="${(VPW-4).toFixed(1)}" height="30" rx="3" fill="${on?"#1d3a24":"#0a0a0b"}" stroke="${on?GRN:"#2a2a2c"}" stroke-width="1.2"/>`+
-        `<text x="${cx.toFixed(1)}" y="${y+4}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="${v.t.length>8?9:10.5}" font-weight="700" letter-spacing=".4" text-anchor="middle" fill="${on?"#fff":INK}" opacity="${on?1:.75}">${v.t}</text>`});put("VSEL",s)}}
+      `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}}
 
 // ================= PATTERN, TRACK and KIT screens: dropdown lists like RONIN's PRESET screen =================
 // Click a screen for its list, type to search, arrows or scroll, then click a row or press Enter. Esc closes.
@@ -589,7 +553,7 @@ function scrText(){if(DD.naming=="PAT")return pad3(patList(bankView).length+1)+"
   const p=patList(curPat.b)[curPat.i];return p?pad3(curPat.i+1)+" "+p.n.toUpperCase()+(dirty?"*":""):""}
 const kitText=()=>DD.naming=="KIT"?DD.name+"_":DD.open=="KIT"?"FIND "+DD.query+"_":curKit.n.toUpperCase()+(curKit.dirty?"*":"");
 const trkText=()=>DD.open=="TRK"?("FIND "+DD.query+"_").slice(-8):VK[sel].t;
-function selTrack(k){sel=k;if(edit>=tracks[sel].len)edit=0;loadKnobs();if(view=="voice")showZones();drawAll();info.textContent=describe(CTRL.find(c=>c.voice==k))}
+function selTrack(k){sel=k;if(edit>=tracks[sel].len)edit=0;loadKnobs();drawAll();info.textContent=describe(CTRL.find(c=>c.voice==k))}
 function stepTrack(d){const i=VOICES.findIndex(v=>v.k==sel);selTrack(VOICES[(i+d+VOICES.length)%VOICES.length].k)}
 
 // ================= step locks, undo, kits, random, chain, MIDI =================
@@ -714,15 +678,15 @@ menu.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)retur
 $("clr").onclick=()=>{cables=[];build();info.textContent="Cables cleared"};
 // BAY adds the bay and its hang below the sequencer and the panel grows; closing it shrinks the panel back. It hides or
 // shows the jacks and cables and never adds or removes a cable; a patched cable keeps working while the bay is closed.
-// The tabs (RACK, LFO, VOICE) swap the page under the top bar the same way: the engine keeps running and no cable moves.
+// The tabs (RACK, LFO) swap the page under the top bar the same way: the engine keeps running and no cable moves.
 let bay=false,view="rack";
-const ZON={top:()=>1,face:()=>view=="rack",seq:()=>view=="rack",baykey:()=>view=="rack",bay:()=>view=="rack"&&bay,lfo:()=>view=="lfo",voice:()=>view=="voice"};
-const zoneOn=z=>z.startsWith("v_")?view=="voice"&&z=="v_"+sel:ZON[z]();
+const ZON={top:()=>1,face:()=>view=="rack",seq:()=>view=="rack",baykey:()=>view=="rack",bay:()=>view=="rack"&&bay,lfo:()=>view=="lfo"};
+const zoneOn=z=>ZON[z]();
 function showZones(){for(const z in ART){const d=zoneOn(z)?"":"none";$("az_"+z).style.display=d;$("lz_"+z).style.display=d}
-  cab.style.display=view=="rack"&&bay?"":"none";VH=view=="lfo"?H_LFO:view=="voice"?H_VOICE:bay?H:H_SEQ;drawShell()}
+  cab.style.display=view=="rack"&&bay?"":"none";VH=view=="lfo"?H_LFO:bay?H:H_SEQ;drawShell()}
 function setView(v){if(grab)cancel();hideMenu();setHov(null);down=null;kdrag=null;if(DD.open)ddClose();view=v;showZones();
   document.querySelectorAll(".tab").forEach(b=>{b.classList.toggle("on",b.dataset.v==v);b.setAttribute("aria-selected",b.dataset.v==v)});drawAll();
-  info.textContent=v=="lfo"?"LFO · one tempo-synced LFO for the rack · patch LFO OUT in the bay to use it":v=="voice"?"VOICE · "+VK[sel].t+" · pick a voice above; the knobs are the same as on the face":
+  info.textContent=v=="lfo"?"LFO · one tempo-synced LFO for the rack · patch LFO OUT in the bay to use it":
     "RACK · "+cables.length+" cable"+(cables.length==1?"":"s")+" patched"}
 function setBay(on){if(grab)cancel();hideMenu();setHov(null);down=null;bay=!!on;showZones();
   if(DD.open)ddClose();drawAll();info.textContent=bay?"BAY · "+cables.length+" cable"+(cables.length==1?"":"s")+" · drag from a jack to a jack, drop on empty space to unplug":"BAY closed · "+cables.length+" cable"+(cables.length==1?"":"s")+" still patched"}

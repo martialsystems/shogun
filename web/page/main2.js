@@ -110,7 +110,7 @@ function put(id,html){if(drawn[id]===html)return;drawn[id]=html;lv(id).innerHTML
 const lcdPut=(id,text)=>{const L=LCD[id];put("LCD:"+id,dots(L.x,L.y,L.w,L.h,text,L.n))};
 function drawAll(){
   drawViews();
-  for(const id in LIVE){const pv=P[ALIAS[id]||id];if(pv==null)continue;const L=LIVE[id];if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*pv));else{const r=pv>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
+  for(const id in P){const L=LIVE[id];if(!L)continue;if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*P[id]));else{const r=P[id]>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
   const t=tracks[sel],bar=1+Math.round(P["CLOCK:BAR"]*31);
   lcdPut("BPM",bpmOf(P["CLOCK:TEMPO"]).toFixed(0).padStart(3," "));lcdPut("POS",counter>=0&&counter>=rot0?String(posOf(counter,bar)+1).padStart(2," "):"--");lcdPut("LEN",String(t.len).padStart(2," "));lcdPut("EDIT",String(edit+1).padStart(2," "));
   put("KIT",dots(KITR.x+8,KITR.y+6,KITR.w-16,KITR.h-12,kitText().slice(-12),12));put("CHN",dots(CHN.x+8,CHN.y+6,CHN.w-16,CHN.h-12,chainText(),8));
@@ -126,7 +126,7 @@ function drawAll(){
     const a=LIVE["ACC:"+i];put("ACC:"+i,lamp(a.x,a.y,a.r,st.on,["s","g","r"][st.acc]));
     const k=LIVE["LK:"+i];put("LK:"+i,`<text x="${k.x}" y="${k.y}" font-size="9" font-weight="700" text-anchor="middle" fill="${INK}" opacity="${in_?1:.4}">${st.on?lockText(st):""}</text>`);const p=LIVE["PH:"+i];put("PH:"+i,lamp(p.x,p.y,5,ph==n))}}
 
-// the LFO and VOICE tabs: their screens, the scope and the voice picker (drawn only while their tab is up)
+// the LFO tab: its screens and the scope (drawn only while the tab is up)
 function drawViews(){
   if(view=="lfo"){const d=lfoDiv(),i=lfoShapeI();lcdPut("LDIV",d[0].padStart(5," "));lcdPut("LSHAPE",LSHAPE[i]);lcdPut("LPHASE",P["LFO:PHASE"].toFixed(2));
     lcdPut("LAMT",String(Math.round(P["LFO:AMOUNT"]*100)).padStart(3," ")+" ");lcdPut("LRATE",(lfoHz().toFixed(2)+" HZ").padStart(8," "));
@@ -138,8 +138,4 @@ function drawViews(){
     if(lfoT>=0){const q=lfoP+lfoHz()*(performance.now()-lfoT)/1000,p=q-Math.floor(q);if(p<lfoLastP-.5)lfoCyc^=1;lfoLastP=p;
       mk=`<circle cx="${xy(lfoCyc,p).split(",")[0]}" cy="${xy(lfoCyc,p).split(",")[1]}" r="5" fill="#ff4a36" stroke="#2a0805" stroke-width="1"/>`}
     put("LFO:SCOPE",`<polyline points="${pts.join(" ")}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="miter" opacity=".9"/>`+mk+
-      `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}
-  if(view=="voice"){put("VDEV",dots(M+80,FR_T+54,122,22,"SHOGUN",8));const y=FR_T+65;let s="";
-    VOICES.forEach((v,i)=>{const cx=VPX+VPW*(i+.5),on=v.k==sel;
-      s+=`<rect x="${(cx-VPW/2+2).toFixed(1)}" y="${y-15}" width="${(VPW-4).toFixed(1)}" height="30" rx="3" fill="${on?"#1d3a24":"#0a0a0b"}" stroke="${on?GRN:"#2a2a2c"}" stroke-width="1.2"/>`+
-        `<text x="${cx.toFixed(1)}" y="${y+4}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="${v.t.length>8?9:10.5}" font-weight="700" letter-spacing=".4" text-anchor="middle" fill="${on?"#fff":INK}" opacity="${on?1:.75}">${v.t}</text>`});put("VSEL",s)}}
+      `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}}
