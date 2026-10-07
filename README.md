@@ -1,12 +1,13 @@
 # SHOGUN design pack (2026-10-06)
 
-**Working name SHOGUN. A fan instrument in the Jidai Collection. Documents and math in this commit.**
+**Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack and voice engine in this commit.**
 
-SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This commit has the design pack. It has no audio module and no panel art.
+SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This commit has the design pack and the voice engine in `engine/`. Panel art is a later commit.
 
 ## Revisions
 
 - 2026-10-06: first pack. Sources, clock bypass, voice equations, sequencer, tests, and the PDF of the same text.
+- 2026-10-06: voice engine. Framework-free C++ in `engine/`, INT and EXT trigger paths, and the named tests in `tests/voices.cpp`.
 
 ## What this is
 
@@ -26,9 +27,12 @@ The instrument this pack describes:
 | README.md | This front page |
 | METHODOLOGY.md | Sources, quotations, and the choices |
 | SCHEMATICS.md | Block, sample equation, knob range, and a 48 kHz example per voice |
-| BUILD_GUIDE.md | How a later program would be built, and the panel rule |
+| BUILD_GUIDE.md | Engine layout, PDF build, and the panel rule |
 | TESTPLAN.md | Named tests and the numbers they lock |
 | REPO_SETUP.md | Tree, git, and the collection link |
+| engine/ | Voice engine, clock, pattern, and outs. No JUCE |
+| tests/voices.cpp | The named checks, compiled by the Makefile |
+| Makefile | Builds `build/shogun_tests` |
 | docs/SHOGUN_Design_Pack.pdf | The same documents in one PDF |
 
 Rebuild the PDF with:
@@ -39,7 +43,7 @@ python3 scripts/build_design_pack_pdf.py
 
 ## The Jidai Collection
 
-BUSHIDO and RONIN share one patch format and one cable feel. JIDAI RACK compiles those two engines. SHOGUN is specified here and is not compiled into that rack in this commit.
+BUSHIDO and RONIN share one patch format and one cable feel. JIDAI RACK compiles those two engines. SHOGUN's engine is in this repository. It is not compiled into that rack.
 
 - **BUSHIDO**: a 3 x 12 analog step sequencer with real patch cables. [github.com/martialsystems/bushido](https://github.com/martialsystems/bushido)
 - **RONIN**: a semi-modular synthesizer you patch as an effect. [github.com/martialsystems/Ronin](https://github.com/martialsystems/Ronin)

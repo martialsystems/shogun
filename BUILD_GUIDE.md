@@ -1,10 +1,10 @@
 # Build guide (2026-10-06)
 
-This commit builds a PDF. It does not build a plugin.
+This commit builds the voice engine and a PDF. It does not build a plugin.
 
 ## This tree
 
-The audio module is not in the tree. The panel art is not in the tree. JIDAI RACK is not changed by this repository. A later program can take the equations in [SCHEMATICS.md](SCHEMATICS.md) as the contract. Until those tests in [TESTPLAN.md](TESTPLAN.md) pass on that program, the program is not this design.
+The voice engine is `engine/`. Panel art is unpainted. JIDAI RACK is not changed by this repository. The equations in [SCHEMATICS.md](SCHEMATICS.md) are the contract. `make test` builds `build/shogun_tests` and runs the checks in [TESTPLAN.md](TESTPLAN.md).
 
 Rebuild the pack PDF from the markdown:
 
@@ -14,9 +14,7 @@ python3 scripts/build_design_pack_pdf.py
 
 The script reads README.md, METHODOLOGY.md, SCHEMATICS.md, BUILD_GUIDE.md, TESTPLAN.md, and REPO_SETUP.md, in that order, and writes `docs/SHOGUN_Design_Pack.pdf`. It needs reportlab. It does not fetch audio code.
 
-## Later program, when one is started
-
-Suggested split, not created here:
+## Engine
 
 | Piece | Job |
 | --- | --- |
@@ -38,7 +36,7 @@ The jobs may match the instrument chapter: the same knob names, the same 14 drum
 
 The INT/EXT switch is a SHOGUN control. Putting it on the plate does not make it a copy of a Tanzbär control, because that machine does not have this switch.
 
-## Outputs in a later binary
+## Outputs
 
 Pairs, post level and post accent, before master:
 
@@ -53,4 +51,4 @@ Main is the sum of those contributions, plus maracas, lead, and bass at center p
 
 ## Limits
 
-The voice is the equation set in SCHEMATICS.md. A STAND-IN number stays marked until a measurement replaces it. A sampled kit is outside this design. A transistor netlist is outside this design: the manuals did not provide one. JIDAI RACK does not compile this repository in this commit, and this guide does not add it.
+The voice is the equation set in SCHEMATICS.md. A STAND-IN number stays marked until a measurement replaces it. A sampled kit is outside this design. A transistor netlist is outside this design: the manuals did not provide one. JIDAI RACK does not compile this repository, and this guide does not add it.

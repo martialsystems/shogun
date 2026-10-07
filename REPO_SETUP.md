@@ -4,7 +4,7 @@
 
 Public repository: `https://github.com/martialsystems/shogun`
 
-Working name: SHOGUN. A separate product name has not been set. The local checkout used for this pack is `/Users/samw/shogun`, branch `main`.
+Working name: SHOGUN. A separate product name has not been set. The engine commit is on branch `feat/engine-voices`, cut from the design pack in this repository.
 
 This commit contains:
 
@@ -13,15 +13,20 @@ This commit contains:
 | README.md | Front page and revision list |
 | METHODOLOGY.md | Sources and the quoted choices |
 | SCHEMATICS.md | Equations and 48 kHz rows |
-| BUILD_GUIDE.md | PDF build, and the shape of a later program |
+| BUILD_GUIDE.md | PDF build, and the engine layout |
 | TESTPLAN.md | Named tests |
 | REPO_SETUP.md | This file |
+| engine/dsp.h | Shared STAND-IN helpers |
+| engine/shogun.h | Clock, pattern, knobs, and the process call |
+| engine/shogun.cpp | Voices and the output sum |
+| tests/voices.cpp | Named checks |
+| Makefile | Builds `build/shogun_tests` |
 | scripts/build_design_pack_pdf.py | Markdown to PDF |
 | docs/SHOGUN_Design_Pack.pdf | The pack as one PDF |
 | LICENSE | All rights reserved, Martial Systems LLC |
 | .gitignore | `build/` and `__pycache__/` |
 
-There is no `src/` audio module, no panel SVG, and no JUCE target.
+The voice engine is framework-free C++ under `engine/`. `process()` does not allocate. There is no panel SVG and no JUCE target.
 
 The MFB manuals are not in the tree. The German PDF that was read for the quotations stays outside the repository. The pack cites it. It does not redistribute it.
 
@@ -35,7 +40,7 @@ The script fails if a source file contains an em dash, an en dash, or a heading 
 
 ## Collection link
 
-`martialsystems/jidai-collection` names this repository under the SHOGUN heading on `main`. The rack plugin in that repository compiles BUSHIDO and RONIN. It does not fetch SHOGUN. Leave it that way until an engine exists and the tests in TESTPLAN.md have somewhere to run.
+`martialsystems/jidai-collection` names this repository under the SHOGUN heading on `main`. The rack plugin in that repository compiles BUSHIDO and RONIN. It does not fetch SHOGUN. This engine does not change the rack.
 
 ## Git
 

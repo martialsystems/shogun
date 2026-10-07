@@ -1,6 +1,6 @@
 # Test plan (2026-10-06)
 
-These tests are the contract for a later engine. This commit does not compile them. Each one is specified against [SCHEMATICS.md](SCHEMATICS.md) at 48,000 Hz, double precision, absolute tolerance 1e-5 on the printed decimals unless a row says otherwise.
+These tests are the contract for the engine in `engine/`. `tests/voices.cpp` compiles them into `build/shogun_tests`. Each one is specified against [SCHEMATICS.md](SCHEMATICS.md) at 48,000 Hz, double precision, absolute tolerance 1e-5 on the printed decimals unless a row says otherwise.
 
 A cleared voice is one that has not been triggered. Its output block is 0.
 
