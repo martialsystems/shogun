@@ -45,6 +45,7 @@ struct DrumStep {
 struct NoteStep {
   int note = -1;  // -1: rest
   int accent = 2;
+  bool tie = false;  // keep the envelope and phase of the note before; the pitch may change
 };
 
 struct Track {
@@ -165,6 +166,16 @@ class Engine {
   void setGlobalShuffle(int s);
   void setLiveNote(Voice voice, int note);
 
+  // Transport. A new engine runs. Stop drops the pattern's queued triggers and releases lead and bass.
+  // Start counts again from step 1 on the next process().
+  void setRunning(bool running);
+  bool running() const { return running_; }
+  // Back to step 1 on the next process() without stopping.
+  void restart();
+  // While on, the period no longer moves the counter; each clockPulse() is one step on the next process().
+  void setExternalClock(bool on);
+  void clockPulse() { pulse_ = true; }
+
   // Applied on the next process(), before render, at the current sample.
   // Hats: a closed trigger on that sample chokes the open hat first.
   void trigger(Voice voice, double gain = 1.0, double bendSt = 0.0);
@@ -230,6 +241,7 @@ class Engine {
     double bend = 0;
     int note = -1;
     EventKind kind = EventKind::Drum;
+    bool tie = false;
     bool pattern = false;
     bool live = false;
   };
@@ -244,14 +256,14 @@ class Engine {
 
   void recomputePeriod();
   void clearVoices();
-  void onStep(std::int64_t c);
-  void schedule(double when, int voice, double gain, double bend, int note, EventKind kind);
+  void onStep(std::int64_t c, double start);
+  void schedule(double when, int voice, double gain, double bend, int note, EventKind kind, bool tie = false);
   void compactEvents();
   void fireDue();
   void applyJacks(const TrigIn& in);
   void applyPending();
   void fireDrum(int voice, double gain, double bend);
-  void fireNote(int voice, int note, double gain);
+  void fireNote(int voice, int note, double gain, bool tie = false);
   void fireRest(int voice);
   void renderAll();
   void renderBd1(VoiceState& st);
@@ -291,6 +303,10 @@ class Engine {
   std::int64_t sampleIndex_ = 0;
   std::int64_t counter_ = 0;
   bool booted_ = false;
+  bool running_ = true;
+  bool extClock_ = false;
+  bool pulse_ = false;
+  double nextStep_ = 0;  // sample time of the next step boundary, fractional
 
   Event events_[kMaxEvents]{};
   int eventCount_ = 0;

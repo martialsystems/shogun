@@ -843,6 +843,7 @@ void testClockNotesAndEdges() {
   tied.track[static_cast<int>(shogun::Voice::Lead)].note[0].accent = 0;
   shogun::Pattern changed = tied;
   changed.track[static_cast<int>(shogun::Voice::Lead)].note[1].note = 62;
+  tied.track[static_cast<int>(shogun::Voice::Lead)].note[1].tie = true;
   shogun::Engine tieE;
   shogun::Engine chgE;
   arm(tieE, tone, tied);
@@ -974,6 +975,148 @@ void testClockNotesAndEdges() {
   expect(f.bdL == 0.0 && f.mainL != 0.0, t, "tom reaches main", f.mainL, y * gL);
 }
 
+// Regressions for the bugs in BUGS.md that the engine fixes.
+int bd1Restarts(shogun::Engine& e, long samples) {
+  shogun::TrigIn in;
+  shogun::Frame f;
+  int fires = 0;
+  double last = e.bd1Hz();
+  for (long i = 0; i < samples; ++i) {
+    e.process(in, f);
+    const double hz = e.bd1Hz();
+    if (hz > last + 1e-9) ++fires;
+    last = hz;
+  }
+  return fires;
+}
+
+void testClockFixes() {
+  const char* t = "testClockFixes";
+  shogun::Pattern every = silentPattern();
+  every.track[static_cast<int>(shogun::Voice::Bd1)].length = 1;
+  every.track[static_cast<int>(shogun::Voice::Bd1)].drum[0].on = true;
+
+  // BUGS.md E1: at a period that is not a whole number of samples every step still fires.
+  const double tempos[] = {120.0, 130.0, 133.0, 97.0, 179.3};
+  for (double bpm : tempos) {
+    shogun::Engine e;
+    arm(e, bd1Example(), every);
+    e.setTempo(bpm);
+    const int fires = bd1Restarts(e, static_cast<long>(e.periodSamples() * 64.0));
+    expect(fires == 64, t, "every step fires at a fractional period", fires, 64);
+  }
+
+  // The step fires on the sample that holds its boundary: 130 BPM step 1 is at 5538.46.
+  shogun::Engine at;
+  arm(at, bd1Example(), every);
+  at.setTempo(130);
+  shogun::TrigIn in;
+  shogun::Frame f;
+  for (int i = 0; i <= 5538 + 10; ++i) at.process(in, f);
+  expect(near(f.bdL, 0.208884), t, "step 1 at floor(5538.46)", f.bdL, 0.208884);
+
+  // E2: a tempo change while running moves the next step by the new period, no burst and no stall.
+  shogun::Engine up;
+  arm(up, bd1Example(), silentPattern());
+  for (int i = 0; i < 480000 + 3000; ++i) up.process(in, f);
+  const std::int64_t c0 = up.counter();
+  up.setTempo(180);
+  long wait = 0;
+  while (up.counter() == c0) {
+    up.process(in, f);
+    ++wait;
+  }
+  expect(wait == 2000, t, "120 to 180 halfway through a step", static_cast<double>(wait), 2000);
+  for (int i = 0; i < 100; ++i) up.process(in, f);
+  expect(up.counter() == c0 + 1, t, "no burst after the change", static_cast<double>(up.counter()), static_cast<double>(c0 + 1));
+  up.setTempo(60);
+  const std::int64_t c1 = up.counter();
+  wait = 0;
+  while (up.counter() == c1 && wait < 100000) {
+    up.process(in, f);
+    ++wait;
+  }
+  expect(wait < 12000, t, "180 to 60 does not stall", static_cast<double>(wait), 11800);
+
+  // Transport: stop holds the count, start plays step 1 at once.
+  shogun::Engine tr;
+  arm(tr, bd1Example(), every);
+  for (int i = 0; i < 7000; ++i) tr.process(in, f);
+  tr.setRunning(false);
+  expect(bd1Restarts(tr, 30000) == 0, t, "stopped plays nothing", 0, 0);
+  expect(tr.counter() == 1, t, "stopped holds the counter", static_cast<double>(tr.counter()), 1);
+  tr.setRunning(true);
+  for (int i = 0; i <= 10; ++i) tr.process(in, f);
+  expect(tr.counter() == 0 && near(f.bdL, 0.208884), t, "start plays step 1 now", f.bdL, 0.208884);
+
+  // External clock: pulses move the counter, the period does not.
+  shogun::Engine ext;
+  arm(ext, bd1Example(), every);
+  ext.setExternalClock(true);
+  for (int i = 0; i < 20000; ++i) ext.process(in, f);
+  expect(ext.counter() == 0, t, "external clock waits for a pulse", static_cast<double>(ext.counter()), 0);
+  ext.clockPulse();
+  for (int i = 0; i <= 10; ++i) ext.process(in, f);
+  expect(ext.counter() == 1 && near(f.bdL, 0.208884), t, "a pulse is one step", f.bdL, 0.208884);
+}
+
+void testVoiceFixes() {
+  const char* t = "testVoiceFixes";
+  shogun::TrigIn in;
+  shogun::Frame f;
+
+  // E3: the conga partial decays with the body.
+  shogun::Knobs conga;
+  conga.ltcMode = 127;
+  conga.ltcDecay = 0;
+  shogun::Engine c;
+  arm(c, conga, silentPattern());
+  c.trigger(shogun::Voice::Ltc);
+  double late = 0;
+  for (int i = 0; i < 48000; ++i) {
+    c.process(in, f);
+    if (i > 24000) late = std::fmax(late, std::fabs(f.mainL));
+  }
+  expect(late < 1e-6, t, "conga is silent half a second later", late, 0);
+
+  // E4: muting a note track, stopping, or switching to EXT releases the held note.
+  shogun::Pattern held = silentPattern();
+  for (int s = 0; s < 4; ++s) {
+    held.track[static_cast<int>(shogun::Voice::Lead)].note[s].note = 60;
+    held.track[static_cast<int>(shogun::Voice::Lead)].note[s].tie = s > 0;
+  }
+  for (int way = 0; way < 3; ++way) {
+    shogun::Engine e;
+    arm(e, shogun::Knobs{}, held);
+    for (int i = 0; i < 3000; ++i) e.process(in, f);
+    if (way == 0) {
+      shogun::Pattern muted = held;
+      muted.track[static_cast<int>(shogun::Voice::Lead)].mute = true;
+      e.setPattern(muted);
+    } else if (way == 1) {
+      e.setRunning(false);
+    } else {
+      e.setMode(shogun::ClockMode::Ext);
+    }
+    double peak = 0;
+    for (int i = 0; i < 96000; ++i) {
+      e.process(in, f);
+      if (i > 48000) peak = std::fmax(peak, std::fabs(f.mainL));
+    }
+    const char* what[] = {"mute releases the held note", "stop releases the held note", "EXT releases the held note"};
+    expect(peak < 1e-6, t, what[way], peak, 0);
+  }
+
+  // E5: the same note twice without a tie plays twice.
+  shogun::Pattern again = silentPattern();
+  again.track[static_cast<int>(shogun::Voice::Lead)].note[0].note = 60;
+  again.track[static_cast<int>(shogun::Voice::Lead)].note[1].note = 60;
+  shogun::Engine r;
+  arm(r, shogun::Knobs{}, again);
+  for (int i = 0; i <= 6000; ++i) r.process(in, f);
+  expect(r.leadSaw() == 0.0, t, "repeated note restarts", r.leadSaw(), 0.0);
+}
+
 int main() {
   testKickBendDecays();
   testBd1SoundChangesAttack();
@@ -988,6 +1131,8 @@ int main() {
   testShortVoices();
   testShuffleAndShift();
   testClockNotesAndEdges();
+  testClockFixes();
+  testVoiceFixes();
   if (gFails != 0) {
     std::printf("%d failed\n", gFails);
     return 1;

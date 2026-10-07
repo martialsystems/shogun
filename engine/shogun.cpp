@@ -67,13 +67,52 @@ void Engine::reset() {
   sampleIndex_ = 0;
   counter_ = 0;
   booted_ = false;
+  running_ = true;
+  extClock_ = false;
+  pulse_ = false;
+  nextStep_ = 0;
   eventCount_ = 0;
   pendingCount_ = 0;
   clearVoices();
   recomputePeriod();
 }
 
-void Engine::setMode(ClockMode mode) { mode_ = mode; }
+void Engine::setMode(ClockMode mode) {
+  // INT to EXT: the pattern no longer reaches lead and bass, so a note it opened must not hang.
+  if (mode_ == ClockMode::Int && mode == ClockMode::Ext) {
+    fireRest(static_cast<int>(Voice::Lead));
+    fireRest(static_cast<int>(Voice::Bass));
+  }
+  mode_ = mode;
+}
+
+void Engine::setRunning(bool running) {
+  if (running == running_) return;
+  running_ = running;
+  if (running) {
+    counter_ = 0;
+    booted_ = false;
+    return;
+  }
+  for (int i = 0; i < eventCount_; ++i) {
+    if (events_[i].pattern) events_[i].live = false;
+  }
+  compactEvents();
+  fireRest(static_cast<int>(Voice::Lead));
+  fireRest(static_cast<int>(Voice::Bass));
+}
+
+void Engine::restart() {
+  counter_ = 0;
+  booted_ = false;
+}
+
+void Engine::setExternalClock(bool on) {
+  if (on == extClock_) return;
+  extClock_ = on;
+  pulse_ = false;
+  if (!on) nextStep_ = static_cast<double>(sampleIndex_) + period_;
+}
 
 void Engine::setTempo(double bpm) {
   bpm_ = clampBpm(bpm);
@@ -160,7 +199,14 @@ int Engine::displayStep() const {
 
 void Engine::recomputePeriod() {
   const double bpm = hostPlaying_ ? hostBpm_ : bpm_;
+  const double old = period_;
   period_ = kFs * 60.0 / (bpm * static_cast<double>(stepsPerQuarter_));
+  // A tempo change keeps the step in progress at the same fraction, so the counter neither races nor stalls.
+  if (booted_ && old > 0.0 && period_ != old) {
+    const double now = static_cast<double>(sampleIndex_);
+    const double left = nextStep_ - now;
+    if (left > 0.0) nextStep_ = now + left * period_ / old;
+  }
 }
 
 void Engine::clearVoices() {
@@ -191,7 +237,7 @@ void Engine::compactEvents() {
   eventCount_ = write;
 }
 
-void Engine::schedule(double when, int voice, double gain, double bend, int note, EventKind kind) {
+void Engine::schedule(double when, int voice, double gain, double bend, int note, EventKind kind, bool tie) {
   if (eventCount_ >= kMaxEvents) compactEvents();
   if (eventCount_ >= kMaxEvents) return;
   Event& e = events_[eventCount_++];
@@ -201,15 +247,17 @@ void Engine::schedule(double when, int voice, double gain, double bend, int note
   e.bend = bend;
   e.note = note;
   e.kind = kind;
+  e.tie = tie;
   e.pattern = true;
   e.live = true;
 }
 
-void Engine::onStep(std::int64_t c) {
+void Engine::onStep(std::int64_t c, double start) {
   compactEvents();
   for (int vi = 0; vi < kVoiceCount; ++vi) {
     const Track& tr = pattern_.track[vi];
-    if (tr.mute) continue;
+    const bool noteTrack = vi >= static_cast<int>(Voice::Lead);
+    if (tr.mute && !noteTrack) continue;
     const int length = clampLength(tr.length);
     int slot = static_cast<int>(c % length);
     if (slot < 0) slot += length;
@@ -221,15 +269,16 @@ void Engine::onStep(std::int64_t c) {
     double delay = 0.0;
     if ((slot % 2) == 1) delay = (static_cast<double>(shuffle) / 15.0) * (period_ / 3.0);
     const double shift = std::round(u(tr.shiftCc) * 0.030 * kFs);
-    const double base = static_cast<double>(c) * period_ + shift + delay;
+    const double base = start + shift + delay;
 
-    if (vi >= static_cast<int>(Voice::Lead)) {
+    if (noteTrack) {
       const NoteStep& step = tr.note[slot];
       const double gain = (vi == static_cast<int>(Voice::Bass)) ? gAccent(step.accent) : 1.0;
-      if (step.note < 0) {
+      // A muted note track rests, so a note it was holding releases instead of droning.
+      if (tr.mute || step.note < 0) {
         schedule(base, vi, gain, 0.0, -1, EventKind::Rest);
       } else {
-        schedule(base, vi, gain, 0.0, step.note, EventKind::Note);
+        schedule(base, vi, gain, 0.0, step.note, EventKind::Note, step.tie);
       }
       continue;
     }
@@ -276,14 +325,15 @@ void Engine::fireDrum(int voice, double gain, double bend) {
   st.right = 0;
 }
 
-void Engine::fireNote(int voice, int note, double gain) {
+void Engine::fireNote(int voice, int note, double gain, bool tie) {
   if (voice != static_cast<int>(Voice::Lead) && voice != static_cast<int>(Voice::Bass)) return;
   if (note < 0) {
     fireRest(voice);
     return;
   }
   VoiceState& st = voice_[voice];
-  const bool tied = st.gate && !st.releasing && st.note == note;
+  // Only a step marked tie holds on; a repeated note without it plays again.
+  const bool tied = tie && st.gate && !st.releasing;
   st.gain = gain;
   st.note = note;
   st.gate = true;
@@ -308,11 +358,12 @@ void Engine::fireRest(int voice) {
 void Engine::fireDue() {
   for (int i = 0; i < eventCount_; ++i) {
     Event& e = events_[i];
-    if (!e.live || e.when != sampleIndex_) continue;
+    // <= so an event can never be stranded live in the queue.
+    if (!e.live || e.when > sampleIndex_) continue;
     e.live = false;
     if (e.pattern && mode_ != ClockMode::Int) continue;
     if (e.kind == EventKind::Drum) fireDrum(e.voice, e.gain, e.bend);
-    else if (e.kind == EventKind::Note) fireNote(e.voice, e.note, e.gain);
+    else if (e.kind == EventKind::Note) fireNote(e.voice, e.note, e.gain, e.tie);
     else fireRest(e.voice);
   }
 }
@@ -353,9 +404,16 @@ void Engine::applyPending() {
 }
 
 void Engine::process(const TrigIn& in, Frame& out) {
-  if (!booted_) {
+  const double now = static_cast<double>(sampleIndex_);
+  if (running_ && !booted_) {
     booted_ = true;
-    if (mode_ == ClockMode::Int) onStep(counter_);
+    pulse_ = false;
+    nextStep_ = now + period_;
+    if (mode_ == ClockMode::Int) onStep(counter_, now);
+  } else if (running_ && extClock_ && pulse_) {
+    pulse_ = false;
+    ++counter_;
+    if (mode_ == ClockMode::Int) onStep(counter_, now);
   }
   fireDue();
   applyJacks(in);
@@ -364,10 +422,14 @@ void Engine::process(const TrigIn& in, Frame& out) {
   renderAll();
   mix(out);
   ++sampleIndex_;
-  const double boundary = static_cast<double>(counter_ + 1) * period_;
-  if (static_cast<double>(sampleIndex_) >= boundary) {
+  if (!running_ || !booted_ || extClock_) return;
+  // The step starts on the sample that contains its fractional boundary. That sample is the next one,
+  // so its events are queued now and fireDue() plays them there.
+  while (std::floor(nextStep_) <= static_cast<double>(sampleIndex_)) {
+    const double start = nextStep_;
+    nextStep_ += period_;
     ++counter_;
-    if (mode_ == ClockMode::Int) onStep(counter_);
+    if (mode_ == ClockMode::Int) onStep(counter_, start);
   }
 }
 
@@ -619,7 +681,8 @@ void Engine::renderTom(VoiceState& st, int which) {
   const double pEnv = expDecay(n, 0.08);
   const double f = fTune * std::pow(2.0, (st.bend * pEnv) / 12.0);
   double y = std::sin(st.phase) * env;
-  if (modeCc >= 64) y += 0.35 * std::sin(st.phase2);
+  // The conga partial rides the body envelope; without it the partial rang forever.
+  if (modeCc >= 64) y += 0.35 * std::sin(st.phase2) * env;
   if (noiseCc >= 64) {
     y += u(knobs_.tomNoise) * noiseDraw(noiseState_) * expDecay(n, 0.12);
   }
