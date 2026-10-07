@@ -11,7 +11,7 @@ function undoPush(key){const now=performance.now();if(key&&key==undoKey&&now-und
   undoKey=key;undoT=now;UNDO.push(snap());if(UNDO.length>200)UNDO.shift();REDO.length=0}
 function undoReset(){UNDO.length=0;REDO.length=0;undoKey=null}
 function restore(s){Object.assign(P,s.P);tracks=s.tracks;curKit=s.kit;dirty=s.dirty;if(edit>=tracks[sel].len)edit=0;loadKnobs();
-  const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"]);send(c);drawAll()}
+  const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...lfoCalls());send(c);drawAll()}
 function undo(redo){const from=redo?REDO:UNDO,to=redo?UNDO:REDO;if(!from.length){info.textContent=redo?"Nothing to redo":"Nothing to undo";return}
   to.push(snap());restore(from.pop());undoKey=null;info.textContent=(redo?"Redo":"Undo")+" · "+UNDO.length+" more to undo, "+REDO.length+" to redo"}
 
@@ -32,7 +32,7 @@ const RND={bd1Decay:[25,110],bd1Pitch:[10,110],bd1Tune:[10,80],bd1Noise:[0,70],b
   sdTune:[20,110],sdDTune:[30,127],sdPitch:[0,90],sdTone:[10,120],sdToneDecay:[10,90],sdSnappy:[40,127],sdSnDecay:[15,90],rsTune:[20,110],
   cpAttack:[40,127],cpDecay:[10,80],cpFilter:[30,110],clTune:[20,120],clDecay:[10,70],cyTune:[20,110],cyTone:[20,110],cyDecay:[30,110],ohDecay:[15,90],
   hhTune:[30,120],hhDecay:[10,70],ltcTune:[15,100],ltcDecay:[15,90],mtcTune:[15,100],mtcDecay:[15,90],htcTune:[15,100],htcDecay:[15,90],
-  cbTune:[20,100],cbDecay:[15,90],maDecay:[5,60],leadTone:[20,120],bassTone:[15,110]};
+  cbTune:[20,100],cbDecay:[15,90],maDecay:[5,60],leadTone:[20,120],bassTone:[15,110],bd1Wave:[0,90],bd2Wave:[0,90],ltcWave:[0,90],mtcWave:[0,90],htcWave:[0,90]};
 function randomVoice(){const v=VK[sel],done=[];undoPush();
   v.knobs.forEach(([lb,p,n])=>{if(!p||n=="tog")return;const id=v.k+":"+lb,[lo,hi]=RND[p]||[0,127];P[id]=vOf(id,lo+Math.floor(Math.random()*(hi-lo+1)),STEPS[id]);syncLinked(id);sendParam(id);done.push(lb)});
   curKit.dirty=true;dirty=true;drawAll();info.textContent=`${v.t} · rolled ${done.join(", ")} · UNDO puts it back`;if(!running)audition(sel)}
