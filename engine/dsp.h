@@ -127,13 +127,9 @@ inline double sawSample(double phase, double freq) {
   return acc / weight;
 }
 
-// Shaped body: a sine bent toward square, then soft-clipped. tanh(k sin) / tanh(k), so the peak stays 1 at any k.
-// k = 1 is a gentle bend that already has odd harmonics; k = 6 is close to a square. STAND-IN.
-constexpr double kWaveMin = 1.0;
-constexpr double kWaveSpan = 5.0;
-constexpr double kBd2Wave = 2.0;
+// Shaped tone: a sine bent toward square, then soft-clipped. tanh(k sin) / tanh(k), so the peak stays 1 at any k.
+// The snare tones and the BD1 square click use it at a fixed k. The body voices use the Wave folder instead. STAND-IN.
 constexpr double kSdWave = 2.0;
-constexpr double kTomWave = 1.5;
 inline double shapedSine(double phase, double k) { return std::tanh(k * std::sin(phase)) / std::tanh(k); }
 
 // Slow FM on BD2 and the toms: f = f0 + i * sin(2 pi fm t). STAND-IN depths, in units of f0.

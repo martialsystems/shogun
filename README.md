@@ -16,6 +16,7 @@ SHOGUN is a drum computer and two note voices, specified from the first MFB Tanz
 - 2026-10-07: track solo. The soloed voice alone reaches its pair and the main; the others keep running at 0. Mute wins.
 - 2026-10-07: a new engine loads the 909-style init kit and pattern "909". STAND-IN knob values, not a Roland capture. reset() still clears.
 - 2026-10-07: density pass. Shaped bodies (tanh(k sin)) on BD1, BD2, SD, and the toms, BD2 and tom slow FM, a 1 ms BD1 click, SD noise through a ducked 4-pole, six-square metal stacks with a band-pass on the hats and cymbal, and clap bursts fixed at 3 ms with a delayed filtered tail. STAND-IN, not a Vermona capture.
+- 2026-10-07: Wave on BD1, BD2, and the three toms: the serge_middle six-cell folder on the body oscillator, CC 0 bypass, default CC 32, g 0.5 to 4. Dist stays after Wave. Hats, clap, cymbal, and maracas have no Wave.
 
 ## What this is
 

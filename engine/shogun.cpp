@@ -1,4 +1,5 @@
 #include "shogun.h"
+#include "wave_folder.h"
 
 namespace shogun {
 
@@ -512,9 +513,8 @@ void Engine::renderBd1(VoiceState& st) {
   const double bEnv = st.bend != 0.0 ? expDecay(n, std::fmax(tauP, kSdBendFloor)) : 0.0;
   const double f = fTune * std::pow(2.0, (depth * pEnv + st.bend * bEnv) / 12.0);
   const double bodyEnv = expDecay(n, tauB);
-  // Wave rides the Dist knob until a Wave knob exists: k = 1 at Dist 0, 6 at Dist 127.
-  const double k = kWaveMin + kWaveSpan * u(knobs_.bd1Dist);
-  const double body = shapedSine(st.phase, k) * bodyEnv;
+  // Wave folds the body oscillator before its envelope, so the fold does not change the decay law. Dist is after.
+  const double body = wave::fold(std::sin(st.phase), knobs_.bd1Wave) * bodyEnv;
   const double tr = bd1Click(s, fTr, n);
   double noise = 0.0;
   if (knobs_.bd1Noise > 0) {
@@ -558,7 +558,7 @@ void Engine::renderBd2(VoiceState& st) {
   const double fm = 40.0 * std::pow(200.0 / 40.0, u(knobs_.bd2Tone));
   const double fmTerm = kBd2FmIndex * fTune * std::sin(2.0 * kPi * fm * static_cast<double>(n) / kFs);
   const double f = fTune * std::pow(2.0, (st.bend * pEnv) / 12.0) + fmTerm;
-  const double body = shapedSine(st.phase, kBd2Wave) * env;
+  const double body = wave::fold(std::sin(st.phase), knobs_.bd2Wave) * env;
   const double trEnv = expDecay(n, 0.005);
   const double tr = std::sin(2.0 * kPi * fTr * static_cast<double>(n) / kFs) * trEnv;
   const double scaled = u(knobs_.bd2Tone) * tr;
@@ -762,6 +762,7 @@ void Engine::renderTom(VoiceState& st, int which) {
   int decayCc = knobs_.ltcDecay;
   int noiseCc = knobs_.ltcNoise;
   int modeCc = knobs_.ltcMode;
+  int waveCc = knobs_.ltcWave;
   double fLo = 70.0;
   double fHi = 180.0;
   if (which == 1) {
@@ -769,6 +770,7 @@ void Engine::renderTom(VoiceState& st, int which) {
     decayCc = knobs_.mtcDecay;
     noiseCc = knobs_.mtcNoise;
     modeCc = knobs_.mtcMode;
+    waveCc = knobs_.mtcWave;
     fLo = 100.0;
     fHi = 280.0;
   } else if (which == 2) {
@@ -776,6 +778,7 @@ void Engine::renderTom(VoiceState& st, int which) {
     decayCc = knobs_.htcDecay;
     noiseCc = knobs_.htcNoise;
     modeCc = knobs_.htcMode;
+    waveCc = knobs_.htcWave;
     fLo = 140.0;
     fHi = 400.0;
   }
@@ -799,7 +802,7 @@ void Engine::renderTom(VoiceState& st, int which) {
   // Quieter cousin of the BD2 FM term, fixed rate.
   const double fmTerm = kTomFmIndex * fTune * std::sin(2.0 * kPi * kTomFmHz * static_cast<double>(n) / kFs);
   const double f = fTune * std::pow(2.0, (st.bend * pEnv) / 12.0) + fmTerm;
-  double y = shapedSine(st.phase, kTomWave) * env;
+  double y = wave::fold(std::sin(st.phase), waveCc) * env;
   if (modeCc >= 64) y += 0.35 * std::sin(st.phase2);
   if (noiseCc >= 64) {
     y += u(knobs_.tomNoise) * noiseDraw(noiseState_) * expDecay(n, 0.12);
