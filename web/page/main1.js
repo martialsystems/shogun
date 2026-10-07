@@ -3,9 +3,9 @@
 // cable hang below the sequencer, and the panel grows to hold them.
 const NS="http://www.w3.org/2000/svg",W=1600,M=14,AV=W-2*M,FR_T=68,BAND=164,INK="#f4f3ee",GRN="#4aa862",JR=9;
 // BAY off: the panel ends under the sequencer (H_SEQ). BAY on: the bay (two jack rows) and its hang are added below it and
-// the panel grows to H. The LFO and VOICE tabs replace the face with their own page (H_LFO, H_VOICE) under the same top bar.
+// the panel grows to H. The LFO tab replaces the face with its own page (H_LFO) under the same top bar.
 const KB_T=FR_T,KB_B=KB_T+2*BAND,SEQ_H=146,SEQ_B=KB_B+SEQ_H,BAY_T=SEQ_B,BAY_B=BAY_T+92,BAY2_B=BAY_B+78,FR_B=BAY2_B+110,H=FR_B+14,H_SEQ=SEQ_B+14;
-const H_LFO=FR_T+262+14,H_VOICE=FR_T+262+14;
+const H_LFO=FR_T+262+14;
 let VH=H_SEQ;   // the height in view now
 const $=id=>document.getElementById(id),sv=$("sv"),cab=$("cab"),ring=$("ring"),info=$("info"),menu=$("menu"),stage=$("stage");
 sv.setAttribute("viewBox",`0 0 ${W} ${VH}`);
@@ -20,8 +20,7 @@ const VI=["BD1","BD2","SD","RS","CY","OH","HH","CL","CP","LTC","MTC","HTC","CB",
 // ================= the instrument =================
 // knobs: [label, engine param, positions, id] (positions = a stepped control; "tog" = an OFF/ON switch; id defaults to the
 // label and keeps the names saved patterns use). LEVEL is the linear level. Only knobs the engine has are drawn.
-// WAVE is the folder on the body (0 is bypass). hide: engine knobs with no knob on this face (a kit still sets them; the
-// VOICE tab has a knob for each).
+// WAVE is the folder on the body (0 is bypass). hide: engine knobs a kit still sets that have no knob on this face.
 const VOICES=[
  {k:"BD1",t:"BD 1",b:0,knobs:[["TUNE","bd1Tune"],["BEND","bd1Pitch",0,"PITCH"],["DECAY","bd1Decay"],["ATTACK","bd1Attack"],["DIST","bd1Dist"],["NOISE","bd1Noise"],["FILTER","bd1Filter"],["WAVE","bd1Wave"],["LEVEL"]],hide:[["SOUND","bd1Trigger",16]]},
  {k:"BD2",t:"BD 2",b:0,knobs:[["TUNE","bd2Tune"],["DECAY","bd2Decay"],["TONE","bd2Tone"],["WAVE","bd2Wave"],["LEVEL"]]},
@@ -40,10 +39,10 @@ const VOICES=[
  {k:"LEAD",t:"LEAD",b:1,note:1,knobs:[["TONE","leadTone"],["LEVEL"]]},
  {k:"BASS",t:"BASS",b:1,note:1,knobs:[["TONE","bassTone"],["LEVEL"]]}];
 const VK=Object.fromEntries(VOICES.map(v=>[v.k,v])),NOTEK={LEAD:1,BASS:1},BENDK={BD1:1,BD2:1,SD:1,LTC:1,MTC:1,HTC:1};
-const P={},DEF={},CTRL=[],JACKS={},LIVE={},MAP={},ALIAS={};   // panel values 0..1, defaults, hit regions, jacks, live svg groups, panel id -> engine target, alias -> panel id
+const P={},DEF={},CTRL=[],JACKS={},LIVE={},MAP={};   // panel values 0..1, defaults, hit regions, jacks, live svg groups, panel id -> engine target
 // Static art and live parts go to a zone, shown or hidden as a whole: top (the top bar), face, seq, baykey (the RACK tab),
-// bay (the RACK tab with BAY on), lfo, voice, and v_<voice> (the VOICE tab with that voice picked). Z is the zone being drawn.
-const ART={},LZ={};let Z,S,AL=false;   // AL: knobs and switches being drawn are aliases of face controls (the VOICE tab)
+// bay (the RACK tab with BAY on) and lfo (the LFO tab). Z is the zone being drawn.
+const ART={},LZ={};let Z,S;
 const zone=z=>{Z=z;S=ART[z]=ART[z]||[]};zone("face");
 const ctl=o=>{o.zone=Z;CTRL.push(o);return o};
 const T=(x,y,s,z=11,anchor="middle",fill=INK,ls=.5)=>S.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${z}" font-weight="700" letter-spacing="${ls}" text-anchor="${anchor}" fill="${fill}">${s}</text>`);
@@ -53,9 +52,7 @@ const rule=(x1,y1,x2,y2,w=1.6)=>S.push(`<line x1="${x1.toFixed(1)}" y1="${y1}" x
 function ticks(cx,cy,r,n=11){for(let i=0;i<n;i++){const a=(-135+270*i/(n-1)-90)*Math.PI/180,l=i==0||i==n-1||i==(n-1)/2?4:2.5;
   S.push(`<line x1="${(cx+(r+4)*Math.cos(a)).toFixed(1)}" y1="${(cy+(r+4)*Math.sin(a)).toFixed(1)}" x2="${(cx+(r+4+l)*Math.cos(a)).toFixed(1)}" y2="${(cy+(r+4+l)*Math.sin(a)).toFixed(1)}" stroke="${INK}" stroke-width="1.1"/>`)}}
 const STEPS={};   // stepped controls: id -> positions
-// An alias (AL) draws a second knob for the same panel value: it sets nothing, and its hit region moves the real control.
-function knob(id,label,cx,cy,def,opt={}){const r=opt.r||14,lid=AL?id+"@"+Z:id;if(AL)ALIAS[lid]=id;else{P[id]=DEF[id]=def;if(opt.n)STEPS[id]=opt.n}
-  const n=opt.n||STEPS[id];ticks(cx,cy,r,n&&n<=16?n:11);live(lid);LIVE[lid]={x:cx,y:cy,r};
+function knob(id,label,cx,cy,def,opt={}){const r=opt.r||14;P[id]=DEF[id]=def;if(opt.n)STEPS[id]=opt.n;ticks(cx,cy,r,opt.n&&opt.n<=16?opt.n:11);live(id);LIVE[id]={x:cx,y:cy,r};
   if(opt.marks)opt.marks.forEach((m,i)=>{const a=(-135+270*i/(opt.marks.length-1)-90)*Math.PI/180;T(cx+(r+16)*Math.cos(a),cy+(r+16)*Math.sin(a)+3,m,8.5)});
   if(label)T(cx,cy+r+(opt.ly||19),label,opt.lz||10);ctl({id,kind:"knob",x:cx,y:cy,r:r+8,name:opt.name||id,fmt:opt.fmt})}
 function key(id,cx,cy,label,lamp){S.push(`<rect x="${cx-17}" y="${cy-17}" width="34" height="34" rx="4" fill="#050505" stroke="#262826" stroke-width="1.2"/>`);live(id);LIVE[id]={x:cx,y:cy};
@@ -64,8 +61,8 @@ function ledAt(l,cx,cy,r=4.5){S.push(`<circle cx="${cx}" cy="${cy}" r="${r+2}" f
 // A jack is drawn on the bay page only. Its name under it is part of its hover area (lx, ly).
 function jack(id,label,cx,cy,dir,type,name){S.push(`<circle cx="${cx}" cy="${cy}" r="${JR+1.5}" fill="#000" opacity=".55"/><circle cx="${cx}" cy="${cy}" r="${JR}" fill="url(#js)" stroke="#2a2a2c" stroke-width=".9"/><circle cx="${cx}" cy="${cy}" r="${JR-2.6}" fill="url(#jn)"/><circle cx="${cx}" cy="${cy}" r="${JR-5}" fill="#030303"/>`);
   T(cx,cy+24.5,label,9.5);JACKS["SHOGUN/"+id]={x:cx,y:cy,lx:cx,ly:cy+21,lw:Math.max(14,label.length*3.6),dir,type,name}}
-function toggle(id,cx,cy,marks,def,name){const lid=AL?id+"@"+Z:id;if(AL)ALIAS[lid]=id;else P[id]=DEF[id]=def;S.push(`<rect x="${cx-15}" y="${cy-8}" width="30" height="16" rx="3" fill="#050505" stroke="#262826"/><rect x="${cx-10}" y="${cy-2}" width="20" height="4" rx="2" fill="#000"/><circle cx="${cx}" cy="${cy}" r="5" fill="url(#jn)" stroke="#111" stroke-width=".8"/>`);
-  T(cx-21,cy+4,marks[0],9,"end");T(cx+21,cy+4,marks[1],9,"start");live(lid);LIVE[lid]={x:cx,y:cy};ctl({id,kind:"toggle",x:cx,y:cy,r:18,marks,name:name||id})}
+function toggle(id,cx,cy,marks,def,name){P[id]=DEF[id]=def;S.push(`<rect x="${cx-15}" y="${cy-8}" width="30" height="16" rx="3" fill="#050505" stroke="#262826"/><rect x="${cx-10}" y="${cy-2}" width="20" height="4" rx="2" fill="#000"/><circle cx="${cx}" cy="${cy}" r="5" fill="url(#jn)" stroke="#111" stroke-width=".8"/>`);
+  T(cx-21,cy+4,marks[0],9,"end");T(cx+21,cy+4,marks[1],9,"start");live(id);LIVE[id]={x:cx,y:cy};ctl({id,kind:"toggle",x:cx,y:cy,r:18,marks,name:name||id})}
 const lcdBox=(x,y,w,h)=>S.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="#0a0a0b" stroke="#2a2a2c" stroke-width="1.2"/><rect x="${x+4}" y="${y+4}" width="${w-8}" height="${h-8}" rx="1.5" fill="url(#lcd)"/>`);
 const LCD={};function lcd(id,x,y,w,label,chars){lcdBox(x,y,w,28);LCD[id]={x:x+6,y:y+6,w:w-12,h:16,n:chars};live("LCD:"+id);if(label)T(x+w/2,y+43,label,10)}
 const ccOf=(id,v)=>{const n=STEPS[id];if(!n)return Math.round(v*127);const i=Math.round(v*(n-1));return Math.floor(i*128/n)};   // a stepped control sends the lowest controller value of its position
@@ -199,32 +196,3 @@ let lfoV=0,lfoP=0,lfoT=-1,lfoCyc=0,lfoLastP=0;
  [0,1].forEach(i=>T(sx+34+(sw-62)*(i+.5)/2,sy+sh+15,"CYCLE "+(i+1),9.5,"middle","#9a9a90",.5));
  live("LFO:SCOPE");LIVE["LFO:SCOPE"]={x:sx+34,y:sy+10,w:sw-62,h:sh-20}}
 function lfoShapeAt(i,p,k){if(i==1)return 1-4*Math.abs(p-.5);if(i==2)return 2*p-1;if(i==3)return p<.5?1:-1;if(i==4)return[.55,-.7,.2,-.15,.9][k%5];return Math.sin(2*Math.PI*p)}
-
-// ================= the VOICE tab: pick a device, then a voice; large knobs for that voice only =================
-// Every knob here is the same control as on the face (or a kit-only control the face does not show: BD 1 and CLAP
-// TRANSIENT, the WAVE folders). The face on the RACK tab is unchanged.
-zone("voice");
-const VPX=330,VPW=(W-M-14-VPX)/16;
-{const y0=FR_T;T(M+18,y0+27,"VOICE",14,"start",INK,1.5);T(M+86,y0+27,"PICK A DEVICE, THEN A VOICE · THESE ARE THE SAME CONTROLS AS THE FACE",10,"start","#9a9a90",.4);
- rule(M,y0+40,W-M,y0+40);T(M+18,y0+68,"DEVICE",10.5,"start");lcdBox(M+76,y0+50,130,30);live("VDEV");
- T(VPX-12,y0+68,"VOICE",10.5,"end");live("VSEL");
- VOICES.forEach((v,i)=>ctl({id:"VSEL:"+v.k,kind:"sel",voice:v.k,x:VPX+VPW*(i+.5),y:y0+65,rw:VPW/2-2,rh:15,rect:1}));
- rule(M,y0+96,W-M,y0+96)}
-const VEXTRA={BD1:[["SOUND","TRANSIENT",x=>"transient "+(1+Math.round(x*15))+" of 16"]],CP:[["SOUND","TRANSIENT",x=>"transient "+(1+Math.round(x*15))+" of 16"]]};
-const VCV={BD1:"CV IN · BD1 PITCH adds to TUNE: 5 V is about a fourth up",BD2:"CV IN · BD2 PITCH adds to TUNE: 5 V is about a fourth up",
-  SD:"CV IN · SD PITCH adds to TUNE (5 V is about a fourth up) · SD SNAPPY adds to SNAPPY (5 V is the whole knob)",
-  LTC:"CV IN · TOM PITCH adds to TUNE on all three toms: 5 V is about a fourth up",OH:"CV IN · HAT DECAY adds to DECAY on both hats (5 V is the whole knob, on the same short decay curve)"};
-VCV.MTC=VCV.HTC=VCV.LTC;VCV.HH=VCV.OH;
-AL=true;
-VOICES.forEach(v=>{zone("v_"+v.k);const y0=FR_T,cy=y0+164,items=[];
-  v.knobs.forEach(([lb,p,n,idn])=>{const id=v.k+":"+(idn||lb);if(!p)return;items.push(n=="tog"?{tog:id,lb,marks:["OFF","ON"],name:v.t+" · NOISE"}:{id,lb})});
-  (VEXTRA[v.k]||[]).forEach(([h,lb,fmt])=>items.push({id:v.k+":"+h,lb,fmt,name:v.t+" · "+lb}));
-  if(v.tog){items.push({tog:v.k+":MODE",lb:"TOM / CGA",marks:["TOM","CGA"],name:v.t+" · TOM or CONGA"});items.push({id:"TOMS:NOISE",lb:"NOISE LVL"})}
-  items.push({id:v.k+":LEVEL",lb:"LEVEL"});
-  const sp=Math.min(150,(AV-40)/items.length),x0=W/2-sp*(items.length-1)/2;
-  items.forEach((it,i)=>{const cx=x0+sp*i;
-    if(it.tog){toggle(it.tog,cx,cy,it.marks,0,it.name);T(cx,cy+44,it.lb,11.5);return}
-    const fc=CTRL.find(c=>c.id==it.id&&c.kind=="knob");
-    knob(it.id,it.lb,cx,cy,0,{r:30,lz:11.5,ly:26,n:STEPS[it.id],name:it.name||(fc&&fc.name),fmt:it.fmt||(fc&&fc.fmt)})});
-  T(M+18,y0+252,VCV[v.k]||"No CV input on this voice",10.5,"start","#9a9a90",.3)});
-AL=false;

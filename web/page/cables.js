@@ -51,15 +51,15 @@ menu.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)retur
 $("clr").onclick=()=>{cables=[];build();info.textContent="Cables cleared"};
 // BAY adds the bay and its hang below the sequencer and the panel grows; closing it shrinks the panel back. It hides or
 // shows the jacks and cables and never adds or removes a cable; a patched cable keeps working while the bay is closed.
-// The tabs (RACK, LFO, VOICE) swap the page under the top bar the same way: the engine keeps running and no cable moves.
+// The tabs (RACK, LFO) swap the page under the top bar the same way: the engine keeps running and no cable moves.
 let bay=false,view="rack";
-const ZON={top:()=>1,face:()=>view=="rack",seq:()=>view=="rack",baykey:()=>view=="rack",bay:()=>view=="rack"&&bay,lfo:()=>view=="lfo",voice:()=>view=="voice"};
-const zoneOn=z=>z.startsWith("v_")?view=="voice"&&z=="v_"+sel:ZON[z]();
+const ZON={top:()=>1,face:()=>view=="rack",seq:()=>view=="rack",baykey:()=>view=="rack",bay:()=>view=="rack"&&bay,lfo:()=>view=="lfo"};
+const zoneOn=z=>ZON[z]();
 function showZones(){for(const z in ART){const d=zoneOn(z)?"":"none";$("az_"+z).style.display=d;$("lz_"+z).style.display=d}
-  cab.style.display=view=="rack"&&bay?"":"none";VH=view=="lfo"?H_LFO:view=="voice"?H_VOICE:bay?H:H_SEQ;drawShell()}
+  cab.style.display=view=="rack"&&bay?"":"none";VH=view=="lfo"?H_LFO:bay?H:H_SEQ;drawShell()}
 function setView(v){if(grab)cancel();hideMenu();setHov(null);down=null;kdrag=null;if(DD.open)ddClose();view=v;showZones();
   document.querySelectorAll(".tab").forEach(b=>{b.classList.toggle("on",b.dataset.v==v);b.setAttribute("aria-selected",b.dataset.v==v)});drawAll();
-  info.textContent=v=="lfo"?"LFO · one tempo-synced LFO for the rack · patch LFO OUT in the bay to use it":v=="voice"?"VOICE · "+VK[sel].t+" · pick a voice above; the knobs are the same as on the face":
+  info.textContent=v=="lfo"?"LFO · one tempo-synced LFO for the rack · patch LFO OUT in the bay to use it":
     "RACK · "+cables.length+" cable"+(cables.length==1?"":"s")+" patched"}
 function setBay(on){if(grab)cancel();hideMenu();setHov(null);down=null;bay=!!on;showZones();
   if(DD.open)ddClose();drawAll();info.textContent=bay?"BAY · "+cables.length+" cable"+(cables.length==1?"":"s")+" · drag from a jack to a jack, drop on empty space to unplug":"BAY closed · "+cables.length+" cable"+(cables.length==1?"":"s")+" still patched"}
