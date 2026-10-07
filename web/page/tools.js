@@ -39,8 +39,8 @@ function randomVoice(){const v=VK[sel],done=[];undoPush();
 // Chain: a list of patterns that play one bar each, in order, while CHAIN is on. Kept in this browser.
 let CHAIN={list:[],on:false},chainPos=-1,chainArm=-1;
 const saveChain=()=>store.set("shogun.chain",CHAIN);
-function loadChain(){const c=store.get("shogun.chain");if(c&&Array.isArray(c.list))CHAIN={list:c.list,on:!!c.on}}
-const chainName=e=>{const p=patList(e.b)[e.i];return e.b+pad3(e.i+1)+(p?" "+p.n:"")};
+function loadChain(){const c=store.get("shogun.chain");if(c&&Array.isArray(c.list))CHAIN={list:c.list.map(e=>e.b=="B"?{b:"A",i:BMOVE>=0?BMOVE+e.i:e.i}:e),on:!!c.on};if(BMOVE>=0)saveChain()}
+const chainName=e=>{const p=patList(e.b)[e.i];return pad3(e.i+1)+(p?" "+p.n:"")};
 function chainText(){const n=CHAIN.list.length;if(!n)return "EMPTY";return CHAIN.on?(running&&chainPos>=0?(chainPos+1)+"/"+n:"ON "+n):"OFF "+n}
 // On the last step of the bar, the next pattern is sent to start on the next step.
 function chainTick(){if(!CHAIN.on||!running||counter<0||!CHAIN.list.length)return;const bar=1+Math.round(P["CLOCK:BAR"]*31);

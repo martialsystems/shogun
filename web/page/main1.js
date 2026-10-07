@@ -103,7 +103,7 @@ for(let i=0;i<16;i++){const cx=SX+SW*(i+.5);live("NUM:"+i);LIVE["NUM:"+i]={x:cx,
 const NN=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],noteName=n=>NN[n%12]+(Math.floor(n/12)-1);
 // top band: name, pattern screen, track screen
 T(M+4,36,"SHOGUN",17,"start","#ffffff",4);
-const SCR={x:604,y:13,w:262,h:30},TRK={x:1200,y:13,w:110,h:30},KITR={x:314,y:13,w:150,h:30},CHN={x:1430,y:13,w:86,h:30};
+const SCR={x:604,y:13,w:262,h:30},TRK={x:1226,y:13,w:100,h:30},KITR={x:314,y:13,w:150,h:30},CHN={x:1452,y:13,w:76,h:30};
 T(SCR.x-12,33,"PATTERN",10.5,"end");T(TRK.x-12,33,"TRACK",10.5,"end");T(KITR.x-12,33,"KIT",10.5,"end");T(CHN.x-12,33,"CHAIN",10.5,"end");
 [SCR,TRK,KITR,CHN].forEach(r=>lcdBox(r.x,r.y,r.w,r.h));live("SCR");live("TRK");live("KIT");live("CHN");
 // a screen is a click target: PATTERN, TRACK and KIT open their lists, CHAIN turns the chain on or off
@@ -112,6 +112,4 @@ const btn=(id,cx,g,z=11,gy=32)=>{S.push(`<rect x="${cx-12}" y="16" width="24" he
 btn("LEARN",164,"M",11,32);ledAt({id:"LED:LEARN"},183,28,3.5);T(193,33,"LEARN",10.5,"start");
 btn("KSAVE",484,"+",17,33);T(500,33,"SAVE",10.5,"start");
 btn("PREV",884,"◀");btn("NEXT",912,"▶");btn("SAVE",944,"+",17,33);T(960,33,"SAVE",10.5,"start");btn("COPY",1010,"C",12,33);T(1026,33,"COPY",10.5,"start");
-// banks A and B: the lit lamp is the bank the arrows, the list, SAVE and COPY use
-[["A",1078],["B",1112]].forEach(([b,cx])=>{btn("BANK:"+b,cx,b,12,33);ledAt({id:"LED:BANK"+b},cx+19,28,3.5)});
-btn("TPREV",1328,"◀");btn("TNEXT",1360,"▶");btn("CH:ADD",1536,"+",17,33);btn("CH:DEL",1564,"−",15,33);
+btn("TPREV",1346,"◀");btn("TNEXT",1374,"▶");btn("CH:ADD",1546,"+",17,33);btn("CH:DEL",1572,"−",15,33);

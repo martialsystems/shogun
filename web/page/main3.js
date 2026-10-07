@@ -23,10 +23,9 @@ function describe(c){const t=tracks[sel];
   if(c.id=="CHN")return "CHAIN "+(CHAIN.on?"on":"off")+" · click to turn it "+(CHAIN.on?"off":"on")+(CHAIN.list.length?" · "+CHAIN.list.map(chainName).join(", "):" · + adds the loaded pattern");
   if(c.id=="CH:ADD")return "Add "+chainName(curPat)+" to the chain";
   if(c.id=="CH:DEL")return "Remove the last pattern from the chain · Shift-click clears it";
-  if(c.id=="COPY")return "Copy this pattern into bank "+bankView+" under a new name";
-  if(c.id.startsWith("BANK:"))return "Bank "+c.id.slice(5)+" · "+patList(c.id.slice(5)).length+" patterns"+(bankView==c.id.slice(5)?" · selected":"");
-  return {PREV:"Previous pattern in bank "+bankView,NEXT:"Next pattern in bank "+bankView,SAVE:DD.naming=="PAT"?"Save as "+(DD.name.trim()||"PATTERN"):userIdx()>=0?"Save over "+chainName(curPat):"Save this pattern and its knobs in bank "+bankView+" under a name",
-    SCR:"Pattern list · bank "+bankView,TRK:"Track list",TPREV:"Previous track",TNEXT:"Next track"}[c.id]||c.id}
+  if(c.id=="COPY")return "Copy this pattern under a new name";
+  return {PREV:"Previous pattern",NEXT:"Next pattern",SAVE:DD.naming=="PAT"?"Save as "+(DD.name.trim()||"PATTERN"):userIdx()>=0?"Save over "+chainName(curPat):"Save this pattern and its knobs under a name",
+    SCR:"Pattern list",TRK:"Track list",TPREV:"Previous track",TNEXT:"Next track"}[c.id]||c.id}
 function setP(id,v){v=clamp(v);if(STEPS[id]){const n=STEPS[id]-1;v=Math.round(v*n)/n}P[id]=v;const t=tracks[sel],st=t.steps[edit];
   if(MAP[id]){sendParam(id);if(!MAP[id].master){dirty=true;curKit.dirty=true}}
   else if(id.startsWith("CLOCK:")){sendClock();dirty=true}
@@ -60,7 +59,6 @@ function press(c,e){const t=tracks[sel];
   else if(c.id=="CHN"){if(!CHAIN.list.length){info.textContent="The chain is empty · + adds the loaded pattern";return}CHAIN.on=!CHAIN.on;chainPos=-1;saveChain()}
   else if(c.id=="CH:ADD"){if(CHAIN.list.length<64)CHAIN.list.push({b:curPat.b,i:curPat.i});saveChain();info.textContent="Chain: "+CHAIN.list.map(chainName).join(", ");drawAll();return}
   else if(c.id=="CH:DEL"){if(e.shiftKey)CHAIN.list=[];else CHAIN.list.pop();if(!CHAIN.list.length)CHAIN.on=false;saveChain();info.textContent=CHAIN.list.length?"Chain: "+CHAIN.list.map(chainName).join(", "):"The chain is empty";drawAll();return}
-  else if(c.id.startsWith("BANK:")){bankView=c.id.slice(5);if(DD.open=="PAT")ddOpen("PAT")}
   else if(c.id=="SCR"||c.id=="TRK"||c.id=="KIT"){const k=c.id=="SCR"?"PAT":c.id;if(DD.open==k)ddClose();else ddOpen(k);return}
   else if(c.id=="TPREV"||c.id=="TNEXT"){stepTrack(c.id=="TNEXT"?1:-1);return}
   else if(c.step!=null){const n=page*16+c.step,st=t.steps[n];edit=n;

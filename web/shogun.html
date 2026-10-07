@@ -38,7 +38,7 @@ p.legal{font-size:.8rem;margin-top:16px}
 <div class="sc"><div id="stage"><svg id="sv"><defs id="df"></defs><g id="panel"></g><g id="live"></g><g id="cab" style="filter:drop-shadow(3px 5px 4px rgba(0,0,0,.6))"></g><g id="ring"></g><g id="dd"></g></svg><div id="menu"></div></div></div>
 <p><b>SHOGUN</b> is the drum computer of the Martial Systems Jidai Collection: fourteen drum voices and two note voices, a sequencer of 1 to 32 steps per track, and patch jacks styled like BUSHIDO's and RONIN's. The sound is the SHOGUN engine itself, compiled for the browser. Press a voice key while stopped to hear that voice.
 <b>Tracks:</b> a voice's key selects its track, and its lamp shows which track is selected. In TRACK, LENGTH sets that track from 1 to 32 steps, SHUFFLE delays its odd steps (16 settings), SHIFT moves the whole track later (up to 30 ms) and MUTE silences it. The 16 step keys are a page: 1-16 and 17-32 switch pages, and steps past the track's length are dimmed. Click a step key to turn it on or off. The lamp under a step is its accent: off is soft, green is medium, red is loud; click it to change. CLEAR empties the selected track.
-<b>Step edits:</b> the last step key you clicked is the edit step (its number is in the EDIT screen). FLAM picks one of 16 flams or none, BEND sets a pitch bend on BD 1, BD 2, the snare and the toms, and NOTE and TIE set the note and the tie on the LEAD and BASS tracks. <b>Patterns:</b> click the PATTERN screen for the list of the lit bank (A or B, up to 999 each; bank A starts with the factory patterns), type to search, use the arrow keys or scroll, then click a row or press Enter. ◀ ▶ step through the bank. SAVE writes over a saved pattern; on a factory pattern it asks for a name. COPY saves the pattern under a new name in the lit bank. Saved patterns keep their knobs and stay in this browser. <b>Kits:</b> KIT lists the sounds: loading one changes the knobs and keeps the steps, and its SAVE stores the knobs as a kit. <b>Chain:</b> + adds the loaded pattern to the chain, − removes the last (Shift-click clears it), and clicking the CHAIN screen turns it on: each pattern then plays one bar, in order. The chain is kept. <b>Under each step:</b> the ACC lamp shows the accent (dim green soft, green medium, red loud) and the line below shows the flam (F1 to F16) and the bend in semitones, or the note on LEAD and BASS (~ = tied). <b>UNDO</b> takes back the last knob move or key press (Ctrl+Z; Shift-click or Ctrl+Shift+Z redoes). <b>RANDOM</b> rolls the selected voice's knobs inside their ranges. <b>MIDI:</b> notes 36 to 51 play the tracks in order, as in the plugin. To change one, press LEARN, pick a track, hit a pad; the next track is then selected. Press LEARN again to finish. <b>Track:</b> click the TRACK screen for the list of tracks, or use its ◀ ▶.
+<b>Step edits:</b> the last step key you clicked is the edit step (its number is in the EDIT screen). FLAM picks one of 16 flams or none, BEND sets a pitch bend on BD 1, BD 2, the snare and the toms, and NOTE and TIE set the note and the tie on the LEAD and BASS tracks. <b>Patterns:</b> click the PATTERN screen for the pattern list (the factory patterns, then your saved ones, up to 999), type to search, use the arrow keys or scroll, then click a row or press Enter. ◀ ▶ step through the list. SAVE writes over a saved pattern; on a factory pattern it asks for a name. COPY saves the pattern under a new name. Saved patterns keep their knobs and stay in this browser. <b>Kits:</b> KIT lists the sounds: loading one changes the knobs and keeps the steps, and its SAVE stores the knobs as a kit. <b>Chain:</b> + adds the loaded pattern to the chain, − removes the last (Shift-click clears it), and clicking the CHAIN screen turns it on: each pattern then plays one bar, in order. The chain is kept. <b>Under each step:</b> the ACC lamp shows the accent (dim green soft, green medium, red loud) and the line below shows the flam (F1 to F16) and the bend in semitones, or the note on LEAD and BASS (~ = tied). <b>UNDO</b> takes back the last knob move or key press (Ctrl+Z; Shift-click or Ctrl+Shift+Z redoes). <b>RANDOM</b> rolls the selected voice's knobs inside their ranges. <b>MIDI:</b> notes 36 to 51 play the tracks in order, as in the plugin. To change one, press LEARN, pick a track, hit a pad; the next track is then selected. Press LEARN again to finish. <b>Track:</b> click the TRACK screen for the list of tracks, or use its ◀ ▶.
 <b>Clock:</b> TEMPO runs from 60 to 180 BPM, SCALE sets the steps per beat (32nd, 16th triplet, 16th, 8th triplet), BAR sets the bar length the STEP screen counts. INT lets the pattern fire the voices. EXT cuts the pattern off: each drum fires only from its TRIG jack, and the clock keeps counting. RST IN restarts the count, RUN IN starts or stops, and with CLK IN patched each pulse there is one step. On this page CLK OUT is the gate to patch: into a TRIG jack in EXT, or into RST IN, RUN IN or CLK IN.
 <b>Outputs:</b> the paired outs are taps before MASTER, and every voice stays in MAIN whether or not its pair is patched. MASTER scales MAIN only. The Monitor slider above sets how loud the page plays. <b>Knobs:</b> drag up or down (Shift = fine), scroll, double-click resets. Drag from a jack to a jack, drag a plug to move it, drop it on empty space to unplug, click a patched jack for its stack. Esc cancels.</p>
 <p class="legal">© 2026 Martial Systems LLC · Jidai Collection. SHOGUN is inspired by the MFB Tanzbär. MFB and Tanzbär are trademarks of their respective owners; Martial Systems is not affiliated with or endorsed by MFB.</p>
@@ -170,7 +170,7 @@ for(let i=0;i<16;i++){const cx=SX+SW*(i+.5);live("NUM:"+i);LIVE["NUM:"+i]={x:cx,
 const NN=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],noteName=n=>NN[n%12]+(Math.floor(n/12)-1);
 // top band: name, pattern screen, track screen
 T(M+4,36,"SHOGUN",17,"start","#ffffff",4);
-const SCR={x:604,y:13,w:262,h:30},TRK={x:1200,y:13,w:110,h:30},KITR={x:314,y:13,w:150,h:30},CHN={x:1430,y:13,w:86,h:30};
+const SCR={x:604,y:13,w:262,h:30},TRK={x:1226,y:13,w:100,h:30},KITR={x:314,y:13,w:150,h:30},CHN={x:1452,y:13,w:76,h:30};
 T(SCR.x-12,33,"PATTERN",10.5,"end");T(TRK.x-12,33,"TRACK",10.5,"end");T(KITR.x-12,33,"KIT",10.5,"end");T(CHN.x-12,33,"CHAIN",10.5,"end");
 [SCR,TRK,KITR,CHN].forEach(r=>lcdBox(r.x,r.y,r.w,r.h));live("SCR");live("TRK");live("KIT");live("CHN");
 // a screen is a click target: PATTERN, TRACK and KIT open their lists, CHAIN turns the chain on or off
@@ -179,9 +179,7 @@ const btn=(id,cx,g,z=11,gy=32)=>{S.push(`<rect x="${cx-12}" y="16" width="24" he
 btn("LEARN",164,"M",11,32);ledAt({id:"LED:LEARN"},183,28,3.5);T(193,33,"LEARN",10.5,"start");
 btn("KSAVE",484,"+",17,33);T(500,33,"SAVE",10.5,"start");
 btn("PREV",884,"◀");btn("NEXT",912,"▶");btn("SAVE",944,"+",17,33);T(960,33,"SAVE",10.5,"start");btn("COPY",1010,"C",12,33);T(1026,33,"COPY",10.5,"start");
-// banks A and B: the lit lamp is the bank the arrows, the list, SAVE and COPY use
-[["A",1078],["B",1112]].forEach(([b,cx])=>{btn("BANK:"+b,cx,b,12,33);ledAt({id:"LED:BANK"+b},cx+19,28,3.5)});
-btn("TPREV",1328,"◀");btn("TNEXT",1360,"▶");btn("CH:ADD",1536,"+",17,33);btn("CH:DEL",1564,"−",15,33);
+btn("TPREV",1346,"◀");btn("TNEXT",1374,"▶");btn("CH:ADD",1546,"+",17,33);btn("CH:DEL",1572,"−",15,33);
 
 // ================= panel art =================
 const DEFS='<linearGradient id="pf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#181918"/><stop offset="1" stop-color="#0c0d0c"/></linearGradient>'+
@@ -280,11 +278,13 @@ const FACT=[
 const store={get(k){try{return JSON.parse(localStorage.getItem(k)||"null")}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const blankStep=()=>({on:false,acc:1,flam:-1,bend:null,note:60,tie:false});
 let sel="BD1",page=0,edit=0,dirty=false,tracks={};
-// Banks A and B of up to 999 patterns. Bank A starts with the factory patterns; saved patterns follow, kept in this browser.
+// One list of up to 999 patterns: the factory patterns, then the saved ones, kept in this browser. (Internally bank "A"; an
+// older bank B is merged in at load.)
 let USERP={A:[],B:[]},curPat={b:"A",i:0},bankView="A";
 const pad3=n=>String(n).padStart(3,"0"),patList=b=>(b=="A"?FACT:[]).concat(USERP[b]);
 function loadUser(){const u=store.get("shogun.patterns"),old=store.get("shogun.user2");
-  USERP=u&&u.A&&u.B?u:{A:old||[],B:[]}}
+  USERP=u&&u.A&&u.B?u:{A:old||[],B:[]};if(USERP.B.length){BMOVE=FACT.length+USERP.A.length;USERP.A=USERP.A.concat(USERP.B);USERP.B=[];saveUser()}}
+let BMOVE=-1;
 const saveUser=()=>store.set("shogun.patterns",USERP);
 function fromFactory(p){const t={};VOICES.forEach(v=>{const len=(p.L&&p.L[v.k])||p.len,steps=Array.from({length:32},blankStep);
     if(NOTEK[v.k]){const tok=((p.nt||{})[v.k]||"").split(" ").filter(Boolean);if(tok.length)for(let i=0;i<len;i++){const s=tok[i%tok.length],st=steps[i];if(s=="-"){st.on=true;st.tie=true;st.note=steps[i-1]?steps[i-1].note:60}else if(s!="."){st.on=true;st.note=+s}}}
@@ -299,12 +299,12 @@ function loadPat(b,i,at){const L=patList(b);if(!L.length){info.textContent=`Bank
   ["LTC","MTC","HTC"].forEach((k,j)=>{P[k+":MODE"]=p.tom&&p.tom[j]=="C"?1:0});
   const kn=patKnobs(p);for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}   // double-click returns a knob to the pattern's setting
   page=0;edit=0;dirty=false;loadKnobs();const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);
-  sendClock();VOICES.forEach(v=>{sendTrack(v.k);sendSteps(v.k)});info.textContent=`Pattern ${b}${pad3(i+1)} ${p.n} · ${p.bpm} BPM`}
-// over: the index of the user pattern to write over; otherwise the pattern goes at the end of the lit bank
+  sendClock();VOICES.forEach(v=>{sendTrack(v.k);sendSteps(v.k)});info.textContent=`Pattern ${pad3(i+1)} ${p.n} · ${p.bpm} BPM`}
+// over: the index of the user pattern to write over; otherwise the pattern goes at the end of the list
 function savePat(name,over){const knobs={};for(const id in MAP)if(!MAP[id].master)knobs[id]=P[id];
   const rec={n:name,kit:curKit.n,bpm:+bpmOf(P["CLOCK:TEMPO"]).toFixed(1),scale:Math.round(P["CLOCK:SCALE"]*3),bar:1+Math.round(P["CLOCK:BAR"]*31),
     tom:["LTC","MTC","HTC"].map(k=>P[k+":MODE"]>.5?"C":"T").join(""),tracks:JSON.parse(JSON.stringify(tracks)),knobs};
-  if(over!=null)USERP[curPat.b][over]=rec;else{USERP[bankView].push(rec);curPat={b:bankView,i:patList(bankView).length-1}}saveUser();dirty=false;for(const id in knobs)DEF[id]=knobs[id];info.textContent=`Saved ${over!=null?"over":"as"} ${curPat.b}${pad3(curPat.i+1)} ${name} in this browser`}
+  if(over!=null)USERP[curPat.b][over]=rec;else{USERP[bankView].push(rec);curPat={b:bankView,i:patList(bankView).length-1}}saveUser();dirty=false;for(const id in knobs)DEF[id]=knobs[id];info.textContent=`Saved ${over!=null?"over":"as"} ${pad3(curPat.i+1)} ${name} in this browser`}
 // the TRACK and STEP knobs show the selected track and the edit step
 function loadKnobs(){const t=tracks[sel],st=t.steps[edit];P["SEQ:LENGTH"]=(t.len-1)/31;P["SEQ:SHUFFLE"]=t.shuffle/15;P["SEQ:SHIFT"]=t.shift/127;
   P["STEP:FLAM"]=(st.flam+1)/16;P["STEP:BEND"]=st.bend==null?.5:st.bend/127;P["STEP:NOTE"]=(clamp(st.note,36,72)-36)/36}
@@ -363,14 +363,14 @@ const lcdPut=(id,text)=>{const L=LCD[id];put("LCD:"+id,dots(L.x,L.y,L.w,L.h,text
 function drawAll(){
   for(const id in P){const L=LIVE[id];if(!L)continue;if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*P[id]));else{const r=P[id]>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
   const t=tracks[sel],bar=1+Math.round(P["CLOCK:BAR"]*31);
-  lcdPut("BPM",bpmOf(P["CLOCK:TEMPO"]).toFixed(0).padStart(3," "));lcdPut("POS",counter>=0?String(posOf(counter,bar)+1).padStart(2," "):"--");lcdPut("LEN",String(t.len).padStart(2," "));lcdPut("EDIT",String(edit+1).padStart(2," "));
+  lcdPut("BPM",bpmOf(P["CLOCK:TEMPO"]).toFixed(0).padStart(3," "));lcdPut("POS",counter>=0&&counter>=rot0?String(posOf(counter,bar)+1).padStart(2," "):"--");lcdPut("LEN",String(t.len).padStart(2," "));lcdPut("EDIT",String(edit+1).padStart(2," "));
   put("KIT",dots(KITR.x+8,KITR.y+6,KITR.w-16,KITR.h-12,kitText().slice(-12),12));put("CHN",dots(CHN.x+8,CHN.y+6,CHN.w-16,CHN.h-12,chainText(),8));
   put("SCR",dots(SCR.x+8,SCR.y+6,SCR.w-16,SCR.h-12,scrText().slice(-20),20));put("TRK",dots(TRK.x+8,TRK.y+6,TRK.w-16,TRK.h-12,trkText(),8));
   const kb=(id,black)=>{const L=LIVE[id];put(id,keyBody(L.x,L.y,black,pressed==id))},ld=(id,on,c)=>{const L=LIVE[id];put(id,lamp(L.x,L.y,L.r,on,c))};
-  VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});["A","B"].forEach(b=>ld("LED:BANK"+b,bankView==b));ld("LED:LEARN",MIDI.learn);
+  VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});ld("LED:LEARN",MIDI.learn);
   kb("START",false);kb("CLEAR",true);kb("UNDO",true);kb("RANDOM",true);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
   [0,1].forEach(n=>{kb("PAGE:"+n,true);ld("LED:P"+n,page==n)});
-  const o=page*16,ph=running&&counter>=0?posOf(counter,t.len):-1;
+  const o=page*16,ph=running&&counter>=0&&counter>=rot0?posOf(counter,t.len):-1;
   for(let i=0;i<16;i++){const n=o+i,st=t.steps[n],in_=n<t.len,L=LIVE["STEP:"+i];
     put("NUM:"+i,`<text x="${LIVE["NUM:"+i].x}" y="${LIVE["NUM:"+i].y}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="12" font-weight="700" letter-spacing=".5" text-anchor="middle" fill="${INK}" opacity="${in_?1:.4}">${n+1}</text>`);
     put("STEP:"+i,`<g opacity="${in_?1:.4}">`+keyBody(L.x,L.y,!st.on,pressed=="STEP:"+i)+`</g>`);
@@ -379,8 +379,7 @@ function drawAll(){
 
 // ================= PATTERN, TRACK and KIT screens: dropdown lists like RONIN's PRESET screen =================
 // Click a screen for its list, type to search, arrows or scroll, then click a row or press Enter. Esc closes.
-// Patterns: banks A and B of up to 999. Bank A starts with the factory patterns; the lit bank lamp is the bank you browse,
-// step through with the arrows, and COPY into (type a name, then Enter). SAVE writes over a saved pattern; on a factory
+// Patterns: one list of up to 999, the factory patterns first. Step through with the arrows; COPY adds one (type a name, then Enter). SAVE writes over a saved pattern; on a factory
 // pattern it asks for a name like COPY. A kit is the knob settings alone: loading one keeps the steps. Saved items stay in this browser.
 const DD={open:null,query:"",name:"",hi:0,top:0},DDROWS=8,DDROW=20,DDPAD=5,MAXP=999;
 const ddRect=()=>DD.open=="PAT"?{x:SCR.x,w:SCR.w,y:SCR.y+SCR.h+4}:DD.open=="KIT"?{x:KITR.x,w:220,y:KITR.y+KITR.h+4}:{x:TRK.x+TRK.w-190,w:190,y:TRK.y+TRK.h+4};
@@ -393,13 +392,13 @@ function ddDraw(){const g=$("dd");if(!DD.open){g.innerHTML="";return}const b=ddB
   let s=`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="4" fill="#0a0a0b" stroke="${GRN}" stroke-width="1.2"/>`;
   const row=(k,txt,hi)=>{const x=b.x+DDPAD,y=b.y+DDPAD+k*DDROW,w=b.w-DDPAD*2,h=DDROW-3;
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="${hi?"#1d2414":"url(#lcd)"}"/>`+dots(x+3,y+1,w-6,h-2,txt,n,hi?"#a6b192":"#1d2414")};
-  if(!M.length)s+=row(0,DD.open!="PAT"||patList(bankView).length?" NO MATCH":" BANK "+bankView+" IS EMPTY",false);
+  if(!M.length)s+=row(0,DD.open!="PAT"||patList(bankView).length?" NO MATCH":" NO PATTERNS",false);
   M.slice(DD.top,DD.top+DDROWS).forEach((r,k)=>{s+=row(k,(r.on?">":" ")+r.t,DD.top+k==DD.hi)});
   if(M.length>DDROWS){const h=b.h-8,y=b.y+4+h*DD.top/M.length;s+=`<rect x="${b.x+b.w-4}" y="${y.toFixed(1)}" width="2" height="${(h*DDROWS/M.length).toFixed(1)}" rx="1" fill="${GRN}" opacity=".8"/>`}
   g.innerHTML=s}
 function ddKeep(){if(DD.hi<DD.top)DD.top=DD.hi;if(DD.hi>=DD.top+DDROWS)DD.top=DD.hi-DDROWS+1}
 function ddOpen(kind){DD.open=kind;DD.query="";const M=ddItems();DD.hi=Math.max(0,M.findIndex(r=>r.on));DD.top=0;ddKeep();ddDraw();drawAll();
-  info.textContent=(kind=="PAT"?"Patterns in bank "+bankView:kind=="KIT"?"Kits: loading one changes the knobs and keeps the steps":"Tracks")+" · type to search, arrows or scroll, Enter or click · Esc closes"}
+  info.textContent=(kind=="PAT"?"Patterns":kind=="KIT"?"Kits: loading one changes the knobs and keeps the steps":"Tracks")+" · type to search, arrows or scroll, Enter or click · Esc closes"}
 function ddClose(){DD.open=null;ddDraw();drawAll()}
 function ddChoose(r){const k=DD.open;ddClose();if(!r)return;if(k=="PAT")loadPat(bankView,r.i);else if(k=="KIT")loadKit(r.i);else selTrack(VOICES[r.i].k)}
 function ddRowAt(x,y){const b=ddBox();if(x<b.x||x>b.x+b.w||y<b.y||y>b.y+b.h)return null;const k=Math.floor((y-b.y-DDPAD)/DDROW);const M=ddItems();return k>=0&&k<DDROWS&&DD.top+k<M.length?M[DD.top+k]:undefined}
@@ -417,14 +416,14 @@ function ddKey(e){const ch=typedCh(e);
   else if(ch&&DD.query.length<12){DD.query+=ch;DD.hi=0;DD.top=0;ddDraw();drawAll()}
   else return true;
   e.preventDefault();return true}
-// kind: "PAT" (a new pattern in the lit bank) or "KIT"; the name starts as name and can be edited
-function nameStart(kind,name=""){if(kind=="PAT"&&patList(bankView).length>=MAXP){info.textContent=`Bank ${bankView} is full (${MAXP})`;return}ddClose();DD.naming=kind;DD.name=name.toUpperCase().slice(0,12);drawAll();
-  info.textContent="Type a name, then Enter"+(kind=="PAT"?" to save in bank "+bankView:" (or SAVE again) to save the kit")+" · Esc cancels"}
+// kind: "PAT" (a new pattern at the end of the list) or "KIT"; the name starts as name and can be edited
+function nameStart(kind,name=""){if(kind=="PAT"&&patList(bankView).length>=MAXP){info.textContent=`The pattern list is full (${MAXP})`;return}ddClose();DD.naming=kind;DD.name=name.toUpperCase().slice(0,12);drawAll();
+  info.textContent="Type a name, then Enter"+(kind=="PAT"?" to save the pattern":" (or SAVE again) to save the kit")+" · Esc cancels"}
 function nameCancel(){DD.naming=false;drawAll()}
 function nameCommit(){const k=DD.naming,n=(DD.name.trim()||(k=="KIT"?"KIT":"PATTERN")).slice(0,12);DD.naming=false;if(k=="KIT")saveKit(n);else savePat(n);drawAll()}
 // what the PATTERN screen shows: the loaded pattern, the search being typed, or the name being typed
-function scrText(){if(DD.naming=="PAT")return bankView+pad3(patList(bankView).length+1)+" "+DD.name+"_";if(DD.open=="PAT")return "FIND "+DD.query+"_";
-  const p=patList(curPat.b)[curPat.i];return p?curPat.b+pad3(curPat.i+1)+" "+p.n.toUpperCase()+(dirty?"*":""):""}
+function scrText(){if(DD.naming=="PAT")return pad3(patList(bankView).length+1)+" "+DD.name+"_";if(DD.open=="PAT")return "FIND "+DD.query+"_";
+  const p=patList(curPat.b)[curPat.i];return p?pad3(curPat.i+1)+" "+p.n.toUpperCase()+(dirty?"*":""):""}
 const kitText=()=>DD.naming=="KIT"?DD.name+"_":DD.open=="KIT"?"FIND "+DD.query+"_":curKit.n.toUpperCase()+(curKit.dirty?"*":"");
 const trkText=()=>DD.open=="TRK"?("FIND "+DD.query+"_").slice(-8):VK[sel].t;
 function selTrack(k){sel=k;if(edit>=tracks[sel].len)edit=0;loadKnobs();drawAll();info.textContent=describe(CTRL.find(c=>c.voice==k))}
@@ -471,8 +470,8 @@ function randomVoice(){const v=VK[sel],done=[];undoPush();
 // Chain: a list of patterns that play one bar each, in order, while CHAIN is on. Kept in this browser.
 let CHAIN={list:[],on:false},chainPos=-1,chainArm=-1;
 const saveChain=()=>store.set("shogun.chain",CHAIN);
-function loadChain(){const c=store.get("shogun.chain");if(c&&Array.isArray(c.list))CHAIN={list:c.list,on:!!c.on}}
-const chainName=e=>{const p=patList(e.b)[e.i];return e.b+pad3(e.i+1)+(p?" "+p.n:"")};
+function loadChain(){const c=store.get("shogun.chain");if(c&&Array.isArray(c.list))CHAIN={list:c.list.map(e=>e.b=="B"?{b:"A",i:BMOVE>=0?BMOVE+e.i:e.i}:e),on:!!c.on};if(BMOVE>=0)saveChain()}
+const chainName=e=>{const p=patList(e.b)[e.i];return pad3(e.i+1)+(p?" "+p.n:"")};
 function chainText(){const n=CHAIN.list.length;if(!n)return "EMPTY";return CHAIN.on?(running&&chainPos>=0?(chainPos+1)+"/"+n:"ON "+n):"OFF "+n}
 // On the last step of the bar, the next pattern is sent to start on the next step.
 function chainTick(){if(!CHAIN.on||!running||counter<0||!CHAIN.list.length)return;const bar=1+Math.round(P["CLOCK:BAR"]*31);
@@ -571,10 +570,9 @@ function describe(c){const t=tracks[sel];
   if(c.id=="CHN")return "CHAIN "+(CHAIN.on?"on":"off")+" · click to turn it "+(CHAIN.on?"off":"on")+(CHAIN.list.length?" · "+CHAIN.list.map(chainName).join(", "):" · + adds the loaded pattern");
   if(c.id=="CH:ADD")return "Add "+chainName(curPat)+" to the chain";
   if(c.id=="CH:DEL")return "Remove the last pattern from the chain · Shift-click clears it";
-  if(c.id=="COPY")return "Copy this pattern into bank "+bankView+" under a new name";
-  if(c.id.startsWith("BANK:"))return "Bank "+c.id.slice(5)+" · "+patList(c.id.slice(5)).length+" patterns"+(bankView==c.id.slice(5)?" · selected":"");
-  return {PREV:"Previous pattern in bank "+bankView,NEXT:"Next pattern in bank "+bankView,SAVE:DD.naming=="PAT"?"Save as "+(DD.name.trim()||"PATTERN"):userIdx()>=0?"Save over "+chainName(curPat):"Save this pattern and its knobs in bank "+bankView+" under a name",
-    SCR:"Pattern list · bank "+bankView,TRK:"Track list",TPREV:"Previous track",TNEXT:"Next track"}[c.id]||c.id}
+  if(c.id=="COPY")return "Copy this pattern under a new name";
+  return {PREV:"Previous pattern",NEXT:"Next pattern",SAVE:DD.naming=="PAT"?"Save as "+(DD.name.trim()||"PATTERN"):userIdx()>=0?"Save over "+chainName(curPat):"Save this pattern and its knobs under a name",
+    SCR:"Pattern list",TRK:"Track list",TPREV:"Previous track",TNEXT:"Next track"}[c.id]||c.id}
 function setP(id,v){v=clamp(v);if(STEPS[id]){const n=STEPS[id]-1;v=Math.round(v*n)/n}P[id]=v;const t=tracks[sel],st=t.steps[edit];
   if(MAP[id]){sendParam(id);if(!MAP[id].master){dirty=true;curKit.dirty=true}}
   else if(id.startsWith("CLOCK:")){sendClock();dirty=true}
@@ -608,7 +606,6 @@ function press(c,e){const t=tracks[sel];
   else if(c.id=="CHN"){if(!CHAIN.list.length){info.textContent="The chain is empty · + adds the loaded pattern";return}CHAIN.on=!CHAIN.on;chainPos=-1;saveChain()}
   else if(c.id=="CH:ADD"){if(CHAIN.list.length<64)CHAIN.list.push({b:curPat.b,i:curPat.i});saveChain();info.textContent="Chain: "+CHAIN.list.map(chainName).join(", ");drawAll();return}
   else if(c.id=="CH:DEL"){if(e.shiftKey)CHAIN.list=[];else CHAIN.list.pop();if(!CHAIN.list.length)CHAIN.on=false;saveChain();info.textContent=CHAIN.list.length?"Chain: "+CHAIN.list.map(chainName).join(", "):"The chain is empty";drawAll();return}
-  else if(c.id.startsWith("BANK:")){bankView=c.id.slice(5);if(DD.open=="PAT")ddOpen("PAT")}
   else if(c.id=="SCR"||c.id=="TRK"||c.id=="KIT"){const k=c.id=="SCR"?"PAT":c.id;if(DD.open==k)ddClose();else ddOpen(k);return}
   else if(c.id=="TPREV"||c.id=="TNEXT"){stepTrack(c.id=="TNEXT"?1:-1);return}
   else if(c.step!=null){const n=page*16+c.step,st=t.steps[n];edit=n;

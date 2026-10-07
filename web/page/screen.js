@@ -1,7 +1,6 @@
 // ================= PATTERN, TRACK and KIT screens: dropdown lists like RONIN's PRESET screen =================
 // Click a screen for its list, type to search, arrows or scroll, then click a row or press Enter. Esc closes.
-// Patterns: banks A and B of up to 999. Bank A starts with the factory patterns; the lit bank lamp is the bank you browse,
-// step through with the arrows, and COPY into (type a name, then Enter). SAVE writes over a saved pattern; on a factory
+// Patterns: one list of up to 999, the factory patterns first. Step through with the arrows; COPY adds one (type a name, then Enter). SAVE writes over a saved pattern; on a factory
 // pattern it asks for a name like COPY. A kit is the knob settings alone: loading one keeps the steps. Saved items stay in this browser.
 const DD={open:null,query:"",name:"",hi:0,top:0},DDROWS=8,DDROW=20,DDPAD=5,MAXP=999;
 const ddRect=()=>DD.open=="PAT"?{x:SCR.x,w:SCR.w,y:SCR.y+SCR.h+4}:DD.open=="KIT"?{x:KITR.x,w:220,y:KITR.y+KITR.h+4}:{x:TRK.x+TRK.w-190,w:190,y:TRK.y+TRK.h+4};
@@ -14,13 +13,13 @@ function ddDraw(){const g=$("dd");if(!DD.open){g.innerHTML="";return}const b=ddB
   let s=`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="4" fill="#0a0a0b" stroke="${GRN}" stroke-width="1.2"/>`;
   const row=(k,txt,hi)=>{const x=b.x+DDPAD,y=b.y+DDPAD+k*DDROW,w=b.w-DDPAD*2,h=DDROW-3;
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.5" fill="${hi?"#1d2414":"url(#lcd)"}"/>`+dots(x+3,y+1,w-6,h-2,txt,n,hi?"#a6b192":"#1d2414")};
-  if(!M.length)s+=row(0,DD.open!="PAT"||patList(bankView).length?" NO MATCH":" BANK "+bankView+" IS EMPTY",false);
+  if(!M.length)s+=row(0,DD.open!="PAT"||patList(bankView).length?" NO MATCH":" NO PATTERNS",false);
   M.slice(DD.top,DD.top+DDROWS).forEach((r,k)=>{s+=row(k,(r.on?">":" ")+r.t,DD.top+k==DD.hi)});
   if(M.length>DDROWS){const h=b.h-8,y=b.y+4+h*DD.top/M.length;s+=`<rect x="${b.x+b.w-4}" y="${y.toFixed(1)}" width="2" height="${(h*DDROWS/M.length).toFixed(1)}" rx="1" fill="${GRN}" opacity=".8"/>`}
   g.innerHTML=s}
 function ddKeep(){if(DD.hi<DD.top)DD.top=DD.hi;if(DD.hi>=DD.top+DDROWS)DD.top=DD.hi-DDROWS+1}
 function ddOpen(kind){DD.open=kind;DD.query="";const M=ddItems();DD.hi=Math.max(0,M.findIndex(r=>r.on));DD.top=0;ddKeep();ddDraw();drawAll();
-  info.textContent=(kind=="PAT"?"Patterns in bank "+bankView:kind=="KIT"?"Kits: loading one changes the knobs and keeps the steps":"Tracks")+" · type to search, arrows or scroll, Enter or click · Esc closes"}
+  info.textContent=(kind=="PAT"?"Patterns":kind=="KIT"?"Kits: loading one changes the knobs and keeps the steps":"Tracks")+" · type to search, arrows or scroll, Enter or click · Esc closes"}
 function ddClose(){DD.open=null;ddDraw();drawAll()}
 function ddChoose(r){const k=DD.open;ddClose();if(!r)return;if(k=="PAT")loadPat(bankView,r.i);else if(k=="KIT")loadKit(r.i);else selTrack(VOICES[r.i].k)}
 function ddRowAt(x,y){const b=ddBox();if(x<b.x||x>b.x+b.w||y<b.y||y>b.y+b.h)return null;const k=Math.floor((y-b.y-DDPAD)/DDROW);const M=ddItems();return k>=0&&k<DDROWS&&DD.top+k<M.length?M[DD.top+k]:undefined}
@@ -38,14 +37,14 @@ function ddKey(e){const ch=typedCh(e);
   else if(ch&&DD.query.length<12){DD.query+=ch;DD.hi=0;DD.top=0;ddDraw();drawAll()}
   else return true;
   e.preventDefault();return true}
-// kind: "PAT" (a new pattern in the lit bank) or "KIT"; the name starts as name and can be edited
-function nameStart(kind,name=""){if(kind=="PAT"&&patList(bankView).length>=MAXP){info.textContent=`Bank ${bankView} is full (${MAXP})`;return}ddClose();DD.naming=kind;DD.name=name.toUpperCase().slice(0,12);drawAll();
-  info.textContent="Type a name, then Enter"+(kind=="PAT"?" to save in bank "+bankView:" (or SAVE again) to save the kit")+" · Esc cancels"}
+// kind: "PAT" (a new pattern at the end of the list) or "KIT"; the name starts as name and can be edited
+function nameStart(kind,name=""){if(kind=="PAT"&&patList(bankView).length>=MAXP){info.textContent=`The pattern list is full (${MAXP})`;return}ddClose();DD.naming=kind;DD.name=name.toUpperCase().slice(0,12);drawAll();
+  info.textContent="Type a name, then Enter"+(kind=="PAT"?" to save the pattern":" (or SAVE again) to save the kit")+" · Esc cancels"}
 function nameCancel(){DD.naming=false;drawAll()}
 function nameCommit(){const k=DD.naming,n=(DD.name.trim()||(k=="KIT"?"KIT":"PATTERN")).slice(0,12);DD.naming=false;if(k=="KIT")saveKit(n);else savePat(n);drawAll()}
 // what the PATTERN screen shows: the loaded pattern, the search being typed, or the name being typed
-function scrText(){if(DD.naming=="PAT")return bankView+pad3(patList(bankView).length+1)+" "+DD.name+"_";if(DD.open=="PAT")return "FIND "+DD.query+"_";
-  const p=patList(curPat.b)[curPat.i];return p?curPat.b+pad3(curPat.i+1)+" "+p.n.toUpperCase()+(dirty?"*":""):""}
+function scrText(){if(DD.naming=="PAT")return pad3(patList(bankView).length+1)+" "+DD.name+"_";if(DD.open=="PAT")return "FIND "+DD.query+"_";
+  const p=patList(curPat.b)[curPat.i];return p?pad3(curPat.i+1)+" "+p.n.toUpperCase()+(dirty?"*":""):""}
 const kitText=()=>DD.naming=="KIT"?DD.name+"_":DD.open=="KIT"?"FIND "+DD.query+"_":curKit.n.toUpperCase()+(curKit.dirty?"*":"");
 const trkText=()=>DD.open=="TRK"?("FIND "+DD.query+"_").slice(-8):VK[sel].t;
 function selTrack(k){sel=k;if(edit>=tracks[sel].len)edit=0;loadKnobs();drawAll();info.textContent=describe(CTRL.find(c=>c.voice==k))}
