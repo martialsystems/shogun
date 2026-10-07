@@ -14,6 +14,10 @@ pi = 3.141592653589793
 
 A rising trigger at sample n0 resets that voice's phase to 0 and restarts its envelopes at n0. Until the first trigger, a cleared voice outputs 0.
 
+A drum voice ends when every envelope it has is under 1e-6. From that sample it outputs 0 until its next trigger. A held voice (BD2 or a tom at Decay 127) does not end, because its envelope stays at the sustain. BD1 with Noise above 0 does not end either, because the BD1 noise below has no envelope.
+
+Rests. A drum step that is off fires nothing, and a drum voice that is still ringing rings out. A note-track rest releases the note that is sounding, with the release in Lead and bass.
+
 ## Velocity law
 
 Pattern accent index a is 0, 1, or 2. English printed page 20: LED off is soft, green is medium, red is loud.
@@ -57,13 +61,13 @@ The step counter increments on each period boundary in INT and in EXT. The clock
 
 Each track stores its own length L, also 1 to 32. On global counter c the track reads step `c mod L`. A shorter track cycles against the bar. A longer track has steps past one bar, which is how a track reaches the B half when the bar is shorter. The track fires when that stored step is on. It does not also have to fall inside the bar length.
 
-Shuffle intensity s is an integer 0 to 15. STAND-IN, even steps only (0-based step index odd):
+Shuffle intensity s is an integer 0 to 15. STAND-IN. The delay goes on odd clock steps, counter c odd, whatever the track's length. A track of odd length still swings on the beat, so its own step 0 is delayed on every other pass:
 
 ```
 delay_samples = (s / 15) * (period / 3)
 ```
 
-s = 0 is no delay. s = 8 at period 6,000 delays the odd step by 1,066.666667 samples. The fractional sample is kept and the trigger fires on the sample that contains the fractional boundary. Play-mode global shuffle, while held, uses one s for every track and does not write the pattern.
+s = 0 is no delay. s = 8 at period 6,000 delays an odd clock step by 1,066.666667 samples. The fractional sample is kept and the trigger fires on the sample that contains the fractional boundary. Play-mode global shuffle, while held, uses one s for every track and does not write the pattern.
 
 Track shift, controllers 89 to 104, one per track including the two note tracks. STAND-IN:
 
@@ -79,7 +83,13 @@ INT fires a drum voice when its step is on. The flam table and the accent index 
 
 EXT does not fire from the pattern. Flam, step on and off, and pattern accent do nothing. The Trig jack's rising edge fires the voice, and g_vel supplies accent. Knobs, including per-step knob overrides if a later editor still wants them, remain in force. This pack's EXT path uses the live knobs, not the pattern's per-step sound overrides, because the brief says the pattern is ignored for step on and off, flam, and accent, and that knob values still apply. ASSUMED: "knob values" means the live knobs, not values stored on ignored steps.
 
+Lead and bass in EXT follow the live gate on their Trig jacks. A rising edge opens the note at the live pitch with g_vel. The falling edge starts the release. The pattern's notes, rests, and ties do nothing in EXT.
+
 Bend stored on a step is part of the pattern. EXT ignores it. The Pitch knob on BD1, BD2, SD, and the toms still applies, because that knob is a sound control, not the step bend.
+
+## Clock jacks
+
+CLK IN, RST IN, and RUN IN are gate inputs at the same 1 V threshold as the Trig jacks. A rising edge on CLK IN advances the counter one step, and while CLK IN is patched the internal period does not. A rising edge on RST IN sets the counter to 0, so the next step is step 1. A rising edge on RUN IN starts a stopped clock or stops a running one. None of them changes the INT and EXT switch. Only the switch chooses.
 
 ## Noise generator
 
@@ -112,6 +122,8 @@ gR = 0.5 * (1 + p)
 
 STAND-IN.
 
+Main-only centre voices (maracas, lead, bass) use equal power instead: 0.707107 on each side, which is sqrt(0.5), so they sit level with a hard-panned voice. The linear law above stays for the toms and the clap.
+
 | Voice | Pair | p |
 | --- | --- | --- |
 | BD1 | BD L | hard left, written only to L at gain 1 |
@@ -127,7 +139,7 @@ STAND-IN.
 | HTC | TO/CO | p = 0.7 |
 | CL | CB/CL L | hard left |
 | CB | CB/CL R | hard right |
-| MA, lead, bass | main only | p = 0 |
+| MA, lead, bass | main only | centre, 0.707107 each side |
 
 The voice sample is after the accent or velocity gain and after the instrument level. Hard left adds that sample to the left channel of the pair and of the main, and adds 0 to the right. Hard right is the swap. A panned voice uses gL and gR on both the pair and the main. The master multiplies the main only. Pair jacks are before the master.
 
@@ -153,6 +165,8 @@ trig --> pitch envelope --> sine body ----+
       --> noise --> one-pole lowpass ------+
 ```
 
+The clip is bypassed at Dist 0.
+
 Decay does not reach a steady tone. The body envelope falls to 0 for every knob value.
 
 ```
@@ -164,7 +178,7 @@ s      = min(15, floor(trigger_cc * 16 / 128))
 f_tr   = 160 * (1.35 ^ s)
 tau_tr = 0.004
 fc     = 200 * (8000/200) ^ u(filter)     # 200 Hz to 8,000 Hz
-drive  = 1 + 8 * u(dist)
+drive  = 9 * u(dist)                     # 0 at Dist 0, which is the bypass
 
 p_env[n] = exp(-n / (fs * tau_p))
 f[n]     = f_tune * 2 ^ (((depth + bend_st) * p_env[n]) / 12)
@@ -172,10 +186,11 @@ body[n]  = sin(phase[n]) * exp(-n / (fs * tau_b))
 tr[n]    = sin(2 * pi * f_tr * n / fs) * exp(-n / (fs * tau_tr))
 noise    = u(noise_cc) * lowpass(x[n], fc)
 pre[n]   = body[n] + u(attack) * tr[n] + noise
-y[n]     = tanh(drive * pre[n]) / tanh(drive)
+y[n]     = pre[n]                                   if dist_cc = 0
+y[n]     = tanh(drive * pre[n]) / tanh(drive)       if dist_cc > 0
 ```
 
-phase advances by `2 * pi * f[n] / fs` after the sample is taken. n is samples since the trigger. bend_st is the step bend in semitones. It decays with p_env, on the same time constant as the Pitch knob. INT step bend is `bend_st = 12 * (2 * u(bend_cc) - 1)`. CC 0 is -12 semitones, CC 127 is +12, and CC 64 is 12 * (128/127 - 1) = 0.094488 semitones. STAND-IN. EXT forces bend_st to 0. The printed BD1 example uses bend_st = 0, noise CC 0, and dist CC 0, so y = pre and the noise term is 0.
+phase advances by `2 * pi * f[n] / fs` after the sample is taken. n is samples since the trigger. bend_st is the step bend in semitones. It decays with p_env, on the same time constant as the Pitch knob. INT step bend is `bend_st = 12 * (2 * u(bend_cc) - 1)`. CC 0 is -12 semitones, CC 127 is +12, and CC 64 is 12 * (128/127 - 1) = 0.094488 semitones. STAND-IN. EXT forces bend_st to 0. The printed BD1 example uses bend_st = 0, noise CC 0, and dist CC 0, so y = pre and the noise term is 0. drive = 9u starts at 0.070866 for CC 1, where tanh(drive * pre) / tanh(drive) is within 0.2% of pre, so CC 0 to CC 1 does not jump.
 
 Example knobs: Attack 64, Decay 80, Pitch 40, Tune 50, Noise 0, Filter 64, Dist 0, Trigger 0.
 
@@ -198,6 +213,8 @@ f_tr      = 160 Hz
 | 2,400 | 72.957296 | -0.605374 |
 
 The instantaneous frequency at n = 2,400 is closer to f_tune than the frequency at n = 0. That is the pitch envelope decaying.
+
+Same knobs, Dist 64: drive = 4.535433, and at n = 48, pre = 0.832547 gives y = 0.999180.
 
 Same knobs, Attack 127, sample n = 10: Trigger 0 gives s = 0, f_tr = 160, y = 0.306787. Trigger 64 gives s = 8, f_tr = 1,765.184603, y = 0.810530. The attack sample changed because the transient frequency changed.
 
@@ -290,7 +307,7 @@ Tune 40: f = 516.298233 Hz. At n = 8, y = 0.507608.
 ```
 trig --> metallic stack A --+
       --> metallic stack B --+--> blend --> decay --> out
-      --> noise, fixed mix -->
+      --> noise, fixed mix 0.15 -->
 ```
 
 Two stacks. Each partial is a sine plus its third harmonic when 3f is under the Nyquist rate, which is the first two terms of a square. Ratios are STAND-IN.
@@ -308,10 +325,10 @@ For each ratio r, one partial is sin(2 * pi * f0 * r * n / fs). When 3 * f0 * r 
 y[n] = exp(-n / (fs * tau)) * (
          (1 - u(tone)) * stack_a[n]
        + u(tone) * stack_b[n]
-       + 0.15 * u(tune) * x[n] )
+       + 0.15 * x[n] )
 ```
 
-The 0.15 noise mix is STAND-IN. The numeric row below uses the stacks only, noise omitted, so the row does not depend on generator position.
+The noise mix is fixed at 0.15 for every Tune, STAND-IN. The numeric row below uses the stacks only, noise omitted, so the row does not depend on generator position.
 
 Tune 64, Tone 70, Decay 90: f0 = 405.050673 Hz, tau = 1.325591 s, blend = 0.551181. At n = 30, stack A = 0.187710, stack B = 0.382957, y = 0.295187.
 
@@ -439,7 +456,7 @@ tau = 0.02 + 0.30 * u(decay)
 y[n] = lowpass(x[n]) * exp(-n / (fs * tau))
 ```
 
-Decay 55: tau = 0.149921 s. First noise draw x = -0.527089. a = exp(-2 * pi * 1500 / fs) = 0.821725. With filter state 0, y[0] = -0.093967 before the envelope, and the envelope at n = 0 is 1.
+Decay 55: tau = 0.149921 s. First noise draw x = -0.527089. a = exp(-2 * pi * 1500 / fs) = 0.821725. With filter state 0, y[0] = -0.093967 before the envelope, and the envelope at n = 0 is 1. On the main, at the equal-power centre, each side is -0.066445.
 
 ## Lead and bass
 
@@ -453,9 +470,9 @@ Pitch is MIDI note 36 to 72, which is the appendix range for CV1 and CV23. Hz = 
 
 The panel entry in both manuals is step buttons 1 to 13 for pitch class C through the next C, and buttons 14 to 16 for the octave. ASSUMED map onto notes 36 to 72: octave 0, 1, 2 from buttons 14, 15, 16, pitch class 0 to 12 from buttons 1 to 13, note = 36 + 12 * octave + class, then clamp to 72. A class of 12 is the upper C, so some combinations land on the same note. That collision is accepted.
 
-A silent step, the A/B rest, forces the voice to 0 for the samples of that step, after the release below. A tied note keeps the envelope open and does not retrigger.
+A rest, the A/B silent step, releases the note that is sounding. It does not cut it to 0. A rest on a voice that is not sounding opens nothing. A tied note keeps the envelope open and does not retrigger.
 
-Envelope: attack is one sample to 1 on a new note, hold while the note is tied, release tau = 0.03 s STAND-IN when the note ends. A rest is not a release of a previous note inside this test's cleared state. In play, a rest after a note starts the release.
+Envelope: attack is one sample to 1 on a new note, hold while the note is tied, release tau = 0.03 s STAND-IN when the note ends.
 
 Lead tone, ASSUMED, one-pole lowpass:
 

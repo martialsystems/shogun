@@ -100,7 +100,23 @@ Repeat with the pair unpatched. Main left at n = 48 is still 0.832547.
 
 Master 0.5 scales the main to 0.416273 and leaves the pair at 0.832547.
 
-Maracas does not appear on any pair. A maracas trigger with the first noise draw appears on the main only.
+Maracas does not appear on any pair. A maracas trigger with the first noise draw appears on the main only. Each side of the main is -0.066445, the printed -0.093967 at the equal-power centre.
+
+## testVoiceEndsWhenQuiet
+
+Trigger each drum voice once, BD1 with the example knobs and the others with default knobs. Each one sounds, then ends, then outputs exactly 0 on both main channels until a new trigger. The BD1 example ends where its body envelope crosses 1e-6: ceil(-ln(1e-6) * 48,000 * 0.785906) samples, within one sample. BD2 at Decay 127 is still sounding after 10 s. A BD1 that has ended plays the example y(10) = 0.208884 on its next trigger.
+
+## testDistBypassAndDrive
+
+BD1 example knobs, n = 48. Dist 0 is y = pre = 0.832547. Dist 1 is within 2e-3 of Dist 0. Dist 64 is 0.999180.
+
+## testCenterPanIsNotHalf
+
+A maracas trigger puts 0.707107 times the maracas sample on each side of the main, not 0.5. At n = 0 that is -0.066445.
+
+## testShuffleSurvivesOddLength
+
+BD1 track of length 3, every step on, shuffle 15, 120 BPM 16ths. The delay is period / 3 = 2,000 samples. The first six hits are at samples 0, 8,000, 12,000, 20,000, 24,000, and 32,000: every odd clock step is late, including track step 0 on the second pass.
 
 ## Also locked by those tests
 
