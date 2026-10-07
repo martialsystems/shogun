@@ -14,8 +14,9 @@ double clampBpm(double bpm) {
   return bpm;
 }
 
-double panL(double p) { return 0.5 * (1.0 - p); }
-double panR(double p) { return 0.5 * (1.0 + p); }
+// Equal-power pan: p = -1 is hard left, p = 0 is kCenterGain on each side, p = 1 is hard right.
+double panL(double p) { return std::cos(0.25 * kPi * (1.0 + p)); }
+double panR(double p) { return std::sin(0.25 * kPi * (1.0 + p)); }
 
 void addHardLeft(double s, double& pair, double& main) {
   pair += s;
@@ -462,7 +463,8 @@ void Engine::renderBd1(VoiceState& st) {
   const double tr = std::sin(2.0 * kPi * fTr * static_cast<double>(n) / kFs) * trEnv;
   double noise = 0.0;
   if (knobs_.bd1Noise > 0) {
-    noise = u(knobs_.bd1Noise) * onePole(st.lp, noiseDraw(noiseState_), fc);
+    // The noise rides the body envelope, so it is silent once the body is.
+    noise = u(knobs_.bd1Noise) * onePole(st.lp, noiseDraw(noiseState_), fc) * bodyEnv;
   }
   const double pre = body + u(knobs_.bd1Attack) * tr + noise;
   double y = pre;
@@ -477,8 +479,7 @@ void Engine::renderBd1(VoiceState& st) {
   bd1TrHz_ = fTr;
   st.phase += 2.0 * kPi * f / kFs;
   st.n = n + 1;
-  // The pack's BD1 noise has no envelope, so a kick with Noise above 0 keeps sounding.
-  endIfQuiet(st.active, knobs_.bd1Noise > 0 ? 1.0 : std::fmax(bodyEnv, trEnv));
+  endIfQuiet(st.active, std::fmax(bodyEnv, trEnv));
 }
 
 void Engine::renderBd2(VoiceState& st) {
@@ -656,8 +657,8 @@ void Engine::renderCp(VoiceState& st) {
   yL *= attack;
   yR *= attack;
   const double tail = onePole(st.lp, noiseDraw(noiseState_), fc) * expDecay(n, tau);
-  yL += tail * 0.5;
-  yR += tail * 0.5;
+  yL += tail * kCenterGain;
+  yR += tail * kCenterGain;
   st.left = yL * st.gain;
   st.right = yR * st.gain;
   st.n = n + 1;

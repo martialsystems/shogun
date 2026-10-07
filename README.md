@@ -12,6 +12,7 @@ SHOGUN is a drum computer and two note voices, specified from the first MFB Tanz
 - 2026-10-06: placeholder VST3. Flat plate, knobs, levels, a 16-step grid, and TRIG buttons. `make plugin` builds a universal instrument. Panel art stays later.
 - 2026-10-07: engine fixes and the web panel. Clock, conga, held-note and tie fixes listed in [BUGS.md](BUGS.md), with tests. `make web` compiles the engine to WebAssembly, checks it against the native build, and writes `web/shogun.html`.
 - 2026-10-07: quiet drum voices end at 1e-6. BD1 Dist 0 is a bypass and drive is 9u above it. Main-only centre voices are equal power. Shuffle follows the clock step. Cymbal noise is a fixed mix. The pack states the rest rules, EXT lead and bass, and the CLK IN, RST IN, and RUN IN jacks.
+- 2026-10-07: BD1 noise rides the body envelope, so a noisy kick ends with its body. The pan law is equal power: every centre, toms and clap tail included, is 0.707107 on each side.
 
 ## What this is
 
