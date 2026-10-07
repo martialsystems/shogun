@@ -617,12 +617,16 @@ sv.addEventListener("wheel",e=>{pt(e);if(DD.open&&ddRowAt(mx,my)!==null){e.preve
 sv.addEventListener("dblclick",e=>{pt(e);const c=ctrlAt(mx,my);if(c&&c.kind=="knob"&&DEF[c.id]!=null){undoPush(null);setP(c.id,DEF[c.id]);info.textContent=describe(c)}});
 sv.addEventListener("pointermove",e=>{pt(e);
   if(kdrag){const c=kdrag.c;kdrag.v=clamp(kdrag.v+(kdrag.y-e.clientY)/(e.shiftKey?900:180));kdrag.y=e.clientY;setP(c.id,kdrag.v);info.textContent=describe(c);return}
-  ptrIn=true;const h=near();setHov(h);const c=h?null:ctrlAt(mx,my);if(c&&!grab)info.textContent=describe(c);
+  ptrIn=true;
+  // over an open list: the row under the pointer is the highlighted one, and nothing under the list reacts
+  if(DD.open){const r=ddRowAt(mx,my);if(r!==null){setHov(null);sv.style.cursor=r?"pointer":"default";if(r){const k=ddItems().findIndex(x=>x.i==r.i);if(k!=DD.hi){DD.hi=k;ddDraw()}}return}}
+  const h=near();setHov(h);const c=h?null:ctrlAt(mx,my);if(c&&!grab)info.textContent=describe(c);
   sv.style.cursor=c?(c.kind=="knob"?"ns-resize":"pointer"):(h||grab?"grab":"default");
   if(down&&!grab&&Math.hypot(mx-down.x,my-down.y)>6){down.moved=true;const pl=plugsAt(down.j);if(pl.length&&!down.shift){const p=pl[pl.length-1];startGrab(p.i,p.e,false)}else newCable(down.j,false)}});
 sv.addEventListener("pointerleave",()=>{ptrIn=false;if(!grab)setHov(null)});
 sv.addEventListener("pointerdown",e=>{pt(e);hideMenu();audio();
   if(grab&&grab.carry){drop();ignoreUp=true;return}
+  if(DD.open){const r=ddRowAt(mx,my);if(r!==null){if(r)ddChoose(r);return}}
   const h=near();if(h){down={j:h,x:mx,y:my,moved:false,shift:e.shiftKey};sv.setPointerCapture(e.pointerId);return}
   const c=ctrlAt(mx,my);
   // an open list takes the click: a row loads, anywhere else closes it (its own screen toggles it)
