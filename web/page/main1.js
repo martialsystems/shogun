@@ -90,7 +90,7 @@ T(M+TRW/2,y3+22,"TRANSPORT",12.5,"middle",INK,1);key("START",M+TRW/2,y3+68,"STAR
  knob("SEQ:SHUFFLE","SHUFFLE",x+170,y3+66,0,{n:16,name:"SHUFFLE",fmt:v=>"intensity "+Math.round(v*15)+" of 15"});
  knob("SEQ:SHIFT","SHIFT",x+232,y3+66,0,{name:"SHIFT",fmt:v=>(Math.round(v*127)/127*30).toFixed(1)+" ms later"});
  key("MUTE",x+288,y3+66,"MUTE",{id:"LED:MUTE",x:x+312,y:y3+48});
- key("PAGE:0",x+100,y3+132,"1-16",{id:"LED:P0",x:x+124,y:y3+120});key("PAGE:1",x+180,y3+132,"17-32",{id:"LED:P1",x:x+204,y:y3+120});key("RANDOM",x+270,y3+132,"RANDOM")}
+ key("PAGE:0",x+100,y3+132,"1-16",{id:"LED:P0",x:x+124,y:y3+120});key("PAGE:1",x+180,y3+132,"17-32",{id:"LED:P1",x:x+204,y:y3+120});key("RANDOM",x+270,y3+132,"RANDOM");key("SOLO",x+34,y3+132,"SOLO",{id:"LED:SOLO",x:x+58,y:y3+120})}
 {const x=M+TRW+TKW;T(x+STW/2,y3+22,"STEP",12.5,"middle",INK,1);lcd("EDIT",x+16,y3+52,62,"EDIT",2);
  knob("STEP:FLAM","FLAM",x+124,y3+66,0,{n:17,name:"FLAM",fmt:v=>{const i=Math.round(v*16);return i?"flam "+i+" of 16":"no flam"}});
  knob("STEP:BEND","BEND",x+186,y3+66,.5,{name:"BEND",fmt:v=>Math.abs(v-.5)<.006?"no bend":((12*(2*Math.round(v*127)/127-1))>=0?"+":"")+(12*(2*Math.round(v*127)/127-1)).toFixed(2)+" semitones"});

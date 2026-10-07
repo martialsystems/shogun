@@ -15,6 +15,7 @@ function describe(c){const t=tracks[sel];
   if(c.id.startsWith("PAGE:"))return "Steps "+(c.id=="PAGE:0"?"1 to 16":"17 to 32");
   if(c.step!=null){const n=page*16+c.step,s=t.steps[n];if(n>=t.len)return `${VK[sel].t} · step ${n+1} · past the track length (${t.len})`;
     return `${VK[sel].t} · step ${n+1} · `+(s.on?(NOTEK[sel]?noteName(s.note)+(s.tie?" tied":""):["soft","medium","loud"][s.acc]):"off")+(c.kind=="acc"?" · click for soft, medium, loud":"")}
+  if(c.id=="SOLO")return soloV?`SOLO · only ${VK[soloV].t} is heard`+(tracks[soloV].mute?" (muted, so nothing)":"")+(soloV==sel?" · press to hear every track":` · press to solo ${VK[sel].t}`):`SOLO · hear only ${VK[sel].t}`;
   if(c.id=="UNDO")return "UNDO the last knob or key ("+UNDO.length+") · Shift-click or Ctrl+Shift+Z redoes ("+REDO.length+")";
   if(c.id=="RANDOM")return "RANDOM · roll the "+VK[sel].t+" knobs inside their ranges (LEVEL stays)";
   if(c.id=="LEARN")return "MIDI LEARN · then pick a track and hit a pad · Shift-click resets to notes 36 to 51";
@@ -54,6 +55,7 @@ function press(c,e){const t=tracks[sel];
   else if(c.id=="COPY"){const p=patList(curPat.b)[curPat.i];nameStart("PAT",p?p.n:"");return}
   else if(c.id=="KSAVE"){if(DD.naming=="KIT")nameCommit();else nameStart("KIT",curKit.n=="BASIC"?"":curKit.n);return}
   else if(c.id=="UNDO"){undo(e.shiftKey);pressed=c.id;drawAll();return}
+  else if(c.id=="SOLO"){soloV=soloV==sel?null:sel;send([["sg_set_solo",soloV?VI.indexOf(soloV):-1]])}
   else if(c.id=="RANDOM"){randomVoice();pressed=c.id;drawAll();return}
   else if(c.id=="LEARN"){learnPress(e.shiftKey);return}
   else if(c.id=="CHN"){if(!CHAIN.list.length){info.textContent="The chain is empty · + adds the loaded pattern";return}CHAIN.on=!CHAIN.on;chainPos=-1;saveChain()}
@@ -101,4 +103,4 @@ $("go").onclick=()=>setRun(!running);
 function loop(){if(grab&&cables[grab.i]&&cables[grab.i].el)pins(cables[grab.i]);step();paint();drawAll();requestAnimationFrame(loop)}
 loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
 try{navigator.permissions.query({name:"midi"}).then(r=>{if(r.state=="granted")midiInit(false)},()=>{})}catch(e){}drawAll();build();requestAnimationFrame(loop);
-window.SHOGUN={P,get tracks(){return tracks},cables,JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel}};
+window.SHOGUN={P,get tracks(){return tracks},cables,JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel}};

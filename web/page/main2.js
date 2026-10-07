@@ -17,7 +17,7 @@ const FACT=[
  {n:"EMPTY",bpm:120,sh:0,len:16,tom:"TTT",s:{}}];
 const store={get(k){try{return JSON.parse(localStorage.getItem(k)||"null")}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const blankStep=()=>({on:false,acc:1,flam:-1,bend:null,note:60,tie:false});
-let sel="BD1",page=0,edit=0,dirty=false,tracks={};
+let sel="BD1",page=0,edit=0,dirty=false,tracks={},soloV=null;   // soloV: the soloed track, or null
 // One list of up to 999 patterns: the factory patterns, then the saved ones, kept in this browser. (Internally bank "A"; an
 // older bank B is merged in at load.)
 let USERP={A:[],B:[]},curPat={b:"A",i:0},bankView="A";
@@ -88,7 +88,7 @@ function cableCalls(){const src=new Array(19).fill(0);
   return src.map((s,n)=>["sg_patch",n,s])}
 const sendCables=()=>send(cableCalls());
 function syncAll(){const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());
-  VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...cableCalls(),["sg_set_running",running?1:0]);send(c)}
+  VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...cableCalls(),["sg_set_solo",soloV?VI.indexOf(soloV):-1],["sg_set_running",running?1:0]);send(c)}
 function setRun(on){audio();
   // a start counts from 0: the chain starts from its first pattern, else the steps go out unrotated
   if(on&&!running&&!chainStart()&&rot0){rot0=0;const c=[];VOICES.forEach(v=>c.push(...stepCalls(v.k)));c.push(["sg_commit"]);send(c)}
@@ -108,7 +108,7 @@ function drawAll(){
   put("SCR",dots(SCR.x+8,SCR.y+6,SCR.w-16,SCR.h-12,scrText().slice(-20),20));put("TRK",dots(TRK.x+8,TRK.y+6,TRK.w-16,TRK.h-12,trkText(),8));
   const kb=(id,black)=>{const L=LIVE[id];put(id,keyBody(L.x,L.y,black,pressed==id))},ld=(id,on,c)=>{const L=LIVE[id];put(id,lamp(L.x,L.y,L.r,on,c))};
   VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});ld("LED:LEARN",MIDI.learn);
-  kb("START",false);kb("CLEAR",true);kb("UNDO",true);kb("RANDOM",true);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
+  kb("START",false);kb("CLEAR",true);kb("UNDO",true);kb("RANDOM",true);kb("SOLO",true);ld("LED:SOLO",soloV!=null);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
   [0,1].forEach(n=>{kb("PAGE:"+n,true);ld("LED:P"+n,page==n)});
   const o=page*16,ph=running&&counter>=0&&counter>=rot0?posOf(counter,t.len):-1;
   for(let i=0;i<16;i++){const n=o+i,st=t.steps[n],in_=n<t.len,L=LIVE["STEP:"+i];

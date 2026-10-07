@@ -99,6 +99,7 @@ EXPORT(sg_set_knob) void sg_set_knob(int i, int cc) {
 
 EXPORT(sg_set_level) void sg_set_level(int v, double x) { gE->setLevel(static_cast<shogun::Voice>(v), x); }
 EXPORT(sg_set_master) void sg_set_master(double x) { gE->setMaster(x); }
+EXPORT(sg_set_solo) void sg_set_solo(int v) { gE->setSolo(v); }
 EXPORT(sg_set_mode) void sg_set_mode(int ext) { gE->setMode(ext ? shogun::ClockMode::Ext : shogun::ClockMode::Int); }
 EXPORT(sg_set_tempo) void sg_set_tempo(double bpm) { gE->setTempo(bpm); }
 EXPORT(sg_set_scale) void sg_set_scale(int stepsPerQuarter) { gE->setScaleSteps(stepsPerQuarter); }
