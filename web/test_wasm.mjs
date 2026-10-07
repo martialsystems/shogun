@@ -9,7 +9,7 @@ const native = execFileSync(root + "build/web_parity", [root + "web/parity_scena
   .toString().trim().split("\n").map((l) => l.split(" ").map(Number));
 
 const { instance } = await WebAssembly.instantiate(readFileSync(root + "build/shogun.wasm"), {
-  env: { sin: Math.sin, exp: Math.exp, pow: Math.pow, tanh: Math.tanh },
+  env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh },
 });
 const x = instance.exports;
 const str = (p) => { const m = new Uint8Array(x.memory.buffer); let s = ""; while (m[p]) s += String.fromCharCode(m[p++]); return s; };

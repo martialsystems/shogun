@@ -4,7 +4,7 @@ CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2 -Iengine
 GRAPHFORGE_SRC ?= $(HOME)/graphforge/src
 JUCE_SRC ?= $(HOME)/jidai-collection/jidai-rack/build/fl-release/_deps/juce-src
 
-.PHONY: test clean asan law plugin install-vst web
+.PHONY: test clean asan law plugin install-vst web web-levels
 
 test: build/shogun_tests law
 	./build/shogun_tests
@@ -55,6 +55,10 @@ build/web_parity: engine/shogun.cpp engine/shogun.h engine/dsp.h web/wasm/shogun
 web: build/shogun.wasm build/web_parity
 	node web/test_wasm.mjs
 	node web/build_page.mjs
+
+# Re-measure the LEVEL table in web/page/kits.js after a kit or engine change, then make web.
+web-levels: build/shogun.wasm
+	node web/make_levels.mjs
 
 clean:
 	rm -rf build

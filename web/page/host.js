@@ -2,7 +2,7 @@
 // bytes: the wasm file. rate: the audio context rate; the engine runs at 48 kHz and is resampled linearly
 // otherwise, as the plugin does. post: receives {counter, running} when either changes.
 function shogunHost(bytes,rate,post){
-  const x=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env:{sin:Math.sin,exp:Math.exp,pow:Math.pow,tanh:Math.tanh}}).exports;
+  const x=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env:{sin:Math.sin,cos:Math.cos,exp:Math.exp,pow:Math.pow,tanh:Math.tanh}}).exports;
   x.sg_init();
   const K={};for(let i=0;i<x.sg_knob_count();i++){const m=new Uint8Array(x.memory.buffer);let p=x.sg_knob_name(i),s="";while(m[p])s+=String.fromCharCode(m[p++]);K[s]=i}
   const view=(n)=>[new Float32Array(x.memory.buffer,x.sg_out_l(),n),new Float32Array(x.memory.buffer,x.sg_out_r(),n)];

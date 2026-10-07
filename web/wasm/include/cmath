@@ -1,13 +1,15 @@
 #pragma once
-// Freestanding <cmath> for the WebAssembly build. sin, exp, pow and tanh are imported from the
+// Freestanding <cmath> for the WebAssembly build. sin, cos, exp, pow and tanh are imported from the
 // page (Math.*). floor and fabs are wasm instructions, fmax is inline. round and llround round half away from zero.
 extern "C" {
 double sin(double);
+double cos(double);
 double exp(double);
 double pow(double, double);
 double tanh(double);
 }
 namespace std {
+using ::cos;
 using ::exp;
 using ::pow;
 using ::sin;

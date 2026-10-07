@@ -72,7 +72,7 @@ VOICES.forEach(voiceSection);
 const sec=k=>ROWS.flat().find(s=>s.k==k);
 {const s=sec("TOMS"),cx=s.x+s.w/2;T(cx,s.y+22,"TOMS",12.5,"middle",INK,1);knob("TOMS:NOISE","NOISE",cx,s.y+96,KD.tomNoise/127,{name:"TOMS · NOISE level, shared by the three"});MAP["TOMS:NOISE"]={f:"tomNoise"};
  T(cx,s.y+150,"ALL THREE",9,"middle","#bdbcb4")}
-{const s=sec("OUT"),y=s.y,x=s.x,sp=(s.w-120)/7;T(x+s.w/2,y+22,"OUTPUTS",12.5,"middle",INK,1);knob("OUT:MASTER","MASTER",x+58,y+100,.45,{name:"MASTER (scales MAIN only)"});MAP["OUT:MASTER"]={master:1};
+{const s=sec("OUT"),y=s.y,x=s.x,sp=(s.w-120)/7;T(x+s.w/2,y+22,"OUTPUTS",12.5,"middle",INK,1);knob("OUT:MASTER","MASTER",x+58,y+100,.65,{name:"MASTER (scales MAIN only)"});MAP["OUT:MASTER"]={master:1};
  [["BD","BD"],["SD/RS","SDRS"],["HH/CY","HHCY"],["CP","CP"],["TO/CO","TOCO"],["CB/CL","CBCL"],["MAIN","MAIN"]].forEach(([lb,k],i)=>{const cx=x+120+sp*(i+.5);T(cx,y+72,lb,11,"middle",INK,.8);
    S.push(`<line x1="${cx-22}" y1="${y+80}" x2="${cx+22}" y2="${y+80}" stroke="${INK}" stroke-width="1"/>`);["L","R"].forEach((c,j)=>jack("OUT:"+k+" "+c,c,cx+(j?17:-17),y+108,"out","Audio",lb+" out "+(j?"right":"left")))})}
 const bpmOf=v=>60+v*120,SCALEN=["32ND","16T","16TH","8T"];
@@ -103,8 +103,13 @@ for(let i=0;i<16;i++){const cx=SX+SW*(i+.5);live("NUM:"+i);LIVE["NUM:"+i]={x:cx,
 const NN=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],noteName=n=>NN[n%12]+(Math.floor(n/12)-1);
 // top band: name, pattern screen, track screen
 T(M+4,36,"SHOGUN",17,"start","#ffffff",4);
-const SCR={x:610,y:13,w:300,h:30},TRK={x:1180,y:13,w:110,h:30};
+const SCR={x:610,y:13,w:300,h:30},TRK={x:1200,y:13,w:110,h:30};
 T(SCR.x-12,33,"PATTERN",10.5,"end");T(TRK.x-12,33,"TRACK",10.5,"end");
 [SCR,TRK].forEach(r=>lcdBox(r.x,r.y,r.w,r.h));live("SCR");live("TRK");
-[["PREV",932,"◀"],["NEXT",964,"▶"],["SAVE",1004,"+"]].forEach(([id,cx,g])=>{S.push(`<rect x="${cx-12}" y="16" width="24" height="24" rx="3" fill="url(#bs)" stroke="#6f6a5a" stroke-width=".9"/><rect x="${cx-12}" y="36" width="24" height="4" rx="2" fill="#7e7764" opacity=".55"/><text x="${cx}" y="${id=="SAVE"?33:32}" font-size="${id=="SAVE"?17:11}" font-weight="700" text-anchor="middle" fill="#2a2620">${g}</text>`);CTRL.push({id,kind:"btn",x:cx,y:28,r:13,rect:1})});
-T(1022,33,"SAVE",10.5,"start");
+// a screen is a click target: it opens its list
+[["SCR",SCR],["TRK",TRK]].forEach(([id,r])=>CTRL.push({id,kind:"screen",x:r.x+r.w/2,y:r.y+r.h/2,rw:r.w/2,rh:r.h/2,rect:1}));
+const btn=(id,cx,g,z=11,gy=32)=>{S.push(`<rect x="${cx-12}" y="16" width="24" height="24" rx="3" fill="url(#bs)" stroke="#6f6a5a" stroke-width=".9"/><rect x="${cx-12}" y="36" width="24" height="4" rx="2" fill="#7e7764" opacity=".55"/><text x="${cx}" y="${gy}" font-size="${z}" font-weight="700" text-anchor="middle" fill="#2a2620">${g}</text>`);CTRL.push({id,kind:"btn",x:cx,y:28,r:13,rect:1})};
+btn("PREV",932,"◀");btn("NEXT",964,"▶");btn("SAVE",1004,"+",17,33);T(1022,33,"SAVE",10.5,"start");
+// banks A and B: the lit lamp is the bank the arrows, the list and SAVE use
+[["A",1070],["B",1106]].forEach(([b,cx])=>{btn("BANK:"+b,cx,b,12,33);ledAt({id:"LED:BANK"+b},cx+19,28,3.5)});
+btn("TPREV",1328,"◀");btn("TNEXT",1360,"▶");

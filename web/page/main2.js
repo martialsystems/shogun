@@ -17,18 +17,31 @@ const FACT=[
  {n:"EMPTY",bpm:120,sh:0,len:16,tom:"TTT",s:{}}];
 const store={get(k){try{return JSON.parse(localStorage.getItem(k)||"null")}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const blankStep=()=>({on:false,acc:1,flam:-1,bend:null,note:60,tie:false});
-let PATS=[],pi=0,sel="BD1",page=0,edit=0,dirty=false,tracks={};
-function loadPats(){const u=store.get("shogun.user2")||[];PATS=FACT.map((p,i)=>({...p,id:"A"+String(i+1).padStart(2,"0")})).concat(u.map((p,i)=>({...p,id:"U"+String(i+1).padStart(2,"0")})))}
+let sel="BD1",page=0,edit=0,dirty=false,tracks={};
+// Banks A and B of up to 999 patterns. Bank A starts with the factory patterns; saved patterns follow, kept in this browser.
+let USERP={A:[],B:[]},curPat={b:"A",i:0},bankView="A";
+const pad3=n=>String(n).padStart(3,"0"),patList=b=>(b=="A"?FACT:[]).concat(USERP[b]);
+function loadUser(){const u=store.get("shogun.patterns"),old=store.get("shogun.user2");
+  USERP=u&&u.A&&u.B?u:{A:old||[],B:[]}}
+const saveUser=()=>store.set("shogun.patterns",USERP);
 function fromFactory(p){const t={};VOICES.forEach(v=>{const len=(p.L&&p.L[v.k])||p.len,steps=Array.from({length:32},blankStep);
     if(NOTEK[v.k]){const tok=((p.nt||{})[v.k]||"").split(" ").filter(Boolean);if(tok.length)for(let i=0;i<len;i++){const s=tok[i%tok.length],st=steps[i];if(s=="-"){st.on=true;st.tie=true;st.note=steps[i-1]?steps[i-1].note:60}else if(s!="."){st.on=true;st.note=+s}}}
     else{const s=p.s[v.k];if(s)for(let i=0;i<len;i++){const c=s[i%s.length];if(c!="."){steps[i].on=true;steps[i].acc=c=="o"?0:c=="x"?1:2}}}
     t[v.k]={len,shuffle:p.sh||0,shift:0,mute:false,steps}});return t}
-function applyPat(i){pi=(i+PATS.length)%PATS.length;const p=PATS[pi];tracks=p.tracks?JSON.parse(JSON.stringify(p.tracks)):fromFactory(p);
+// The sound a pattern loads: a saved pattern's own knobs, else its kit (kits.js) with the levels measured for that kit.
+function patKnobs(p){if(p.knobs)return p.knobs;const kit=kitOf(p.n),lv=LEVEL[p.n]||LEVEL.EMPTY,k={};
+  for(const id in MAP){const m=MAP[id];if(m.level!=null)k[id]=lv[VI[m.level]];else if(m.f&&kit[m.f]!=null)k[id]=m.tog?(kit[m.f]>=64?1:0):vOf(id,kit[m.f],STEPS[id])}return k}
+function loadPat(b,i){const L=patList(b);if(!L.length){info.textContent=`Bank ${b} is empty · SAVE stores the current pattern there`;return}
+  i=(i+L.length)%L.length;curPat={b,i};bankView=b;const p=L[i];tracks=p.tracks?JSON.parse(JSON.stringify(p.tracks)):fromFactory(p);
   P["CLOCK:TEMPO"]=clamp((p.bpm-60)/120);P["CLOCK:SCALE"]=(p.scale==null?2:p.scale)/3;P["CLOCK:BAR"]=((p.bar||p.len)-1)/31;
-  ["LTC","MTC","HTC"].forEach((k,j)=>{P[k+":MODE"]=p.tom&&p.tom[j]=="C"?1:0;sendParam(k+":MODE")});page=0;edit=0;dirty=false;loadKnobs();
-  sendClock();VOICES.forEach(v=>{sendTrack(v.k);sendSteps(v.k)});info.textContent=`Pattern ${p.id} ${p.n} · ${p.bpm} BPM`}
-function savePat(){const u=store.get("shogun.user2")||[];u.push({n:"USER "+(u.length+1),bpm:+bpmOf(P["CLOCK:TEMPO"]).toFixed(1),scale:Math.round(P["CLOCK:SCALE"]*3),bar:1+Math.round(P["CLOCK:BAR"]*31),
-  tom:["LTC","MTC","HTC"].map(k=>P[k+":MODE"]>.5?"C":"T").join(""),tracks});store.set("shogun.user2",u);loadPats();pi=PATS.length-1;dirty=false;info.textContent=`Saved as ${PATS[pi].id} ${PATS[pi].n} in this browser`}
+  ["LTC","MTC","HTC"].forEach((k,j)=>{P[k+":MODE"]=p.tom&&p.tom[j]=="C"?1:0});
+  const kn=patKnobs(p);for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}   // double-click returns a knob to the pattern's setting
+  page=0;edit=0;dirty=false;loadKnobs();const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);
+  sendClock();VOICES.forEach(v=>{sendTrack(v.k);sendSteps(v.k)});info.textContent=`Pattern ${b}${pad3(i+1)} ${p.n} · ${p.bpm} BPM`}
+function savePat(name){const knobs={};for(const id in MAP)if(!MAP[id].master)knobs[id]=P[id];
+  USERP[bankView].push({n:name,bpm:+bpmOf(P["CLOCK:TEMPO"]).toFixed(1),scale:Math.round(P["CLOCK:SCALE"]*3),bar:1+Math.round(P["CLOCK:BAR"]*31),
+    tom:["LTC","MTC","HTC"].map(k=>P[k+":MODE"]>.5?"C":"T").join(""),tracks:JSON.parse(JSON.stringify(tracks)),knobs});saveUser();
+  curPat={b:bankView,i:patList(bankView).length-1};dirty=false;for(const id in knobs)DEF[id]=knobs[id];info.textContent=`Saved as ${curPat.b}${pad3(curPat.i+1)} ${name} in this browser`}
 // the TRACK and STEP knobs show the selected track and the edit step
 function loadKnobs(){const t=tracks[sel],st=t.steps[edit];P["SEQ:LENGTH"]=(t.len-1)/31;P["SEQ:SHUFFLE"]=t.shuffle/15;P["SEQ:SHIFT"]=t.shift/127;
   P["STEP:FLAM"]=(st.flam+1)/16;P["STEP:BEND"]=st.bend==null?.5:st.bend/127;P["STEP:NOTE"]=(clamp(st.note,36,72)-36)/36}
@@ -82,9 +95,9 @@ function drawAll(){
   for(const id in P){const L=LIVE[id];if(!L)continue;if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*P[id]));else{const r=P[id]>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
   const t=tracks[sel],bar=1+Math.round(P["CLOCK:BAR"]*31);
   lcdPut("BPM",bpmOf(P["CLOCK:TEMPO"]).toFixed(0).padStart(3," "));lcdPut("POS",counter>=0?String(counter%bar+1).padStart(2," "):"--");lcdPut("LEN",String(t.len).padStart(2," "));lcdPut("EDIT",String(edit+1).padStart(2," "));
-  const pat=PATS[pi];put("SCR",dots(SCR.x+8,SCR.y+6,SCR.w-16,SCR.h-12,(pat.id+" "+pat.n+(dirty?"*":"")).slice(0,17),17));put("TRK",dots(TRK.x+8,TRK.y+6,TRK.w-16,TRK.h-12,VK[sel].t,7));
+  put("SCR",dots(SCR.x+8,SCR.y+6,SCR.w-16,SCR.h-12,scrText().slice(-20),20));put("TRK",dots(TRK.x+8,TRK.y+6,TRK.w-16,TRK.h-12,trkText(),8));
   const kb=(id,black)=>{const L=LIVE[id];put(id,keyBody(L.x,L.y,black,pressed==id))},ld=(id,on,c)=>{const L=LIVE[id];put(id,lamp(L.x,L.y,L.r,on,c))};
-  VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});
+  VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});["A","B"].forEach(b=>ld("LED:BANK"+b,bankView==b));
   kb("START",false);kb("CLEAR",true);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
   [0,1].forEach(n=>{kb("PAGE:"+n,true);ld("LED:P"+n,page==n)});
   const o=page*16,ph=running&&counter>=0?counter%t.len:-1;
