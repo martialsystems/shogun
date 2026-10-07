@@ -14,6 +14,7 @@ SHOGUN is a drum computer and two note voices, specified from the first MFB Tanz
 - 2026-10-07: BD1 noise rides the body envelope, so a noisy kick ends with its body. The pan law is equal power: every centre, toms and clap tail included, is 0.707107 on each side.
 - 2026-10-07: one decay law for every drum, tau = 8 ms * exp(4.5 u), and a voice is 0 under 1e-3. BD2 at Decay 127 holds; a tom at Decay 127 rings 4 s and ends. The snare bend is its own drop to Tune with an 80 ms floor.
 - 2026-10-07: track solo. The soloed voice alone reaches its pair and the main; the others keep running at 0. Mute wins.
+- 2026-10-07: a new engine loads the 909-style init kit and pattern "909". STAND-IN knob values, not a Roland capture. reset() still clears.
 
 ## What this is
 

@@ -57,6 +57,7 @@ struct Track {
 };
 
 struct Pattern {
+  const char* name = "";
   int length = 4;
   Track track[kVoiceCount]{};
 };
@@ -114,6 +115,10 @@ struct Knobs {
   int bassTone = 0;
 };
 
+// The fresh-engine kit and pattern "909". STAND-IN knob values, not a Roland capture.
+Knobs initKit();
+Pattern initPattern();
+
 struct TrigIn {
   double volts[kVoiceCount];
   int velocity[kVoiceCount];  // < 0: no velocity byte, treated as 127
@@ -148,9 +153,12 @@ enum class Pair : int { Bd = 0, SdRs, HhCy, Cp, ToCo, CbCl, Count };
 
 class Engine {
  public:
+  // A new engine loads the init kit and pattern (loadInit). reset() clears to empty knobs, steps and level 1.
   Engine();
 
   void reset();
+  // Init kit, pattern "909", its levels, master 0.7, 120 BPM, 16ths, INT.
+  void loadInit();
   void setMode(ClockMode mode);
   void setTempo(double bpm);
   // While playing is true, this BPM is the clock. It does not write the internal tempo.
@@ -163,6 +171,10 @@ class Engine {
   // Solo one voice (a Voice index), or -1 for off. Not part of the pattern; the clock switch is not touched.
   void setSolo(int voice);
   int solo() const { return solo_; }
+  const Knobs& knobs() const { return knobs_; }
+  const Pattern& pattern() const { return pattern_; }
+  double level(Voice voice) const { return level_[static_cast<int>(voice)]; }
+  double master() const { return master_; }
   void setPairPatched(Pair pair, bool patched);
   // s in 0..15 overrides every track. Pass -1 to use the pattern values again.
   void setGlobalShuffle(int s);

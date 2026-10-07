@@ -511,6 +511,42 @@ Bass accent uses g_accent on the bass voice in INT. The drums' three-level accen
 
 BD1's Pitch knob is both time and depth, one u, as the instrument chapter states. SD's pitch control is depth, with the time law above. Step bend is an extra signed depth on BD1, BD2, SD, LTC, MTC, and HTC only. On SD it has its own envelope with the 80 ms floor, written in the SD equation. CY, RS, hats, clave, clap, cowbell, and maracas have no step bend. EXT ignores step bend.
 
+## Init kit (909)
+
+STAND-IN, not a Roland capture. A 909-style balance set by ear from the knob ranges above, with no samples. A new engine loads it. reset() still clears to empty knobs, empty steps, level 1, and master 1, which is the state every named test arms from. The plugin writes its own parameters over both on the first block.
+
+Knob CC is round(u * 127).
+
+| Voice | Knobs, u (CC) | Level |
+| --- | --- | --- |
+| BD1 | Tune 0.22 (28), Pitch 0.55 (70), Decay 0.28 (36), Attack 0.45 (57), Dist 0.15 (19), Noise 0.08 (10), Filter 0.35 (44) | 0.85 |
+| BD2 | off | 0 |
+| SD | Tune 0.48 (61), Detune 0.12 (15), Pitch 0.35 (44), Tone Decay 0.22 (28), SN Decay 0.30 (38), Snappy 0.62 (79), Tone 0.45 (57) | 0.75 |
+| RS | Tune 0.62 (79) | 0.4 |
+| CP | Data 48 (4 bursts), Attack 0.7 (89), Decay 0.25 (32), Filter 0.55 (70) | 0.7 |
+| HH | Decay 0.08 (10), Tune 0.7 (89) | 0.45 |
+| OH | Decay 0.34 (43), Tune shared with HH | 0.4 |
+| CY | Decay 0.55 (70) | 0.35 |
+| LTC, MTC, HTC | Tune 0.30, 0.42, 0.55 (38, 53, 70), Decay 0.32, 0.28, 0.24 (41, 36, 30) | 0 |
+| CL, MA, CB | default | 0 |
+| Lead, bass | default, no steps | 1 |
+
+Every knob not listed keeps its Knobs default. Master 0.7, 120 BPM, 16ths, INT.
+
+Pattern "909", length 16, every track length 16, accent 2 on every step:
+
+| Voice | Steps (1 to 16) |
+| --- | --- |
+| BD1 | 1, 9 |
+| SD | 5, 13 |
+| CP | 5, 13 |
+| OH | 3, 7, 11, 15 |
+| HH | every step except 3, 7, 11, 15 |
+
+CHOICE: the closed hat skips the open-hat steps. A closed trigger on the same sample chokes the open hat, so a closed hat on every step would leave the open hat silent.
+
+Not in the engine, so not in the kit: a hat filter knob, a master Drive, and a global Accent amount. The sheet called the BD1 and SD sweep "Bend"; here that is the Pitch knob. Step bend stays off. One bar peaks at 0.943890 on the main.
+
 ## Cleared voice
 
 A voice that has never been triggered in the block under test outputs 0 on every sample. A drum step that is off does not trigger. A note-track rest does not open the gate. Neither event produces a new nonzero sample from a cleared voice.
