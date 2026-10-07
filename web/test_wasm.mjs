@@ -9,7 +9,7 @@ const native = execFileSync(root + "build/web_parity", [root + "web/parity_scena
   .toString().trim().split("\n").map((l) => l.split(" ").map(Number));
 
 const { instance } = await WebAssembly.instantiate(readFileSync(root + "build/shogun.wasm"), {
-  env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh },
+  env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh, log: Math.log },
 });
 const x = instance.exports;
 const str = (p) => { const m = new Uint8Array(x.memory.buffer); let s = ""; while (m[p]) s += String.fromCharCode(m[p++]); return s; };
@@ -47,7 +47,7 @@ console.log(ok ? "wasm matches the native engine" : "MISMATCH");
 // only with the switch on EXT, and the cable never moves the switch. ACC OUT is high only on a loud step.
 async function bayPeak(mode, source, loudStep) {
   const { instance: i2 } = await WebAssembly.instantiate(readFileSync(root + "build/shogun.wasm"), {
-    env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh },
+    env: { sin: Math.sin, cos: Math.cos, exp: Math.exp, pow: Math.pow, tanh: Math.tanh, log: Math.log },
   });
   const y = i2.exports;
   y.sg_init();
