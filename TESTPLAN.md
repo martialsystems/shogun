@@ -104,7 +104,7 @@ Maracas does not appear on any pair. A maracas trigger with the first noise draw
 
 ## testVoiceEndsWhenQuiet
 
-Trigger each drum voice once, BD1 with the example knobs and the others with default knobs. Each one sounds, then ends, then outputs exactly 0 on both main channels until a new trigger. The BD1 example ends where its body envelope crosses 1e-6: ceil(-ln(1e-6) * 48,000 * 0.785906) samples, within one sample. BD2 at Decay 127 is still sounding after 10 s. A BD1 that has ended plays the example y(10) = 0.208884 on its next trigger.
+Trigger each drum voice once, BD1 with the example knobs and the others with default knobs. Each one sounds, then ends, then outputs exactly 0 on both main channels until a new trigger. The BD1 example ends where its body envelope crosses 1e-6: ceil(-ln(1e-6) * 48,000 * 0.785906) samples, within one sample. With Noise 127 it ends at the same sample and stays 0, because the noise rides the body envelope. BD2 at Decay 127 is still sounding after 10 s. A BD1 that has ended plays the example y(10) = 0.208884 on its next trigger.
 
 ## testDistBypassAndDrive
 
@@ -112,7 +112,7 @@ BD1 example knobs, n = 48. Dist 0 is y = pre = 0.832547. Dist 1 is within 2e-3 o
 
 ## testCenterPanIsNotHalf
 
-A maracas trigger puts 0.707107 times the maracas sample on each side of the main, not 0.5. At n = 0 that is -0.066445.
+A maracas trigger puts 0.707107 times the maracas sample on each side of the main, not 0.5. At n = 0 that is -0.066445. The mid tom is equal on both TO/CO channels and on the main. With Attack 0 the clap is its tail alone, 0.707107 times the filtered first noise draw on each channel.
 
 ## testShuffleSurvivesOddLength
 

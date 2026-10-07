@@ -970,8 +970,10 @@ void testClockNotesAndEdges() {
   tomN.process(in, f);
   const double x0 = -0.527088949456811;
   const double y = (33.0 / 127.0) * x0;
-  const double gL = 0.5 * (1.0 - -0.7);
+  // Equal-power pan at p = -0.7: gL = cos(pi / 4 * 0.3) = 0.972370. Printed toL = -0.133176.
+  const double gL = 0.972370;
   expect(near(f.toL, y * gL), t, "shared tom noise", f.toL, y * gL);
+  expect(near(f.toL, -0.133176), t, "printed tom noise", f.toL, -0.133176);
   expect(f.bdL == 0.0 && f.mainL != 0.0, t, "tom reaches main", f.mainL, y * gL);
 }
 
@@ -1026,6 +1028,24 @@ void testVoiceEndsWhenQuiet() {
   }
   const double want = std::ceil(-std::log(1e-6) * 48000.0 * (0.03 + 1.2 * 80.0 / 127.0));
   expect(std::fabs(static_cast<double>(n) - want) <= 1.0, t, "BD1 ends at the 1e-6 crossing", n, want);
+  // With Noise up, the noise rides the body envelope: BD1 ends at the same crossing and is 0 after it.
+  shogun::Knobs noisy = bd1Example();
+  noisy.bd1Noise = 127;
+  shogun::Engine bn;
+  arm(bn, noisy, silentPattern());
+  bn.trigger(shogun::Voice::Bd1);
+  long m = 0;
+  while (bn.voiceActive(shogun::Voice::Bd1) || m == 0) {
+    bn.process(in, f);
+    ++m;
+  }
+  expect(std::fabs(static_cast<double>(m) - want) <= 1.0, t, "noisy BD1 ends with the body", m, want);
+  bool noisySilent = true;
+  for (int i = 0; i < 48000; ++i) {
+    bn.process(in, f);
+    if (f.bdL != 0.0) noisySilent = false;
+  }
+  expect(noisySilent, t, "noisy BD1 is 0 after the body", noisySilent ? 0.0 : 1.0, 0.0);
   // A held BD2 does not end, and an ended voice plays again on the next trigger.
   shogun::Knobs hold;
   hold.bd2Decay = 127;
@@ -1071,6 +1091,28 @@ void testCenterPanIsNotHalf() {
   expect(near(f.mainL, 0.707107 * y, 1e-6) && near(f.mainR, 0.707107 * y, 1e-6), t, "maracas at 0.707", f.mainL, 0.707107 * y);
   expect(std::fabs(f.mainL - 0.5 * y) > 1e-3, t, "not 0.5", f.mainL, 0.5 * y);
   expect(near(f.mainL, -0.066445), t, "printed maracas main", f.mainL, -0.066445);
+
+  // Every centre is 0.707: the mid tom on its pair and the main, and the clap tail on both channels.
+  shogun::Knobs mt;
+  mt.mtcTune = 50;
+  mt.mtcDecay = 60;
+  shogun::Engine m;
+  arm(m, mt, silentPattern());
+  m.trigger(shogun::Voice::Mtc);
+  for (int i = 0; i <= 40; ++i) m.process(in, f);
+  expect(f.toL != 0.0 && near(f.toL, f.toR, 1e-12), t, "MTC is centred", f.toL, f.toR);
+  expect(near(f.mainL, f.toL, 1e-12), t, "MTC main matches its pair", f.mainL, f.toL);
+  shogun::Knobs tail;
+  tail.cpAttack = 0;
+  tail.cpDecay = 50;
+  shogun::Engine cp;
+  arm(cp, tail, silentPattern());
+  cp.trigger(shogun::Voice::Cp);
+  cp.process(in, f);
+  // Attack 0 leaves only the tail: the first noise draw through the one-pole at fc 1,565.8 Hz, times 0.707107.
+  const double a = std::exp(-2.0 * 3.141592653589793 * (400.0 * std::pow(15.0, 64.0 / 127.0)) / 48000.0);
+  const double want = (1.0 - a) * -0.527088949456811 * 0.707107;
+  expect(near(f.cpL, want, 1e-6) && near(f.cpR, want, 1e-6), t, "clap tail at 0.707", f.cpL, want);
 }
 
 void testShuffleSurvivesOddLength() {
