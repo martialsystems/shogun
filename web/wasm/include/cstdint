@@ -1,0 +1,8 @@
+#pragma once
+// Freestanding <cstdint> for the WebAssembly build (wasm32: int is 32 bits, long long is 64).
+typedef unsigned int uint32_t;
+typedef long long int64_t;
+namespace std {
+using ::int64_t;
+using ::uint32_t;
+}  // namespace std

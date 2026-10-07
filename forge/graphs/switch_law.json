@@ -1,0 +1,58 @@
+{
+  "name": "shogun.clock_switch",
+  "_note": "Panel switch values are int and ext. The switch chooses. cable_forces_ext is the claim that a Trig cable selected EXT, and that claim is refused. INT fires from the pattern and ignores Trig jacks. EXT fires from Trig jacks and ignores the pattern. A plugged cable is legal in either mode. The cable channel is not part of a match, so a cable cannot select the mode. Printed sample rows are not channels of this law.",
+  "channels": {
+    "switch": {"reducer": "last_value", "default": null},
+    "cable_plugged": {"reducer": "last_value", "default": null},
+    "cable_forces_ext": {"reducer": "last_value", "default": null},
+    "pattern_fires_voices": {"reducer": "last_value", "default": null},
+    "trig_jacks_fire_voices": {"reducer": "last_value", "default": null},
+    "decision": {"reducer": "last_value", "default": null},
+    "violations": {"reducer": "operator_add", "default": []}
+  },
+  "rules": [
+    {
+      "when": {"cable_forces_ext": true},
+      "decision": "block",
+      "violations": ["cable_forces_ext"]
+    },
+    {
+      "when": {"switch": "int", "trig_jacks_fire_voices": true},
+      "decision": "block",
+      "violations": ["int_reads_trig_jacks"]
+    },
+    {
+      "when": {"switch": "int", "pattern_fires_voices": false},
+      "decision": "block",
+      "violations": ["int_drops_pattern"]
+    },
+    {
+      "when": {"switch": "ext", "pattern_fires_voices": true},
+      "decision": "block",
+      "violations": ["ext_reads_pattern"]
+    },
+    {
+      "when": {"switch": "ext", "trig_jacks_fire_voices": false},
+      "decision": "block",
+      "violations": ["ext_ignores_trig_jacks"]
+    },
+    {
+      "when": {
+        "switch": "int",
+        "cable_forces_ext": false,
+        "pattern_fires_voices": true,
+        "trig_jacks_fire_voices": false
+      },
+      "decision": "allow"
+    },
+    {
+      "when": {
+        "switch": "ext",
+        "cable_forces_ext": false,
+        "pattern_fires_voices": false,
+        "trig_jacks_fire_voices": true
+      },
+      "decision": "allow"
+    }
+  ]
+}
