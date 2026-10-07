@@ -145,6 +145,8 @@ void Engine::triggerNote(Voice voice, int note, double gain) {
   p.isNote = true;
 }
 
+void Engine::release(Voice voice) { fireRest(static_cast<int>(voice)); }
+
 double Engine::cpBurst(int index) const {
   if (index < 0 || index >= 8) return 0.0;
   return cpBurst_[index];

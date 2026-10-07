@@ -169,6 +169,8 @@ class Engine {
   // Hats: a closed trigger on that sample chokes the open hat first.
   void trigger(Voice voice, double gain = 1.0, double bendSt = 0.0);
   void triggerNote(Voice voice, int note, double gain = 1.0);
+  // Note-off for lead and bass. Drums ignore it.
+  void release(Voice voice);
 
   void process(const TrigIn& in, Frame& out);
 

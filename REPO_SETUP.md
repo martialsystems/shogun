@@ -4,7 +4,7 @@
 
 Public repository: `https://github.com/martialsystems/shogun`
 
-Working name: SHOGUN. A separate product name has not been set. The engine commit is on branch `feat/engine-voices`, cut from the design pack in this repository. The clock-switch pin is on that branch, in `forge/`.
+Working name: SHOGUN. A separate product name has not been set. The engine, the clock-switch pin, and the placeholder plate are on branch `feat/engine-voices`, cut from the design pack in this repository. The pin is in `forge/`. The plate is in `plugin/`.
 
 This tree contains:
 
@@ -20,7 +20,9 @@ This tree contains:
 | engine/shogun.h | Clock, pattern, knobs, and the process call |
 | engine/shogun.cpp | Voices and the output sum |
 | tests/voices.cpp | Named checks |
-| Makefile | Builds `build/shogun_tests` and runs the clock-switch law |
+| Makefile | `make test` builds `build/shogun_tests` and runs the clock-switch law. `make plugin` builds the VST3 |
+| plugin/CMakeLists.txt | VST3 target. Universal Release build. No standalone target |
+| plugin/Source/ | Processor, placeholder plate, knob table, and probe |
 | scripts/build_design_pack_pdf.py | Markdown to PDF |
 | docs/SHOGUN_Design_Pack.pdf | The pack as one PDF |
 | forge/engine_pin.json | GraphForge pin, clock switch only |
@@ -30,7 +32,7 @@ This tree contains:
 | LICENSE | All rights reserved, Martial Systems LLC |
 | .gitignore | `build/` and `__pycache__/` |
 
-The voice engine is framework-free C++ under `engine/`. `process()` does not allocate. There is no panel SVG and no JUCE target.
+The voice engine is framework-free C++ under `engine/`. `process()` does not allocate. There is no panel SVG. JUCE is the wrapper in `plugin/` only.
 
 The MFB manuals are not in the tree. The German PDF that was read for the quotations stays outside the repository. The pack cites it. It does not redistribute it.
 

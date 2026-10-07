@@ -1,14 +1,15 @@
 # SHOGUN design pack (2026-10-06)
 
-**Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack, voice engine, and a GraphForge pin for the clock switch.**
+**Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack, voice engine, a GraphForge pin for the clock switch, and a placeholder plate.**
 
-SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, and the clock-switch pin in `forge/`. Panel art is a later commit.
+SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in FL Studio.
 
 ## Revisions
 
 - 2026-10-06: first pack. Sources, clock bypass, voice equations, sequencer, tests, and the PDF of the same text.
 - 2026-10-06: voice engine. Framework-free C++ in `engine/`, INT and EXT trigger paths, and the named tests in `tests/voices.cpp`.
 - 2026-10-06: clock switch pinned under `forge/`. A Trig cable cannot force EXT. Printed 48 kHz rows stay named tests.
+- 2026-10-06: placeholder VST3. Flat plate, knobs, levels, a 16-step grid, and TRIG buttons. `make plugin` builds a universal instrument. Panel art stays later.
 
 ## What this is
 
@@ -33,7 +34,8 @@ The instrument this pack describes:
 | REPO_SETUP.md | Tree, git, and the collection link |
 | engine/ | Voice engine, clock, pattern, and outs. No JUCE |
 | tests/voices.cpp | The named checks, compiled by the Makefile |
-| Makefile | Builds `build/shogun_tests` and runs the clock-switch law |
+| plugin/ | Placeholder VST3. JUCE wraps the engine. The plate is stock controls |
+| Makefile | `make test` builds the engine checks and runs the clock-switch law. `make plugin` builds the VST3 |
 | forge/ | GraphForge pin for the clock switch. Printed sample rows stay in `tests/voices.cpp` |
 | docs/SHOGUN_Design_Pack.pdf | The same documents in one PDF |
 
