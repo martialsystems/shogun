@@ -181,7 +181,9 @@ zone("lfo");
 const LDIV=[["1/1",.25],["1/2",.5],["1/4",1],["1/8",2],["1/8.",4/3],["1/8T",3],["1/16",4],["1/16.",8/3],["1/16T",6],["1/32",8]],LSHAPE=["SINE","TRI","SAW","SQUARE","S+H"];
 const lfoDiv=()=>LDIV[Math.round(P["LFO:DIV"]*9)],lfoShapeI=()=>Math.round(P["LFO:SHAPE"]*4),lfoHz=()=>bpmOf(P["CLOCK:TEMPO"])/60*lfoDiv()[1];
 const divText=d=>d[0].replace(/\.$/," dotted").replace(/T$/," triplet");
-let lfoV=0;   // LFO OUT now, in volts, as the engine last reported it
+// LFO OUT and the phase as the engine last reported them (about 47 times a second), and when. A fast LFO turns more than a
+// cycle between reports, so the scope's marker runs the phase on from the last report at the LFO's rate instead.
+let lfoV=0,lfoP=0,lfoT=-1,lfoShown={t:0,s:""};
 {const y0=FR_T,cy=y0+170,KX=[110,290,470,650];
  T(M+18,y0+27,"LFO",14,"start",INK,1.5);T(M+66,y0+27,"ONE TEMPO-SYNCED LFO FOR THE RACK · ITS OUTPUT IS THE LFO OUT JACK IN THE BAY",10,"start","#9a9a90",.4);
  rule(M,y0+40,W-M,y0+40);rule(890,y0+40,890,y0+262);

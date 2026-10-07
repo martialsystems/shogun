@@ -217,6 +217,8 @@ EXPORT(sg_set_lfo) void sg_set_lfo(double cyclesPerBeat, double phase, int shape
   gLfoAmount = amount < 0 ? 0 : (amount > 1 ? 1 : amount);
 }
 EXPORT(sg_lfo_volts) double sg_lfo_volts() { return gLfoVolts; }
+// the phase the last output was made at, PHASE included, 0 to 1 (the page draws its marker from it)
+EXPORT(sg_lfo_phase) double sg_lfo_phase() { return gLfoLastP; }
 EXPORT(sg_set_scale) void sg_set_scale(int stepsPerQuarter) { gE->setScaleSteps(stepsPerQuarter); }
 EXPORT(sg_set_running) void sg_set_running(int on) {
   if (on && !gE->running()) gKick = true;

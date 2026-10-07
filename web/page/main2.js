@@ -55,7 +55,7 @@ function loadKnobs(){const t=tracks[sel],st=t.steps[edit];P["SEQ:LENGTH"]=(t.len
 let ctx=null,node=null,host=null,mon=null,running=false,counter=-1;let outbox=[];
 const SPQ=[8,6,4,3];
 function send(calls){if(node)node.port.postMessage(calls);else if(host)host.run(calls);else outbox.push(...calls)}
-function onEngine(m){if(m.lfo!=null)lfoV=m.lfo;counter=m.running?m.counter:-1;chainTick();if(m.running!=running){running=m.running;$("go").textContent=running?"Stop":"Start"}}
+function onEngine(m){if(m.lfo!=null){lfoV=m.lfo;lfoP=m.lfoP;lfoT=performance.now()}counter=m.running?m.counter:-1;chainTick();if(m.running!=running){running=m.running;$("go").textContent=running?"Stop":"Start"}}
 const wasmBytes=()=>Uint8Array.from(atob($("wasm").textContent.trim()),c=>c.charCodeAt(0)).buffer;
 function audio(){if(ctx){if(ctx.state=="suspended")ctx.resume();return}
   // The engine runs at 48 kHz (dsp.h kFs). Ask for that rate; the host resamples if the browser will not.
@@ -129,12 +129,15 @@ function drawAll(){
 // the LFO and VOICE tabs: their screens, the scope and the voice picker (drawn only while their tab is up)
 function drawViews(){
   if(view=="lfo"){const d=lfoDiv(),i=lfoShapeI();lcdPut("LDIV",d[0].padStart(5," "));lcdPut("LSHAPE",LSHAPE[i]);lcdPut("LPHASE",P["LFO:PHASE"].toFixed(2));
-    lcdPut("LAMT",String(Math.round(P["LFO:AMOUNT"]*100)).padStart(3," ")+" ");lcdPut("LRATE",(lfoHz().toFixed(2)+" HZ").padStart(8," "));lcdPut("LOUT",(lfoV.toFixed(2)+" V").padStart(8," "));
+    lcdPut("LAMT",String(Math.round(P["LFO:AMOUNT"]*100)).padStart(3," ")+" ");lcdPut("LRATE",(lfoHz().toFixed(2)+" HZ").padStart(8," "));
     const g=LIVE["LFO:SCOPE"],a=P["LFO:AMOUNT"],ph=P["LFO:PHASE"],yv=v=>(g.y+g.h-v/5*g.h).toFixed(1);let pts="";
     for(let k=0;k<=480;k++){const t=k/240+ph,p=t-Math.floor(t);pts+=(k?" ":"")+(g.x+g.w*k/480).toFixed(1)+","+yv(a*2.5*(1+lfoShapeAt(i,p,Math.floor(t))))}
-    const ly=yv(clamp(lfoV,0,5));
-    put("LFO:SCOPE",`<polyline points="${pts}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="round" opacity=".9"/>`+
-      `<line x1="${g.x}" y1="${ly}" x2="${g.x+g.w+8}" y2="${ly}" stroke="#ff4a36" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`+lamp(g.x+g.w+16,+ly,4.5,running||lfoV>0)+
+    // the marker rides the first cycle of the trace at the phase now; sample and hold shows the level it really holds
+    let mk="",now=lfoV;
+    if(lfoT>=0){const q=lfoP+lfoHz()*(performance.now()-lfoT)/1000,p=q-Math.floor(q),t=((p-ph)%1+1)%1;if(i!=4)now=a*2.5*(1+lfoShapeAt(i,p,0));
+      mk=`<circle cx="${(g.x+g.w*t/2).toFixed(1)}" cy="${yv(now)}" r="5" fill="#ff4a36" stroke="#2a0805" stroke-width="1"/>`}
+    const ms=performance.now();if(ms-lfoShown.t>125){lfoShown={t:ms,s:(now.toFixed(2)+" V").padStart(8," ")}}lcdPut("LOUT",lfoShown.s);
+    put("LFO:SCOPE",`<polyline points="${pts}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="round" opacity=".9"/>`+mk+
       `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}
   if(view=="voice"){put("VDEV",dots(M+80,FR_T+54,122,22,"SHOGUN",8));const y=FR_T+65;let s="";
     VOICES.forEach((v,i)=>{const cx=VPX+VPW*(i+.5),on=v.k==sel;
