@@ -181,9 +181,9 @@ zone("lfo");
 const LDIV=[["1/1",.25],["1/2",.5],["1/4",1],["1/8",2],["1/8.",4/3],["1/8T",3],["1/16",4],["1/16.",8/3],["1/16T",6],["1/32",8]],LSHAPE=["SINE","TRI","SAW","SQUARE","S+H"];
 const lfoDiv=()=>LDIV[Math.round(P["LFO:DIV"]*9)],lfoShapeI=()=>Math.round(P["LFO:SHAPE"]*4),lfoHz=()=>bpmOf(P["CLOCK:TEMPO"])/60*lfoDiv()[1];
 const divText=d=>d[0].replace(/\.$/," dotted").replace(/T$/," triplet");
-// LFO OUT and the phase as the engine last reported them (about 47 times a second), and when. A fast LFO turns more than a
-// cycle between reports, so the scope's marker runs the phase on from the last report at the LFO's rate instead.
-let lfoV=0,lfoP=0,lfoT=-1,lfoShown={t:0,s:""};
+// The LFO's phase as the engine last reported it (about 47 times a second), and when. A fast LFO turns more than a cycle
+// between reports, so the scope's playhead runs the phase on from the last report at the LFO's rate. lfoV: LFO OUT in volts.
+let lfoV=0,lfoP=0,lfoT=-1,lfoCyc=0,lfoLastP=0;
 {const y0=FR_T,cy=y0+170,KX=[110,290,470,650];
  T(M+18,y0+27,"LFO",14,"start",INK,1.5);T(M+66,y0+27,"ONE TEMPO-SYNCED LFO FOR THE RACK · ITS OUTPUT IS THE LFO OUT JACK IN THE BAY",10,"start","#9a9a90",.4);
  rule(M,y0+40,W-M,y0+40);rule(890,y0+40,890,y0+262);
@@ -191,11 +191,12 @@ let lfoV=0,lfoP=0,lfoT=-1,lfoShown={t:0,s:""};
  knob("LFO:SHAPE","SHAPE",KX[1],cy,0,{r:28,n:5,lz:11.5,ly:26,name:"LFO · SHAPE",fmt:v=>["sine","triangle","saw","square, width 0.5","sample and hold, a new random level each cycle"][Math.round(v*4)]});lcd("LSHAPE",KX[1]-50,y0+62,100,null,6);
  knob("LFO:PHASE","PHASE",KX[2],cy,0,{r:28,lz:11.5,ly:26,name:"LFO · PHASE",fmt:v=>v.toFixed(2)+" of a cycle"});lcd("LPHASE",KX[2]-50,y0+62,100,null,4);
  knob("LFO:AMOUNT","AMOUNT",KX[3],cy,.5,{r:28,lz:11.5,ly:26,name:"LFO · AMOUNT",fmt:v=>v<.0005?"0 V":"0 to "+(5*v).toFixed(2)+" V"+(v>.9995?", around 2.5 V":"")});lcd("LAMT",KX[3]-50,y0+62,100,null,4);
- lcd("LRATE",728,y0+62,140,"RATE",8);lcd("LOUT",728,y0+150,140,"LFO OUT",8);
- // the scope: two cycles of the shape as set, and the level at the jack now
+ lcd("LRATE",728,y0+62,140,"RATE",8);
+ // the scope: two cycles of the shape as set, from the start of a cycle, and a playhead
  const sx=912,sy=y0+58,sw=W-M-18-sx,sh=176;S.push(`<rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" rx="3" fill="#070807" stroke="#2a2a2c" stroke-width="1.2"/>`);
  [0,2.5,5].forEach(v=>{const y=sy+sh-10-v/5*(sh-20);S.push(`<line x1="${sx+34}" y1="${y}" x2="${sx+sw-28}" y2="${y}" stroke="#1d3a24" stroke-width="1" stroke-dasharray="${v==2.5?"4 4":"none"}"/>`);T(sx+28,y+3.5,v+" V",9,"end","#6f7a66")});
- [1,2,3].forEach(i=>{const x=sx+34+(sw-62)*i/4;S.push(`<line x1="${x}" y1="${sy+10}" x2="${x}" y2="${sy+sh-10}" stroke="#16251a" stroke-width="1"/>`)});
+ [0,1,2].forEach(i=>{const x=sx+34+(sw-62)*i/2;S.push(`<line x1="${x}" y1="${sy+10}" x2="${x}" y2="${sy+sh-10}" stroke="#24452c" stroke-width="1"/>`)});
+ [0,1].forEach(i=>T(sx+34+(sw-62)*(i+.5)/2,sy+sh+15,"CYCLE "+(i+1),9.5,"middle","#9a9a90",.5));
  live("LFO:SCOPE");LIVE["LFO:SCOPE"]={x:sx+34,y:sy+10,w:sw-62,h:sh-20}}
 function lfoShapeAt(i,p,k){if(i==1)return 1-4*Math.abs(p-.5);if(i==2)return 2*p-1;if(i==3)return p<.5?1:-1;if(i==4)return[.55,-.7,.2,-.15,.9][k%5];return Math.sin(2*Math.PI*p)}
 

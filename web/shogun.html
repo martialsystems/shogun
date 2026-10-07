@@ -44,7 +44,7 @@ p.legal{font-size:.8rem;margin-top:16px}
 <div id="info" aria-live="polite">Press START (or Space) to play. Click a voice's name to select its track, then click the step keys. BAY opens the patch bay.</div>
 <div class="sc"><div id="stage"><svg id="sv"><defs id="df"></defs><g id="panel"></g><g id="live"></g><g id="cab" style="filter:drop-shadow(3px 5px 4px rgba(0,0,0,.6))"></g><g id="ring"></g><g id="dd"></g></svg><div id="menu"></div></div></div>
 <p><b>SHOGUN</b> is the drum computer of the Martial Systems Jidai Collection: fourteen drum voices and two note voices, a sequencer of 1 to 32 steps per track, and a patch bay styled like BUSHIDO's and RONIN's. The sound is the SHOGUN engine itself, compiled for the browser. TEST, next to the TRACK screen, plays the selected voice once.
-<b>Tabs:</b> RACK is the instrument: the face, the sequencer and, with BAY, the patch bay. LFO and VOICE replace it under the same top bar. Switching tabs never stops the sound or unplugs a cable. <b>LFO:</b> one tempo-synced LFO for the rack. DIVISION picks 1/1 to 1/32, with dotted and triplet 1/8 and 1/16; the rate is BPM / 60 × steps per beat, so 1/16 at 120 BPM is 8 Hz. It starts again from PHASE when the transport starts. SHAPE is sine, triangle, saw, square or sample and hold (a new random level each cycle). AMOUNT scales the output: at full it swings 0 to 5 V around 2.5 V, and at 0 it is 0 V. Its only output is the LFO OUT jack in the bay: patch it with a cable. <b>VOICE:</b> pick a voice and get large knobs for it alone, the same controls as on the face, plus BD 1 and CLAP TRANSIENT.
+<b>Tabs:</b> RACK is the instrument: the face, the sequencer and, with BAY, the patch bay. LFO and VOICE replace it under the same top bar. Switching tabs never stops the sound or unplugs a cable. <b>LFO:</b> one tempo-synced LFO for the rack. DIVISION picks 1/1 to 1/32, with dotted and triplet 1/8 and 1/16; the rate is BPM / 60 × steps per beat, so 1/16 at 120 BPM is 8 Hz. It starts again from PHASE when the transport starts. SHAPE is sine, triangle, saw, square or sample and hold (a new random level each cycle). AMOUNT scales the output: at full it swings 0 to 5 V around 2.5 V, and at 0 it is 0 V. The scope draws two cycles of the shape as set; the red dot is where the LFO is now. Its only output is the LFO OUT jack in the bay: patch it with a cable. <b>VOICE:</b> pick a voice and get large knobs for it alone, the same controls as on the face, plus BD 1 and CLAP TRANSIENT.
 <b>One editor:</b> the top bar, the knobs and the sequencer are always there. The <b>BAY</b> key opens the patch bay under the sequencer and the panel grows to hold it. Closing the bay shrinks the panel back and hides the jacks and cables; it does not unplug anything, and a patched cable keeps working.
 <b>Voices:</b> every voice is on the face with its name, its lamp and two rows of knobs. Click a voice's name to select its track (or use the TRACK screen); the lamp shows which track is selected. The open and closed hat share one TUNE. WAVE on BD 1, BD 2 and the toms is the folder on the body (0 is bypass). The toms each have a NOISE switch and a TOM/CGA switch; TOMS NOISE sets the noise level for all three.
 <b>Sequencer:</b> in TRACK, LENGTH sets the selected track from 1 to 32 steps, SHUFFLE delays its odd steps (16 settings), SHIFT moves the whole track later (up to 30 ms) and MUTE silences it. The 16 step keys are a page: 1-16 and 17-32 switch pages, and steps past the track's length are dimmed. Click a step key to turn it on or off. The ACC lamp under a step is its accent: dim green soft, green medium, red loud; click it to change. CLEAR empties the selected track. The last step key you clicked is the edit step (EDIT): FLAM picks one of 16 flams or none, BEND sets a pitch bend on BD 1, BD 2, the snare and the toms, and NOTE and TIE set the note and the tie on LEAD and BASS. The line under a step shows its flam and bend, or its note.
@@ -261,9 +261,9 @@ zone("lfo");
 const LDIV=[["1/1",.25],["1/2",.5],["1/4",1],["1/8",2],["1/8.",4/3],["1/8T",3],["1/16",4],["1/16.",8/3],["1/16T",6],["1/32",8]],LSHAPE=["SINE","TRI","SAW","SQUARE","S+H"];
 const lfoDiv=()=>LDIV[Math.round(P["LFO:DIV"]*9)],lfoShapeI=()=>Math.round(P["LFO:SHAPE"]*4),lfoHz=()=>bpmOf(P["CLOCK:TEMPO"])/60*lfoDiv()[1];
 const divText=d=>d[0].replace(/\.$/," dotted").replace(/T$/," triplet");
-// LFO OUT and the phase as the engine last reported them (about 47 times a second), and when. A fast LFO turns more than a
-// cycle between reports, so the scope's marker runs the phase on from the last report at the LFO's rate instead.
-let lfoV=0,lfoP=0,lfoT=-1,lfoShown={t:0,s:""};
+// The LFO's phase as the engine last reported it (about 47 times a second), and when. A fast LFO turns more than a cycle
+// between reports, so the scope's playhead runs the phase on from the last report at the LFO's rate. lfoV: LFO OUT in volts.
+let lfoV=0,lfoP=0,lfoT=-1,lfoCyc=0,lfoLastP=0;
 {const y0=FR_T,cy=y0+170,KX=[110,290,470,650];
  T(M+18,y0+27,"LFO",14,"start",INK,1.5);T(M+66,y0+27,"ONE TEMPO-SYNCED LFO FOR THE RACK · ITS OUTPUT IS THE LFO OUT JACK IN THE BAY",10,"start","#9a9a90",.4);
  rule(M,y0+40,W-M,y0+40);rule(890,y0+40,890,y0+262);
@@ -271,11 +271,12 @@ let lfoV=0,lfoP=0,lfoT=-1,lfoShown={t:0,s:""};
  knob("LFO:SHAPE","SHAPE",KX[1],cy,0,{r:28,n:5,lz:11.5,ly:26,name:"LFO · SHAPE",fmt:v=>["sine","triangle","saw","square, width 0.5","sample and hold, a new random level each cycle"][Math.round(v*4)]});lcd("LSHAPE",KX[1]-50,y0+62,100,null,6);
  knob("LFO:PHASE","PHASE",KX[2],cy,0,{r:28,lz:11.5,ly:26,name:"LFO · PHASE",fmt:v=>v.toFixed(2)+" of a cycle"});lcd("LPHASE",KX[2]-50,y0+62,100,null,4);
  knob("LFO:AMOUNT","AMOUNT",KX[3],cy,.5,{r:28,lz:11.5,ly:26,name:"LFO · AMOUNT",fmt:v=>v<.0005?"0 V":"0 to "+(5*v).toFixed(2)+" V"+(v>.9995?", around 2.5 V":"")});lcd("LAMT",KX[3]-50,y0+62,100,null,4);
- lcd("LRATE",728,y0+62,140,"RATE",8);lcd("LOUT",728,y0+150,140,"LFO OUT",8);
- // the scope: two cycles of the shape as set, and the level at the jack now
+ lcd("LRATE",728,y0+62,140,"RATE",8);
+ // the scope: two cycles of the shape as set, from the start of a cycle, and a playhead
  const sx=912,sy=y0+58,sw=W-M-18-sx,sh=176;S.push(`<rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" rx="3" fill="#070807" stroke="#2a2a2c" stroke-width="1.2"/>`);
  [0,2.5,5].forEach(v=>{const y=sy+sh-10-v/5*(sh-20);S.push(`<line x1="${sx+34}" y1="${y}" x2="${sx+sw-28}" y2="${y}" stroke="#1d3a24" stroke-width="1" stroke-dasharray="${v==2.5?"4 4":"none"}"/>`);T(sx+28,y+3.5,v+" V",9,"end","#6f7a66")});
- [1,2,3].forEach(i=>{const x=sx+34+(sw-62)*i/4;S.push(`<line x1="${x}" y1="${sy+10}" x2="${x}" y2="${sy+sh-10}" stroke="#16251a" stroke-width="1"/>`)});
+ [0,1,2].forEach(i=>{const x=sx+34+(sw-62)*i/2;S.push(`<line x1="${x}" y1="${sy+10}" x2="${x}" y2="${sy+sh-10}" stroke="#24452c" stroke-width="1"/>`)});
+ [0,1].forEach(i=>T(sx+34+(sw-62)*(i+.5)/2,sy+sh+15,"CYCLE "+(i+1),9.5,"middle","#9a9a90",.5));
  live("LFO:SCOPE");LIVE["LFO:SCOPE"]={x:sx+34,y:sy+10,w:sw-62,h:sh-20}}
 function lfoShapeAt(i,p,k){if(i==1)return 1-4*Math.abs(p-.5);if(i==2)return 2*p-1;if(i==3)return p<.5?1:-1;if(i==4)return[.55,-.7,.2,-.15,.9][k%5];return Math.sin(2*Math.PI*p)}
 
@@ -525,14 +526,14 @@ function drawAll(){
 function drawViews(){
   if(view=="lfo"){const d=lfoDiv(),i=lfoShapeI();lcdPut("LDIV",d[0].padStart(5," "));lcdPut("LSHAPE",LSHAPE[i]);lcdPut("LPHASE",P["LFO:PHASE"].toFixed(2));
     lcdPut("LAMT",String(Math.round(P["LFO:AMOUNT"]*100)).padStart(3," ")+" ");lcdPut("LRATE",(lfoHz().toFixed(2)+" HZ").padStart(8," "));
-    const g=LIVE["LFO:SCOPE"],a=P["LFO:AMOUNT"],ph=P["LFO:PHASE"],yv=v=>(g.y+g.h-v/5*g.h).toFixed(1);let pts="";
-    for(let k=0;k<=480;k++){const t=k/240+ph,p=t-Math.floor(t);pts+=(k?" ":"")+(g.x+g.w*k/480).toFixed(1)+","+yv(a*2.5*(1+lfoShapeAt(i,p,Math.floor(t))))}
-    // the marker rides the first cycle of the trace at the phase now; sample and hold shows the level it really holds
-    let mk="",now=lfoV;
-    if(lfoT>=0){const q=lfoP+lfoHz()*(performance.now()-lfoT)/1000,p=q-Math.floor(q),t=((p-ph)%1+1)%1;if(i!=4)now=a*2.5*(1+lfoShapeAt(i,p,0));
-      mk=`<circle cx="${(g.x+g.w*t/2).toFixed(1)}" cy="${yv(now)}" r="5" fill="#ff4a36" stroke="#2a0805" stroke-width="1"/>`}
-    const ms=performance.now();if(ms-lfoShown.t>125){lfoShown={t:ms,s:(now.toFixed(2)+" V").padStart(8," ")}}lcdPut("LOUT",lfoShown.s);
-    put("LFO:SCOPE",`<polyline points="${pts}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="round" opacity=".9"/>`+mk+
+    // two cycles of the shape, each from phase 0 to 1; a reset (saw, square, a new held level) is a vertical line
+    const g=LIVE["LFO:SCOPE"],a=P["LFO:AMOUNT"],yv=v=>(g.y+g.h-v/5*g.h).toFixed(1),xy=(c,p)=>(g.x+g.w*(c+p)/2).toFixed(1)+","+yv(a*2.5*(1+lfoShapeAt(i,p,c)));
+    const E=1e-6,pts=[];for(let c=0;c<2;c++){for(let k=0;k<240;k++){const p=k/240;if(k==120)pts.push(xy(c,.5-E));pts.push(xy(c,p))}pts.push(xy(c,1-E))}
+    // the playhead: where the LFO is in its cycle now, on the trace; it alternates between the two drawn cycles
+    let mk="";
+    if(lfoT>=0){const q=lfoP+lfoHz()*(performance.now()-lfoT)/1000,p=q-Math.floor(q);if(p<lfoLastP-.5)lfoCyc^=1;lfoLastP=p;
+      mk=`<circle cx="${xy(lfoCyc,p).split(",")[0]}" cy="${xy(lfoCyc,p).split(",")[1]}" r="5" fill="#ff4a36" stroke="#2a0805" stroke-width="1"/>`}
+    put("LFO:SCOPE",`<polyline points="${pts.join(" ")}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="miter" opacity=".9"/>`+mk+
       `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}
   if(view=="voice"){put("VDEV",dots(M+80,FR_T+54,122,22,"SHOGUN",8));const y=FR_T+65;let s="";
     VOICES.forEach((v,i)=>{const cx=VPX+VPW*(i+.5),on=v.k==sel;
