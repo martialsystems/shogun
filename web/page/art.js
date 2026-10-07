@@ -20,16 +20,21 @@ function wear(){const R=rnd(5),u=(a,b)=>a+(b-a)*R();let o="";   // mottling, edg
   for(let i=0;i<40;i++){const s="tblr"[R()*4|0],x=s=="t"||s=="b"?u(0,W):s=="l"?u(2,10):u(W-10,W-2),y=s=="l"||s=="r"?u(0,H):s=="t"?u(2,10):u(H-10,H-2);o+=`<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${u(1.5,7).toFixed(1)}" ry="${u(1,4).toFixed(1)}" fill="#6a6a66" opacity="${u(.15,.35).toFixed(2)}"/>`}
   for(let i=0;i<70;i++){const x=u(0,W),y=u(0,H),L=u(8,110),a=u(0,6.283);o+=`<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x+L*Math.cos(a)).toFixed(1)}" y2="${(y+L*Math.sin(a)).toFixed(1)}" stroke="#dcdcd4" stroke-width="${u(.35,.7).toFixed(2)}" opacity="${u(.05,.16).toFixed(2)}"/>`}
   for(let i=0;i<320;i++)o+=`<circle cx="${u(0,W).toFixed(1)}" cy="${u(0,H).toFixed(1)}" r="${u(.3,.9).toFixed(2)}" fill="#ece8dc" opacity="${u(.2,.55).toFixed(2)}"/>`;
-  return o+`<rect width="${W}" height="${H}" fill="none" filter="url(#grain)"/><rect width="${W}" height="${H}" rx="8" fill="url(#vig)"/>`}
+  return o+`<rect width="${W}" height="${H}" fill="none" filter="url(#grain)"/>`}
 function screw(cx,cy){return `<g transform="translate(${cx} ${cy})"><circle r="5" fill="url(#js)" stroke="#000" stroke-width=".9"/><line x1="-3.5" x2="3.5" stroke="#1a1a1a" stroke-width="1.5"/><line y1="-3.5" y2="3.5" stroke="#1a1a1a" stroke-width="1.5"/></g>`}
 $("df").innerHTML=DEFS;
 const FONTG=a=>`<g font-family="'Liberation Sans',Arial,Helvetica,sans-serif">${a.join("")}</g>`;
-$("panel").innerHTML=`<rect width="${W}" height="${H}" rx="8" fill="url(#pf)"/><rect x="3" y="3" width="${W-6}" height="${H-6}" rx="6" fill="none" stroke="#050506" stroke-width="2"/>`+
+$("panel").innerHTML=`<g id="shellBg"></g>`+
  FONTG(ART.all)+`<g id="seqArt">${FONTG(ART.seq)}</g><g id="bayArt" style="display:none">${FONTG(ART.bay)}</g>`+
- // the frame, and the heavier rule between the knob block and the bottom half
- `<rect x="${M}" y="${FR_T}" width="${AV}" height="${FR_B-FR_T}" fill="none" stroke="${GRN}" stroke-width="1.6"/><line x1="${M}" y1="${KB_B}" x2="${W-M}" y2="${KB_B}" stroke="${GRN}" stroke-width="3.4"/>`+
- wear()+[[9,9],[W-9,9],[9,H-9],[W-9,H-9]].map(p=>screw(...p)).join("");
-// live parts sit above the wear layer, so move them to #live in order
+ // the heavier rule between the knob block and the sequencer
+ `<line x1="${M}" y1="${KB_B}" x2="${W-M}" y2="${KB_B}" stroke="${GRN}" stroke-width="3.4"/>`+wear()+`<g id="shellFg"></g>`;
+// The case, the frame, the vignette and the corner screws follow the height in view (VH): short with BAY off, tall with it on.
+function drawShell(){const h=VH,fb=h-14;
+  $("shellBg").innerHTML=`<rect width="${W}" height="${h}" rx="8" fill="url(#pf)"/>`;
+  $("shellFg").innerHTML=`<rect width="${W}" height="${h}" rx="8" fill="url(#vig)"/><rect x="3" y="3" width="${W-6}" height="${h-6}" rx="6" fill="none" stroke="#050506" stroke-width="2"/>`+
+   `<rect x="${M}" y="${FR_T}" width="${AV}" height="${fb-FR_T}" fill="none" stroke="${GRN}" stroke-width="1.6"/>`+[[9,9],[W-9,9],[9,h-9],[W-9,h-9]].map(p=>screw(...p)).join("");
+  sv.setAttribute("viewBox",`0 0 ${W} ${h}`)}
+drawShell();
 const liveSeq=document.createElementNS(NS,"g");liveSeq.id="liveSeq";
 document.querySelectorAll("#panel g[id^=L_]").forEach(g=>{const z=g.closest("#seqArt")?liveSeq:$("live");z.appendChild(g)});$("live").appendChild(liveSeq);
 

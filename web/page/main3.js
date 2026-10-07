@@ -1,16 +1,17 @@
 
 // ================= controls =================
 let kdrag=null,pressed=null;
-function ctrlAt(x,y){for(const c of CTRL){if(c.zone==(bay?"seq":"bay"))continue;if(c.rect?Math.abs(x-c.x)<=(c.rw||c.r)&&Math.abs(y-c.y)<=(c.rh||c.r):Math.hypot(x-c.x,y-c.y)<=c.r)return c}return null}
+function ctrlAt(x,y){for(const c of CTRL){if(c.zone=="bay"&&!bay)continue;if(c.rect?Math.abs(x-c.x)<=(c.rw||c.r)&&Math.abs(y-c.y)<=(c.rh||c.r):Math.hypot(x-c.x,y-c.y)<=c.r)return c}return null}
 const NOFLAM={CP:1,LEAD:1,BASS:1};
 function describe(c){const t=tracks[sel];
   if(c.kind=="knob"){const v=P[c.id];let s=c.name+" · "+(c.fmt?c.fmt(v):MAP[c.id]&&MAP[c.id].f?"CC "+ccOf(c.id,v):Math.round(v*100)+"%");
     if(c.id=="STEP:FLAM"&&NOFLAM[sel])s+=` (${VK[sel].t} has no flam)`;if(c.id=="STEP:BEND"&&!BENDK[sel])s+=` (${VK[sel].t} has no bend)`;if(c.id=="STEP:NOTE"&&!NOTEK[sel])s+=" (LEAD and BASS only)";
     if(/^(SEQ|STEP):/.test(c.id))s=VK[sel].t+" · "+s;if(/^STEP:/.test(c.id))s+=` · step ${edit+1}`;return s}
   if(c.id=="CLOCK:SOURCE")return P[c.id]>.5?"EXT · the pattern does not fire the voices; each drum fires from its Trig jack in the bay, and the count keeps running":"INT · the pattern fires the voices; the Trig jacks are ignored";
-  if(c.id=="BAY")return bay?"BAY · press for the sequencer; the cables stay patched":"BAY · press for the patch bay ("+cables.length+" cable"+(cables.length==1?"":"s")+")";
+  if(c.id=="BAY")return bay?"BAY · press to close the bay; the cables stay patched":"BAY · press to open the patch bay under the sequencer ("+cables.length+" cable"+(cables.length==1?"":"s")+")";
   if(c.kind=="toggle")return c.name+" · "+(P[c.id]>.5?c.marks[1]:c.marks[0]);
-  if(c.voice)return VK[c.voice].t+" · "+tracks[c.voice].len+" steps"+(tracks[c.voice].mute?" · muted":"")+" · "+midiText(c.voice);
+  if(c.id=="TEST")return "TEST · play "+VK[sel].t+" once";
+  if(c.voice)return "Select "+VK[c.voice].t+" · "+tracks[c.voice].len+" steps"+(tracks[c.voice].mute?" · muted":"")+" · "+midiText(c.voice);
   if(c.id=="START")return running?"STOP":"START";if(c.id=="CLEAR")return "CLEAR · empty the "+VK[sel].t+" track";
   if(c.id=="MUTE")return VK[sel].t+" · "+(t.mute?"muted":"playing");if(c.id=="TIE")return VK[sel].t+" · step "+(edit+1)+" · "+(t.steps[edit].tie?"tied to the step before":"not tied")+(NOTEK[sel]?"":" (LEAD and BASS only)");
   if(c.id.startsWith("PAGE:"))return "Steps "+(c.id=="PAGE:0"?"1 to 16":"17 to 32");
@@ -45,7 +46,8 @@ function press(c,e){const t=tracks[sel];
   if(c.kind=="knob"||UNDOABLE[c.kind]||c.step!=null||/^(CLEAR|MUTE|TIE)$/.test(c.id))undoPush(c.kind=="knob"?c.id:null);
   if(c.kind=="knob"){kdrag={c,y:e.clientY,v:P[c.id]};sv.setPointerCapture(e.pointerId);return}
   if(c.kind=="toggle")setP(c.id,P[c.id]>.5?0:1);
-  else if(c.voice){selTrack(c.voice);if(!running)audition(sel)}
+  else if(c.voice){selTrack(c.voice)}
+  else if(c.id=="TEST")audition(sel);
   else if(c.id=="START")setRun(!running);
   else if(c.id=="CLEAR"){t.steps=Array.from({length:32},blankStep);dirty=true;sendSteps(sel);loadKnobs()}
   else if(c.id.startsWith("PAGE:"))page=+c.id.slice(5);

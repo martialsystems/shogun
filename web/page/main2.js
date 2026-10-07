@@ -109,7 +109,7 @@ function drawAll(){
   put("KIT",dots(KITR.x+8,KITR.y+6,KITR.w-16,KITR.h-12,kitText().slice(-12),12));put("CHN",dots(CHN.x+8,CHN.y+6,CHN.w-16,CHN.h-12,chainText(),8));
   put("SCR",dots(SCR.x+8,SCR.y+6,SCR.w-16,SCR.h-12,scrText().slice(-20),20));put("TRK",dots(TRK.x+8,TRK.y+6,TRK.w-16,TRK.h-12,trkText(),8));
   const kb=(id,black)=>{const L=LIVE[id];put(id,keyBody(L.x,L.y,black,pressed==id))},ld=(id,on,c)=>{const L=LIVE[id];put(id,lamp(L.x,L.y,L.r,on,c))};
-  VOICES.forEach(v=>{kb("SEL:"+v.k,true);ld("LED:"+v.k,v.k==sel)});ld("LED:LEARN",MIDI.learn);
+  VOICES.forEach(v=>ld("LED:"+v.k,v.k==sel));ld("LED:LEARN",MIDI.learn);
   kb("START",false);kb("CLEAR",true);kb("UNDO",true);kb("RANDOM",true);kb("SOLO",true);ld("LED:SOLO",soloV!=null&&soloV==sel);kb("BAY",true);ld("LED:BAY",bay);ld("LED:RUN",running);kb("MUTE",true);ld("LED:MUTE",t.mute);kb("TIE",true);ld("LED:TIE",t.steps[edit].tie);
   [0,1].forEach(n=>{kb("PAGE:"+n,true);ld("LED:P"+n,page==n)});
   const o=page*16,ph=running&&counter>=0&&counter>=rot0?posOf(counter,t.len):-1;
