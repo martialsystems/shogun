@@ -4,9 +4,9 @@
 
 Public repository: `https://github.com/martialsystems/shogun`
 
-Working name: SHOGUN. A separate product name has not been set. The engine commit is on branch `feat/engine-voices`, cut from the design pack in this repository.
+Working name: SHOGUN. A separate product name has not been set. The engine commit is on branch `feat/engine-voices`, cut from the design pack in this repository. The clock-switch pin is on that branch, in `forge/`.
 
-This commit contains:
+This tree contains:
 
 | Path | Role |
 | --- | --- |
@@ -20,9 +20,13 @@ This commit contains:
 | engine/shogun.h | Clock, pattern, knobs, and the process call |
 | engine/shogun.cpp | Voices and the output sum |
 | tests/voices.cpp | Named checks |
-| Makefile | Builds `build/shogun_tests` |
+| Makefile | Builds `build/shogun_tests` and runs the clock-switch law |
 | scripts/build_design_pack_pdf.py | Markdown to PDF |
 | docs/SHOGUN_Design_Pack.pdf | The pack as one PDF |
+| forge/engine_pin.json | GraphForge pin, clock switch only |
+| forge/product_laws.py | Legal INT and legal EXT states passed to require_law |
+| forge/graphs/switch_law.json | The switch law. A Trig cable cannot force EXT |
+| forge/tests/test_switch_law.py | Allows both switch positions and blocks the cable override |
 | LICENSE | All rights reserved, Martial Systems LLC |
 | .gitignore | `build/` and `__pycache__/` |
 
@@ -48,6 +52,12 @@ Commits on this repository use author `Martial Systems LLC` and `25778085+martia
 
 The license grants no right to copy the pack without permission from Martial Systems LLC. Short quotations in METHODOLOGY.md are the disputed parameter sentences, with the source named beside each one.
 
-## Clock switch, as a repository fact
+## Clock switch
 
-INT and EXT are specified in METHODOLOGY.md and SCHEMATICS.md. They are not a control from the Tanzbär manuals. A later patch against this repository that removes the switch, or that lets a Trig cable force EXT, breaks `testExtBypassIgnoresPattern` and `testIntIgnoresTrigJacks`.
+INT ignores Trig jacks. EXT ignores the pattern. The switch chooses. A plugged Trig cable does not force EXT.
+
+That rule is `forge/graphs/switch_law.json`, loaded by `forge/product_laws.py`. `forge/engine_pin.json` pins GraphForge for this law. `forge/tests/test_switch_law.py` asks `require_law` to allow both switch positions with a cable plugged, and to block a cable that forces EXT, an INT state that reads Trig jacks, and an EXT state that fires from the pattern.
+
+The printed 48 kHz rows stay in `tests/voices.cpp`. A later fit may change a row when SCHEMATICS.md and that test change together.
+
+INT and EXT are specified in METHODOLOGY.md and SCHEMATICS.md. The engine checks are `testExtBypassIgnoresPattern` and `testIntIgnoresTrigJacks`.

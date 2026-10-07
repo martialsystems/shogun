@@ -1,0 +1,11 @@
+{
+  "engine": "graphforge",
+  "github": "martialsystems/graphforge",
+  "track": "main",
+  "remote": "origin",
+  "min_version": "0.6.0",
+  "policy": "report_only",
+  "require_product_laws": true,
+  "local_candidates": ["~/graphforge"],
+  "note": "Clock switch only. Printed sample rows stay named tests in shogun_tests. policy: report_only | auto_pull_if_clean | fail_if_behind"
+}

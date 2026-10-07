@@ -1,13 +1,14 @@
 # SHOGUN design pack (2026-10-06)
 
-**Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack and voice engine in this commit.**
+**Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack, voice engine, and a GraphForge pin for the clock switch.**
 
-SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This commit has the design pack and the voice engine in `engine/`. Panel art is a later commit.
+SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, and the clock-switch pin in `forge/`. Panel art is a later commit.
 
 ## Revisions
 
 - 2026-10-06: first pack. Sources, clock bypass, voice equations, sequencer, tests, and the PDF of the same text.
 - 2026-10-06: voice engine. Framework-free C++ in `engine/`, INT and EXT trigger paths, and the named tests in `tests/voices.cpp`.
+- 2026-10-06: clock switch pinned under `forge/`. A Trig cable cannot force EXT. Printed 48 kHz rows stay named tests.
 
 ## What this is
 
@@ -17,7 +18,7 @@ The instrument this pack describes:
 
 - 14 drum tracks and 2 note tracks
 - An internal sequencer with patterns of 1 to 32 steps
-- A clock switch, INT or EXT, that connects or disconnects that sequencer from the voice triggers
+- A clock switch, INT or EXT, that connects or disconnects that sequencer from the voice triggers. The switch chooses. INT ignores Trig jacks. EXT ignores the pattern. A plugged Trig cable does not force EXT.
 - Paired outputs plus a main mix
 
 ## Files
@@ -32,7 +33,8 @@ The instrument this pack describes:
 | REPO_SETUP.md | Tree, git, and the collection link |
 | engine/ | Voice engine, clock, pattern, and outs. No JUCE |
 | tests/voices.cpp | The named checks, compiled by the Makefile |
-| Makefile | Builds `build/shogun_tests` |
+| Makefile | Builds `build/shogun_tests` and runs the clock-switch law |
+| forge/ | GraphForge pin for the clock switch. Printed sample rows stay in `tests/voices.cpp` |
 | docs/SHOGUN_Design_Pack.pdf | The same documents in one PDF |
 
 Rebuild the PDF with:

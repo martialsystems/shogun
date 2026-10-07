@@ -2,6 +2,8 @@
 
 These tests are the contract for the engine in `engine/`. `tests/voices.cpp` compiles them into `build/shogun_tests`. Each one is specified against [SCHEMATICS.md](SCHEMATICS.md) at 48,000 Hz, double precision, absolute tolerance 1e-5 on the printed decimals unless a row says otherwise.
 
+The clock switch is also pinned in `forge/graphs/switch_law.json`. A Trig cable cannot force EXT. INT ignores Trig jacks. EXT ignores the pattern. The numbers in this file stay the named checks. A later fit may change a printed row when SCHEMATICS.md and `tests/voices.cpp` change together. `make test` runs those checks and `forge/tests/test_switch_law.py`.
+
 A cleared voice is one that has not been triggered. Its output block is 0.
 
 Shared pattern for the bypass tests: 16th scale, 120 BPM, so a step is 6,000 samples. Pattern length 4. Track length 4. One drum voice, BD1, with the BD1 example knobs (Attack 64, Decay 80, Pitch 40, Tune 50, Noise 0, Filter 64, Dist 0, Trigger 0). Step 0 is on. Steps 1, 2, and 3 are off. No flam. Accent index 2. No bend.

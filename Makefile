@@ -1,10 +1,15 @@
 CXX ?= c++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O2 -Iengine
 
-.PHONY: test clean asan
+GRAPHFORGE_SRC ?= $(HOME)/graphforge/src
 
-test: build/shogun_tests
+.PHONY: test clean asan law
+
+test: build/shogun_tests law
 	./build/shogun_tests
+
+law:
+	PYTHONPATH="$(GRAPHFORGE_SRC)" python3 forge/tests/test_switch_law.py
 
 build/shogun_tests: engine/shogun.cpp engine/shogun.h engine/dsp.h tests/voices.cpp
 	mkdir -p build

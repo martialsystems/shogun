@@ -4,7 +4,7 @@ This commit builds the voice engine and a PDF. It does not build a plugin.
 
 ## This tree
 
-The voice engine is `engine/`. Panel art is unpainted. JIDAI RACK is not changed by this repository. The equations in [SCHEMATICS.md](SCHEMATICS.md) are the contract. `make test` builds `build/shogun_tests` and runs the checks in [TESTPLAN.md](TESTPLAN.md).
+The voice engine is `engine/`. Panel art is unpainted. JIDAI RACK is not changed by this repository. The equations in [SCHEMATICS.md](SCHEMATICS.md) are the voice contract. `make test` builds `build/shogun_tests`, runs the checks in [TESTPLAN.md](TESTPLAN.md), and runs the clock-switch law. That law test imports GraphForge from `~/graphforge/src`.
 
 Rebuild the pack PDF from the markdown:
 
@@ -19,6 +19,7 @@ The script reads README.md, METHODOLOGY.md, SCHEMATICS.md, BUILD_GUIDE.md, TESTP
 | Piece | Job |
 | --- | --- |
 | Clock | INT and EXT, tempo, scale, the step counter that keeps running in EXT |
+| Clock law | `forge/graphs/switch_law.json`. The switch chooses. Printed sample rows stay in the voice tests |
 | Pattern | 14 drum tracks, 2 note tracks, lengths, shuffle, shift, mute, per-step flags |
 | Voices | One block per voice in SCHEMATICS.md, cleared to 0 until triggered |
 | Outs | The pair map, the main sum, master after the sum |
