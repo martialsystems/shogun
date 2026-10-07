@@ -24,10 +24,7 @@ function wear(){const R=rnd(5),u=(a,b)=>a+(b-a)*R();let o="";   // mottling, edg
 function screw(cx,cy){return `<g transform="translate(${cx} ${cy})"><circle r="5" fill="url(#js)" stroke="#000" stroke-width=".9"/><line x1="-3.5" x2="3.5" stroke="#1a1a1a" stroke-width="1.5"/><line y1="-3.5" y2="3.5" stroke="#1a1a1a" stroke-width="1.5"/></g>`}
 $("df").innerHTML=DEFS;
 const FONTG=a=>`<g font-family="'Liberation Sans',Arial,Helvetica,sans-serif">${a.join("")}</g>`;
-$("panel").innerHTML=`<g id="shellBg"></g>`+
- FONTG(ART.all)+`<g id="seqArt">${FONTG(ART.seq)}</g><g id="bayArt" style="display:none">${FONTG(ART.bay)}</g>`+
- // the heavier rule between the knob block and the sequencer
- `<line x1="${M}" y1="${KB_B}" x2="${W-M}" y2="${KB_B}" stroke="${GRN}" stroke-width="3.4"/>`+wear()+`<g id="shellFg"></g>`;
+$("panel").innerHTML=`<g id="shellBg"></g>`+Object.keys(ART).map(z=>`<g id="az_${z}">${FONTG(ART[z])}</g>`).join("")+wear()+`<g id="shellFg"></g>`;
 // The case, the frame, the vignette and the corner screws follow the height in view (VH): short with BAY off, tall with it on.
 function drawShell(){const h=VH,fb=h-14;
   $("shellBg").innerHTML=`<rect width="${W}" height="${h}" rx="8" fill="url(#pf)"/>`;
@@ -35,6 +32,7 @@ function drawShell(){const h=VH,fb=h-14;
    `<rect x="${M}" y="${FR_T}" width="${AV}" height="${fb-FR_T}" fill="none" stroke="${GRN}" stroke-width="1.6"/>`+[[9,9],[W-9,9],[9,h-9],[W-9,h-9]].map(p=>screw(...p)).join("");
   sv.setAttribute("viewBox",`0 0 ${W} ${h}`)}
 drawShell();
-const liveSeq=document.createElementNS(NS,"g");liveSeq.id="liveSeq";
-document.querySelectorAll("#panel g[id^=L_]").forEach(g=>{const z=g.closest("#seqArt")?liveSeq:$("live");z.appendChild(g)});$("live").appendChild(liveSeq);
+// each zone's live parts go in a group of their own over the art, so a zone shows and hides as one
+Object.keys(ART).forEach(z=>{const g=document.createElementNS(NS,"g");g.id="lz_"+z;$("live").appendChild(g)});
+document.querySelectorAll("#panel g[id^=L_]").forEach(g=>{const z=g.closest("[id^=az_]").id.slice(3);$("lz_"+z).appendChild(g)});
 
