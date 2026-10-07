@@ -84,32 +84,34 @@ const bpmOf=v=>60+v*120,SCALEN=["32ND","16T","16TH","8T"];
  [["CLK IN","in","clock in"],["RST IN","in","reset in"],["RUN IN","in","start/stop in"],["CLK OUT","out","clock out"]].forEach(([lb,d,nm],i)=>jack("CLOCK:"+lb,lb,x+w*(.14+i*.24),y+150,d,"Gate","CLOCK "+nm))}
 // row 3: TRANSPORT, TRACK, STEP and the 16 step keys
 const TRW=118,TKW=330,STW=300,SX=M+TRW+TKW+STW,SW=(AV-TRW-TKW-STW)/16,y3=ROWY[3];rules.push([M+TRW,y3,FR_B],[M+TRW+TKW,y3,FR_B],[SX,y3,FR_B]);
-T(M+TRW/2,y3+22,"TRANSPORT",12.5,"middle",INK,1);key("START",M+TRW/2,y3+68,"START/STOP",{id:"LED:RUN",x:M+TRW/2+30,y:y3+56});key("CLEAR",M+TRW/2,y3+128,"CLEAR");
+T(M+TRW/2,y3+22,"TRANSPORT",12.5,"middle",INK,1);key("START",M+TRW/2,y3+68,"START/STOP",{id:"LED:RUN",x:M+TRW/2+30,y:y3+56});key("CLEAR",M+TRW/2-27,y3+128,"CLEAR");key("UNDO",M+TRW/2+27,y3+128,"UNDO");
 {const x=M+TRW;T(x+TKW/2,y3+22,"TRACK",12.5,"middle",INK,1);
  knob("SEQ:LENGTH","LENGTH",x+38,y3+66,15/31,{n:32,name:"LENGTH",fmt:v=>(1+Math.round(v*31))+" steps"});lcd("LEN",x+66,y3+52,62,"STEPS",2);CTRL.push({id:"SEQ:LENGTH",kind:"knob",x:x+97,y:y3+66,r:30,name:"LENGTH",fmt:v=>(1+Math.round(v*31))+" steps"});
  knob("SEQ:SHUFFLE","SHUFFLE",x+170,y3+66,0,{n:16,name:"SHUFFLE",fmt:v=>"intensity "+Math.round(v*15)+" of 15"});
  knob("SEQ:SHIFT","SHIFT",x+232,y3+66,0,{name:"SHIFT",fmt:v=>(Math.round(v*127)/127*30).toFixed(1)+" ms later"});
  key("MUTE",x+288,y3+66,"MUTE",{id:"LED:MUTE",x:x+312,y:y3+48});
- key("PAGE:0",x+100,y3+132,"1-16",{id:"LED:P0",x:x+124,y:y3+120});key("PAGE:1",x+180,y3+132,"17-32",{id:"LED:P1",x:x+204,y:y3+120})}
+ key("PAGE:0",x+100,y3+132,"1-16",{id:"LED:P0",x:x+124,y:y3+120});key("PAGE:1",x+180,y3+132,"17-32",{id:"LED:P1",x:x+204,y:y3+120});key("RANDOM",x+270,y3+132,"RANDOM")}
 {const x=M+TRW+TKW;T(x+STW/2,y3+22,"STEP",12.5,"middle",INK,1);lcd("EDIT",x+16,y3+52,62,"EDIT",2);
  knob("STEP:FLAM","FLAM",x+124,y3+66,0,{n:17,name:"FLAM",fmt:v=>{const i=Math.round(v*16);return i?"flam "+i+" of 16":"no flam"}});
  knob("STEP:BEND","BEND",x+186,y3+66,.5,{name:"BEND",fmt:v=>Math.abs(v-.5)<.006?"no bend":((12*(2*Math.round(v*127)/127-1))>=0?"+":"")+(12*(2*Math.round(v*127)/127-1)).toFixed(2)+" semitones"});
  knob("STEP:NOTE","NOTE",x+248,y3+66,24/36,{n:37,name:"NOTE",fmt:v=>noteName(36+Math.round(v*36))});
- key("TIE",x+124,y3+132,"TIE",{id:"LED:TIE",x:x+148,y:y3+120})}
+ key("TIE",x+124,y3+132,"TIE",{id:"LED:TIE",x:x+148,y:y3+120});T(SX-8,y3+133,"ACC",9,"end");T(SX-8,y3+156,"LOCK",9,"end")}
 for(let i=0;i<16;i++){const cx=SX+SW*(i+.5);live("NUM:"+i);LIVE["NUM:"+i]={x:cx,y:y3+22};
   S.push(`<circle cx="${cx}" cy="${y3+46}" r="9" fill="url(#js)" stroke="#2a2a2c" stroke-width=".9"/><circle cx="${cx}" cy="${y3+46}" r="6.5" fill="#050505"/>`);live("PH:"+i);LIVE["PH:"+i]={x:cx,y:y3+46};
-  const c=key("STEP:"+i,cx,y3+88);c.step=i;ledAt({id:"ACC:"+i},cx,y3+130,4);CTRL.push({id:"ACC:"+i,kind:"acc",x:cx,y:y3+130,r:10,step:i});T(cx,y3+152,"ACC",9);
+  const c=key("STEP:"+i,cx,y3+88);c.step=i;ledAt({id:"ACC:"+i},cx,y3+130,4);CTRL.push({id:"ACC:"+i,kind:"acc",x:cx,y:y3+130,r:10,step:i});live("LK:"+i);LIVE["LK:"+i]={x:cx,y:y3+156};
   if(i%4==0&&i)rules.push([SX+SW*i,y3,FR_B])}
 const NN=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],noteName=n=>NN[n%12]+(Math.floor(n/12)-1);
 // top band: name, pattern screen, track screen
 T(M+4,36,"SHOGUN",17,"start","#ffffff",4);
-const SCR={x:610,y:13,w:300,h:30},TRK={x:1200,y:13,w:110,h:30};
-T(SCR.x-12,33,"PATTERN",10.5,"end");T(TRK.x-12,33,"TRACK",10.5,"end");
-[SCR,TRK].forEach(r=>lcdBox(r.x,r.y,r.w,r.h));live("SCR");live("TRK");
-// a screen is a click target: it opens its list
-[["SCR",SCR],["TRK",TRK]].forEach(([id,r])=>CTRL.push({id,kind:"screen",x:r.x+r.w/2,y:r.y+r.h/2,rw:r.w/2,rh:r.h/2,rect:1}));
+const SCR={x:604,y:13,w:262,h:30},TRK={x:1200,y:13,w:110,h:30},KITR={x:314,y:13,w:150,h:30},CHN={x:1430,y:13,w:86,h:30};
+T(SCR.x-12,33,"PATTERN",10.5,"end");T(TRK.x-12,33,"TRACK",10.5,"end");T(KITR.x-12,33,"KIT",10.5,"end");T(CHN.x-12,33,"CHAIN",10.5,"end");
+[SCR,TRK,KITR,CHN].forEach(r=>lcdBox(r.x,r.y,r.w,r.h));live("SCR");live("TRK");live("KIT");live("CHN");
+// a screen is a click target: PATTERN, TRACK and KIT open their lists, CHAIN turns the chain on or off
+[["SCR",SCR],["TRK",TRK],["KIT",KITR],["CHN",CHN]].forEach(([id,r])=>CTRL.push({id,kind:"screen",x:r.x+r.w/2,y:r.y+r.h/2,rw:r.w/2,rh:r.h/2,rect:1}));
 const btn=(id,cx,g,z=11,gy=32)=>{S.push(`<rect x="${cx-12}" y="16" width="24" height="24" rx="3" fill="url(#bs)" stroke="#6f6a5a" stroke-width=".9"/><rect x="${cx-12}" y="36" width="24" height="4" rx="2" fill="#7e7764" opacity=".55"/><text x="${cx}" y="${gy}" font-size="${z}" font-weight="700" text-anchor="middle" fill="#2a2620">${g}</text>`);CTRL.push({id,kind:"btn",x:cx,y:28,r:13,rect:1})};
-btn("PREV",932,"◀");btn("NEXT",964,"▶");btn("SAVE",1004,"+",17,33);T(1022,33,"SAVE",10.5,"start");
-// banks A and B: the lit lamp is the bank the arrows, the list and SAVE use
-[["A",1070],["B",1106]].forEach(([b,cx])=>{btn("BANK:"+b,cx,b,12,33);ledAt({id:"LED:BANK"+b},cx+19,28,3.5)});
-btn("TPREV",1328,"◀");btn("TNEXT",1360,"▶");
+btn("LEARN",164,"M",11,32);ledAt({id:"LED:LEARN"},183,28,3.5);T(193,33,"LEARN",10.5,"start");
+btn("KSAVE",484,"+",17,33);T(500,33,"SAVE",10.5,"start");
+btn("PREV",884,"◀");btn("NEXT",912,"▶");btn("SAVE",944,"+",17,33);T(960,33,"SAVE",10.5,"start");btn("COPY",1010,"C",12,33);T(1026,33,"COPY",10.5,"start");
+// banks A and B: the lit lamp is the bank the arrows, the list, SAVE and COPY use
+[["A",1078],["B",1112]].forEach(([b,cx])=>{btn("BANK:"+b,cx,b,12,33);ledAt({id:"LED:BANK"+b},cx+19,28,3.5)});
+btn("TPREV",1328,"◀");btn("TNEXT",1360,"▶");btn("CH:ADD",1536,"+",17,33);btn("CH:DEL",1564,"−",15,33);

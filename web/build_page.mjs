@@ -6,6 +6,6 @@ const root = new URL("..", import.meta.url).pathname;
 const part = (f) => readFileSync(root + "web/page/" + f, "utf8");
 const wasm = readFileSync(root + "build/shogun.wasm").toString("base64");
 const head = part("head.html").replace("/*__WASM__*/", wasm).replace("/*__HOST__*/", part("host.js"));
-const body = ["main1.js", "art.js", "live.js", "kits.js", "main2.js", "screen.js", "cables.js", "main3.js"].map(part).join("\n");
+const body = ["main1.js", "art.js", "live.js", "kits.js", "main2.js", "screen.js", "tools.js", "cables.js", "main3.js"].map(part).join("\n");
 writeFileSync(root + "web/shogun.html", head + body + "\n</script>\n");
 console.log("web/shogun.html", Math.round((head.length + body.length) / 1024), "KB");
