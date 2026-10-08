@@ -29,7 +29,8 @@ enum B {
   B_VMETER, B_FADER, B_BUS, B_GR, B_CVAMT, B_TSCALE, B_TSWING, B_TSWINGTXT, B_TSHIFT, B_TSHIFTTXT, B_LFOMODE,
   B_LFORATE, B_LFOSCOPE, B_MATRIX, B_CABLES, B_JACK, B_TITLE, B_STEPINFO, B_TRACKINFO, B_TRACKSCALE, B_LOCKINFO,
   B_TRK, B_PAGE, B_COPY, B_PASTE, B_CLEAR, B_RANDOM, B_SHIFTL, B_SHIFTR, B_CLEARLOCKS, B_IDEAL, B_INITPATCH, B_PANIC,
-  B_REROLL, B_SERIAL, B_LATENCY, B_RATE, B_OSBADGE, B_SP, B_WP, B_OFF, B_STATIC
+  B_REROLL, B_SERIAL, B_LATENCY, B_RATE, B_OSBADGE, B_SP, B_WP, B_OFF, B_PROG, B_BROWSE, B_AB, B_UNDO, B_REDO, B_SRC,
+  B_ASSIGN, B_UISCALE, B_STATIC
 };
 
 int voiceIndex(const juce::String& s) {
@@ -275,7 +276,8 @@ void ShogunPanel::buildBindings() {
       {"clear", B_CLEAR}, {"random", B_RANDOM}, {"shiftl", B_SHIFTL}, {"shiftr", B_SHIFTR},
       {"clearlocks", B_CLEARLOCKS}, {"ideal", B_IDEAL}, {"initpatch", B_INITPATCH}, {"panic", B_PANIC},
       {"reroll", B_REROLL}, {"serial", B_SERIAL}, {"latency", B_LATENCY}, {"rate", B_RATE}, {"osbadge", B_OSBADGE},
-      {"sp", B_SP}, {"wp", B_WP}, {"off", B_OFF},
+      {"sp", B_SP}, {"wp", B_WP}, {"off", B_OFF}, {"prog", B_PROG}, {"browse", B_BROWSE}, {"ab", B_AB},
+      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE},
   };
   for (int i = 0; i < kOpCount; ++i) {
     const LayoutOp& o = kOps[i];
@@ -355,6 +357,9 @@ void ShogunPanel::timerCallback() {
   decay(meterL_, proc_.meters.peakL);
   decay(meterR_, proc_.meters.peakR);
   for (int v = 0; v < kVoices; ++v) decay(vPeak_[v], proc_.meters.voicePeak[static_cast<size_t>(v)]);
+  // An open undo step (begun at mouse-down) is settled once the gesture is over; a menu settles it in its callback.
+  if (menuOpen_ == 0 && proc_.undoPending() && !juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+    proc_.settleUndoStep();
   repaint();
 }
 
@@ -466,7 +471,8 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     }
     case B_DISP:
       if (b->a >= 0) {
-        const juce::String d = paramDisplay(b->a, proc_.paramU(b->a));
+        juce::String d = paramDisplay(b->a, proc_.paramU(b->a));
+        if (b->a == P_CLOCK_TEMPO && o.w < 60) d = d.upToFirstOccurrenceOf(" ", false, false);  // header LCD: digits only
         t = t.contains(": ") ? t.upToFirstOccurrenceOf(": ", true, false) + d : d;
       }
       break;
@@ -519,6 +525,12 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       break;
     }
     case B_KIT: t = u8(factory::programName(proc_.getCurrentProgram())).toUpperCase(); break;
+    case B_AB: fill = proc_.abSlot() == b->a ? AMB.getARGB() : 0; dim = !proc_.abFilled(b->a); break;
+    case B_UNDO: dim = proc_.undoDepth() == 0; break;
+    case B_REDO: dim = proc_.redoDepth() == 0; break;
+    case B_SRC: t = "SRC " + paramDisplay(P_CLOCK_SOURCE, proc_.paramU(P_CLOCK_SOURCE)); break;
+    case B_ASSIGN: fill = armedSrc_ == b->a ? AMB.getARGB() : 0; break;
+    case B_UISCALE: fill = uiScalePercent() == b->a ? GRN.getARGB() : 0; break;
     case B_PATTERN: t = u8(pat.name); break;
     case B_CPU: t = "CPU " + juce::String(juce::roundToInt(100.0f * proc_.meters.cpu.load())) + "%"; break;
     case B_CPULED: on = proc_.meters.cpu.load() < 0.8f; fill = on ? GRN.getARGB() : RED.getARGB(); on = true; break;
@@ -683,7 +695,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     }
     case B_PAGE: fill = b->a == page_ ? GRN.getARGB() : 0; break;
     case B_SERIAL: {
-      const auto s = juce::String::toHexString(static_cast<juce::int64>(proc_.engine().serial())).toUpperCase().paddedLeft('0', 8);
+      const auto s = juce::String::toHexString(static_cast<juce::int64>(proc_.unitSerial())).toUpperCase().paddedLeft('0', 8);
       t = "SN 0x" + s.substring(0, 4) + "-" + s.substring(4);
       break;
     }
@@ -700,6 +712,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     default: break;
   }
 
+  lastText_ = t;
   switch (o.kind) {
     case TEXT: text(g, x, y, t, o.z, anchor, juce::Colour(fill), bold, v); break;
     case RTEXT: drawRtext(g, x, y, t, o.z); break;
@@ -823,7 +836,7 @@ void ShogunPanel::paintMatrix(juce::Graphics& g, const LayoutOp&) {
   }
 }
 
-void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, const juce::MouseEvent&) {
+void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, juce::ModifierKeys) {
   int slots[kRowsShown];
   const int n = matrixRows(proc_.editRows(), slots);
   const int i = static_cast<int>(std::floor((p.y - (kRowY0 - 2)) / kRowH));
@@ -847,7 +860,9 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, const juce:
     return menu;
   };
   if (p.x >= 46 && p.x < 156) {
+    ++menuOpen_;
     sourceMenu(true).showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
+      --menuOpen_;  // the timer settles the undo step now
       if (res <= 0) return;
       mod::Row& rr = proc_.editRows()[row];
       if (res == 1000) {
@@ -878,7 +893,9 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, const juce:
       sec.addItem(k + 1, pj ? u8(pj->label.c_str()) : id, true, r.dst == k);
     }
     if (cur.isNotEmpty()) menu.addSubMenu(cur, sec);
+    ++menuOpen_;
     menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
+      --menuOpen_;  // the timer settles the undo step now
       if (res <= 0) return;
       proc_.editRows()[row].dst = res - 1;
       commit();
@@ -887,7 +904,9 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, const juce:
     matrixDragRow_ = row;
     matrixDragDepth_ = r.depth;
   } else if (p.x >= 518 && p.x < 578) {
+    ++menuOpen_;
     sourceMenu(false).showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
+      --menuOpen_;  // the timer settles the undo step now
       if (res <= 0) return;
       mod::Row& rr = proc_.editRows()[row];
       rr.via = res == 1000 ? mod::SRC_NONE : res / 100;
@@ -933,6 +952,8 @@ int ShogunPanel::findBound(juce::Point<float> p) const {
       case B_LFOMODE: case B_MATRIX: case B_JACK: case B_TRK: case B_PAGE: case B_COPY: case B_PASTE: case B_CLEAR:
       case B_RANDOM: case B_SHIFTL: case B_SHIFTR: case B_CLEARLOCKS: case B_IDEAL: case B_INITPATCH: case B_PANIC:
       case B_REROLL: case B_SP: case B_WP: case B_CLIPLED: case B_FADER: case B_DISP: case B_KIT: case B_PATTERN:
+      case B_OSBADGE: case B_PROG: case B_BROWSE: case B_AB: case B_UNDO: case B_REDO: case B_SRC: case B_ASSIGN:
+      case B_UISCALE:
         return *it;
       default: break;
     }
@@ -946,7 +967,7 @@ void ShogunPanel::mouseDown(const juce::MouseEvent& e) {
   dragStart_ = e.position;
   matrixDragRow_ = -1;
   if (dragBound_ < 0) return;
-  click(dragBound_, e, p);
+  click(dragBound_, e.mods, p);
 }
 
 static int pidForBound(int kind, const char* bind, int a, int selVoice, int waveVoice) {
@@ -959,17 +980,117 @@ static int pidForBound(int kind, const char* bind, int a, int selVoice, int wave
   return -1;
 }
 
-void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p) {
+bool ShogunPanel::pressBind(const char* bind, bool right, bool shift, int nth) {
+  for (int bi : tabBounds_[tab_]) {
+    const LayoutOp& o = kOps[bounds_[static_cast<size_t>(bi)].op];
+    if (std::strcmp(o.bind, bind) != 0 || nth-- > 0) continue;
+    juce::ModifierKeys m;
+    if (right) m = m.withFlags(juce::ModifierKeys::rightButtonModifier);
+    if (shift) m = m.withFlags(juce::ModifierKeys::shiftModifier);
+    const juce::Point<float> c = o.kind == KNOB || o.kind == TOGGLE || o.kind == JACK ? juce::Point<float>(o.x, o.y)
+                                                                                     : juce::Point<float>(o.x + o.w / 2, o.y + o.h / 2);
+    click(bi, m, c);
+    if (o.kind == KNOB && dragBound_ == bi) {  // a press without a drag: close the gesture like mouseUp would
+      const int pid = pidForBound(bounds_[static_cast<size_t>(bi)].kind, o.bind, bounds_[static_cast<size_t>(bi)].a,
+                                  selVoice_, selWaveVoice());
+      if (pid >= 0) proc_.param(pid)->endChangeGesture();
+    }
+    dragBound_ = -1;
+    return true;
+  }
+  return false;
+}
+
+juce::String ShogunPanel::boundText(const char* bind) {
+  for (int bi : tabBounds_[tab_]) {
+    const Bound& b = bounds_[static_cast<size_t>(bi)];
+    if (std::strcmp(kOps[b.op].bind, bind) != 0) continue;
+    juce::Image img(juce::Image::ARGB, 8, 8, true);
+    juce::Graphics g(img);
+    lastText_.clear();
+    paintOp(g, kOps[b.op], &b);
+    return lastText_;
+  }
+  return {};
+}
+
+int ShogunPanel::uiScalePercent() const {
+  const auto* ed = getParentComponent();
+  return ed != nullptr ? juce::roundToInt(100.0 * ed->getWidth() / kW) : 100;
+}
+
+void ShogunPanel::showProgramMenu() {
+  juce::PopupMenu m;
+  for (int i = 0; i < factory::kPrograms; ++i)
+    m.addItem(i + 1, juce::String(i + 1).paddedLeft('0', 3) + " " + u8(factory::programName(i)), true,
+              i == proc_.getCurrentProgram());
+  juce::Component::SafePointer<ShogunPanel> safe(this);
+  ++menuOpen_;
+  m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(), [safe](int r) {
+    if (safe == nullptr) return;
+    --safe->menuOpen_;
+    if (r > 0) safe->proc_.setCurrentProgram(r - 1);  // brackets its own undo step
+    safe->repaint();
+  });
+}
+
+bool ShogunPanel::assignTo(int pid) {
+  // ASSIGN: the armed source gets a matrix row onto this knob's parameter (own voice, +50 %), in the first free slot.
+  if (armedSrc_ <= 0 || pid < 0 || !kParams[pid].mod) return false;
+  mod::Row* rows = proc_.editRows();
+  int slot = -1;
+  for (int r = 0; r < mod::kRows; ++r) {
+    if (rows[r].src == armedSrc_ && rows[r].srcVoice < 0 && rows[r].dst == pid) {
+      slot = -2;  // already there
+      break;
+    }
+    if (slot == -1 && (rows[r].src == mod::SRC_NONE || rows[r].dst < 0)) slot = r;
+  }
+  if (slot >= 0) {
+    mod::Row r;
+    r.src = armedSrc_;
+    r.srcVoice = -1;
+    r.dst = pid;
+    r.depth = 0.5;
+    r.on = true;
+    rows[slot] = r;
+    proc_.commitEdits();
+  }
+  armedSrc_ = 0;
+  repaint();
+  return slot != -1;
+}
+
+namespace {
+bool editsState(int kind) {
+  switch (kind) {
+    case B_PARAM: case B_SP: case B_WP: case B_DISP: case B_CHOICE: case B_STEP: case B_GRID: case B_LEN:
+    case B_CVAMT: case B_TSCALE: case B_TSWING: case B_TSHIFT: case B_LFOMODE: case B_MATRIX: case B_JACK:
+    case B_PASTE: case B_CLEAR: case B_RANDOM: case B_SHIFTL: case B_SHIFTR: case B_CLEARLOCKS: case B_IDEAL:
+    case B_FADER: case B_SK: case B_SRC: case B_OSBADGE:
+      return true;
+    default: return false;
+  }
+}
+}  // namespace
+
+void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
   const Bound& b = bounds_[static_cast<size_t>(bi)];
   const LayoutOp& o = kOps[b.op];
   Pattern& pat = proc_.editPattern();
   auto commit = [this] { proc_.commitEdits(); repaint(); };
   const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
+  if (editsState(b.kind)) proc_.beginUndoStep();  // settled when the gesture is over (timer) or by the menu callback
   switch (b.kind) {
     case B_PARAM:
     case B_SP:
     case B_WP:
     case B_DISP: {
+      if (o.kind == KNOB && armedSrc_ > 0) {  // ASSIGN armed: this knob becomes the row's destination
+        assignTo(pid);
+        dragBound_ = -1;
+        return;
+      }
       if (pid < 0) {
         if (b.kind == B_SP) dragStartU_ = static_cast<float>(0.5 * (proc_.cvAmt(isDrum(selVoice_) ? drumPort(selVoice_, DJ_PITCH) : synthPort(selVoice_ - LEAD, SJ_NOTE)) + 1.0));
         return;
@@ -981,7 +1102,7 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
       } else {
         // keys, toggles, LCDs: step to the next choice (toggles flip)
         const int n = pi.steps > 0 ? pi.steps : 2;
-        const int i = (stepIndex(static_cast<double>(proc_.paramU(pid)), n) + (e.mods.isRightButtonDown() ? n - 1 : 1)) % n;
+        const int i = (stepIndex(static_cast<double>(proc_.paramU(pid)), n) + (mods.isRightButtonDown() ? n - 1 : 1)) % n;
         proc_.setParamU(pid, pi.kind == ParamKind::Toggle ? static_cast<float>(i) : static_cast<float>(stepU(i, n)));
         dragBound_ = -1;
       }
@@ -992,14 +1113,14 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
       break;
     case B_SEL:
       selVoice_ = b.a;
-      if (e.mods.isAltDown() || tab_ == 0) proc_.pushPad(b.a);  // MAIN select keys also audition
+      if (mods.isAltDown() || tab_ == 0) proc_.pushPad(b.a);  // MAIN select keys also audition
       break;
     case B_STEP: {
       const int s = page_ * 16 + b.a;
       Step& st = pat.tracks[selVoice_].steps[s];
-      if (e.mods.isRightButtonDown()) {
+      if (mods.isRightButtonDown()) {
         selStep_ = s;
-      } else if (e.mods.isShiftDown()) {  // panel legend: shift-click = accent
+      } else if (mods.isShiftDown()) {  // panel legend: shift-click = accent
         st.on = true;
         st.acc = st.acc >= 3 ? 2 : 3;
         selStep_ = s;
@@ -1015,7 +1136,7 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
       Step& st = pat.tracks[b.a].steps[b.b];
       selVoice_ = b.a;
       selStep_ = b.b;
-      if (!(e.mods.isRightButtonDown() || e.mods.isShiftDown())) {
+      if (!(mods.isRightButtonDown() || mods.isShiftDown())) {
         if (!st.on) {
           st.on = true;
           st.acc = 2;
@@ -1056,9 +1177,9 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
       if (id >= 0) proc_.setParamU(id, static_cast<float>(stepU(b.b, 3)));
       break;
     }
-    case B_MATRIX: matrixClick(o, p, e); break;
+    case B_MATRIX: matrixClick(o, p, mods); break;
     case B_JACK:
-      if (e.mods.isRightButtonDown() || e.mods.isAltDown()) {
+      if (mods.isRightButtonDown() || mods.isAltDown()) {
         proc_.removeCablesAt(b.a);
         dragBound_ = -1;
       } else {
@@ -1102,22 +1223,31 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
     case B_IDEAL: proc_.requestIdeal(); break;
     case B_INITPATCH: proc_.setCurrentProgram(0); break;
     case B_KIT:
-    case B_PATTERN: {  // the factory bank browser: INIT and the kits, each with its pattern
-      juce::PopupMenu m;
-      for (int i = 0; i < factory::kPrograms; ++i)
-        m.addItem(i + 1, juce::String(i + 1).paddedLeft('0', 3) + " " + u8(factory::programName(i)), true,
-                  i == proc_.getCurrentProgram());
-      juce::Component::SafePointer<ShogunPanel> safe(this);
-      m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(), [safe](int r) {
-        if (safe != nullptr && r > 0) {
-          safe->proc_.setCurrentProgram(r - 1);
-          safe->repaint();
-        }
-      });
+    case B_PATTERN:
+    case B_BROWSE: showProgramMenu(); break;  // the factory bank browser: INIT and the kits, each with its pattern
+    case B_PROG: proc_.stepProgram(b.a); break;
+    case B_AB:
+      if (mods.isRightButtonDown() || mods.isShiftDown()) proc_.copyAB(1 - b.a, b.a);  // right-click B = copy A → B
+      else proc_.selectAB(b.a);
+      break;
+    case B_UNDO: proc_.undo(); break;
+    case B_REDO: proc_.redo(); break;
+    case B_SRC: {  // CLOCK:SOURCE  HOST → INT → EXT (right-click steps back)
+      const int i = (stepIndex(static_cast<double>(proc_.paramU(P_CLOCK_SOURCE)), 3) + (mods.isRightButtonDown() ? 2 : 1)) % 3;
+      proc_.setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(i, 3)));
       break;
     }
+    case B_OSBADGE: {  // the bus badge shows the realtime oversampling; click cycles GLOBAL:OS 1× → 2× → 4×
+      const int i = (stepIndex(static_cast<double>(proc_.paramU(P_GLOBAL_OS)), 3) + (mods.isRightButtonDown() ? 2 : 1)) % 3;
+      proc_.setParamU(P_GLOBAL_OS, static_cast<float>(stepU(i, 3)));
+      break;
+    }
+    case B_ASSIGN: armedSrc_ = armedSrc_ == b.a ? 0 : b.a; break;
+    case B_UISCALE:
+      if (auto* ed = getParentComponent()) ed->setSize(kW * b.a / 100, kH * b.a / 100);
+      break;
     case B_PANIC: proc_.requestRestart(); proc_.requestRun(false); break;
-    case B_REROLL: break;  // serial re-roll: next pass (needs the per-unit tolerance re-seed on the audio thread)
+    case B_REROLL: proc_.rerollUnit(); break;  // new tolerance seed, applied on the audio thread
     case B_FADER: {
       char buf[48];
       std::snprintf(buf, sizeof buf, "%s:LEVEL", kVoiceNames[b.a]);
@@ -1263,7 +1393,10 @@ void ShogunPanel::mouseDoubleClick(const juce::MouseEvent& e) {
   const Bound& b = bounds_[static_cast<size_t>(bi)];
   const LayoutOp& o = kOps[b.op];
   const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
-  if (pid >= 0 && o.kind == KNOB) proc_.setParamU(pid, kParams[pid].def);  // double-click = default (noon kit value)
+  if (pid >= 0 && o.kind == KNOB) {
+    proc_.beginUndoStep();
+    proc_.setParamU(pid, kParams[pid].def);  // double-click = default (noon kit value)
+  }
 }
 
 void ShogunPanel::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) {
@@ -1273,7 +1406,10 @@ void ShogunPanel::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWhe
   const Bound& b = bounds_[static_cast<size_t>(bi)];
   const LayoutOp& o = kOps[b.op];
   const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
-  if (pid >= 0 && o.kind == KNOB) proc_.setParamU(pid, proc_.paramU(pid) + w.deltaY * 0.05f);
+  if (pid >= 0 && o.kind == KNOB) {
+    if (!proc_.undoPending()) proc_.beginUndoStep();  // a wheel burst is one step (settled by the timer)
+    proc_.setParamU(pid, proc_.paramU(pid) + w.deltaY * 0.05f);
+  }
 }
 
 // ================================================================ editor

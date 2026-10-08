@@ -59,7 +59,7 @@ function showZones(){for(const z in ART){const d=zoneOn(z)?"":"none";$("az_"+z).
   cab.style.display=view=="rack"&&bay?"":"none";VH=view=="lfo"?H_LFO:bay?H:H_SEQ;drawShell()}
 function setView(v){if(grab)cancel();hideMenu();setHov(null);down=null;kdrag=null;if(DD.open)ddClose();view=v;showZones();
   document.querySelectorAll(".tab").forEach(b=>{b.classList.toggle("on",b.dataset.v==v);b.setAttribute("aria-selected",b.dataset.v==v)});drawAll();
-  info.textContent=v=="lfo"?"LFO · one tempo-synced LFO for the rack · patch LFO OUT in the bay to use it":
+  info.textContent=v=="lfo"?"LFO · the kit's LFO 1, saved with the pattern · patch LFO OUT in the bay to use it":
     "RACK · "+cables.length+" cable"+(cables.length==1?"":"s")+" patched"}
 function setBay(on){if(grab)cancel();hideMenu();setHov(null);down=null;bay=!!on;showZones();
   if(DD.open)ddClose();drawAll();info.textContent=bay?"BAY · "+cables.length+" cable"+(cables.length==1?"":"s")+" · drag from a jack to a jack, drop on empty space to unplug":"BAY closed · "+cables.length+" cable"+(cables.length==1?"":"s")+" still patched"}

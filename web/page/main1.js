@@ -5,7 +5,7 @@ const NS="http://www.w3.org/2000/svg",W=1600,M=14,AV=W-2*M,FR_T=68,BAND=164,INK=
 // BAY off: the panel ends under the sequencer (H_SEQ). BAY on: the bay (two jack rows) and its hang are added below it and
 // the panel grows to H. The LFO tab replaces the face with its own page (H_LFO) under the same top bar.
 const KB_T=FR_T,KB_B=KB_T+2*BAND,SEQ_H=146,SEQ_B=KB_B+SEQ_H,BAY_T=SEQ_B,BAY_B=BAY_T+92,BAY2_B=BAY_B+78,FR_B=BAY2_B+110,H=FR_B+14,H_SEQ=SEQ_B+14;
-const H_LFO=FR_T+262+14;
+const H_LFO=FR_T+262+96+14;
 let VH=H_SEQ;   // the height in view now
 const $=id=>document.getElementById(id),sv=$("sv"),cab=$("cab"),ring=$("ring"),info=$("info"),menu=$("menu"),stage=$("stage");
 sv.setAttribute("viewBox",`0 0 ${W} ${VH}`);
@@ -170,10 +170,11 @@ btn("TEST",1492,"▷",12);T(1492,TY+26,"TEST",8.5);
 key("SOLO",1534,TY-2,null,{id:"LED:SOLO",x:1558,y:TY-14});T(1534,TY+28,"SOLO",9.5);
 
 
-// ================= the LFO tab: one tempo-synced LFO for the rack =================
+// ================= the LFO tab: the kit's LFO 1, tempo-synced =================
 // Hz = BPM / 60 * cycles per beat (1/16 at 120 BPM is 8 Hz). It restarts at phase 0 when the transport starts. Bipolar
 // shapes, -1 to 1; AMOUNT scales the jack to 0 to 5 V around 2.5 V, and AMOUNT 0 is 0 V. Its one output is LFO OUT in the
-// bay: it reaches nothing without a cable. The settings are kept in this browser, not in the pattern.
+// bay: it reaches nothing without a cable. The knobs are the kit's LFO 1: a pattern loads them and SAVE keeps them, with
+// the rest of the kit's four LFOs (listed under the knobs) as the document has them.
 zone("lfo");
 const LDIV=[["1/1",.25],["1/2",.5],["1/4",1],["1/8",2],["1/8.",4/3],["1/8T",3],["1/16",4],["1/16.",8/3],["1/16T",6],["1/32",8]],LSHAPE=["SINE","TRI","SAW","SQUARE","S+H"];
 const lfoDiv=()=>LDIV[Math.round(P["LFO:DIV"]*9)],lfoShapeI=()=>Math.round(P["LFO:SHAPE"]*4),lfoHz=()=>bpmOf(P["CLOCK:TEMPO"])/60*lfoDiv()[1];
@@ -182,8 +183,11 @@ const divText=d=>d[0].replace(/\.$/," dotted").replace(/T$/," triplet");
 // between reports, so the scope's playhead runs the phase on from the last report at the LFO's rate. lfoV: LFO OUT in volts.
 let lfoV=0,lfoP=0,lfoT=-1,lfoCyc=0,lfoLastP=0;
 {const y0=FR_T,cy=y0+170,KX=[110,290,470,650];
- T(M+18,y0+27,"LFO",14,"start",INK,1.5);T(M+66,y0+27,"ONE TEMPO-SYNCED LFO FOR THE RACK · ITS OUTPUT IS THE LFO OUT JACK IN THE BAY",10,"start","#9a9a90",.4);
- rule(M,y0+40,W-M,y0+40);rule(890,y0+40,890,y0+262);
+ T(M+18,y0+27,"LFO",14,"start",INK,1.5);T(M+66,y0+27,"THE KIT'S LFO 1, TEMPO-SYNCED · ITS OUTPUT IS THE LFO OUT JACK IN THE BAY",10,"start","#9a9a90",.4);
+ rule(M,y0+40,W-M,y0+40);rule(890,y0+40,890,y0+262);rule(M,y0+262,W-M,y0+262);
+ // the kit's four LFOs as its document sets them (drawn by drawViews from lfoLines)
+ T(M+18,y0+284,"THE KIT'S LFOS",11,"start",INK,1.2);T(M+140,y0+284,"LOADED AND SAVED WITH THE PATTERN · THE KNOBS ABOVE SET LFO 1 · MOD ROWS ON THE PLUGIN'S MOD TAB",9.5,"start","#9a9a90",.4);
+ live("LFO:KIT");LIVE["LFO:KIT"]={x:M+18,y:y0+304};
  knob("LFO:DIV","DIVISION",KX[0],cy,6/9,{r:28,n:10,lz:11.5,ly:26,name:"LFO · DIVISION",fmt:()=>divText(lfoDiv())+" · "+lfoHz().toFixed(2)+" Hz at "+bpmOf(P["CLOCK:TEMPO"]).toFixed(1)+" BPM"});lcd("LDIV",KX[0]-50,y0+62,100,null,5);
  knob("LFO:SHAPE","SHAPE",KX[1],cy,0,{r:28,n:5,lz:11.5,ly:26,name:"LFO · SHAPE",fmt:v=>["sine","triangle","saw","square, width 0.5","sample and hold, a new random level each cycle"][Math.round(v*4)]});lcd("LSHAPE",KX[1]-50,y0+62,100,null,6);
  knob("LFO:PHASE","PHASE",KX[2],cy,0,{r:28,lz:11.5,ly:26,name:"LFO · PHASE",fmt:v=>v.toFixed(2)+" of a cycle"});lcd("LPHASE",KX[2]-50,y0+62,100,null,4);

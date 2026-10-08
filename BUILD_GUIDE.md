@@ -16,7 +16,7 @@ Program 1 is INIT (the INIT kit and the empty pattern "001 INIT"). Programs 2 to
 | --- | --- |
 | `engine/factory.h` | `shogun::factory::kBank`, `kCount` (21), `kPrograms` (22), `programName(i)`, `programJson(i)`, `loadProgram(i, Patch&)` |
 | `engine/factory_bank.inc` | the 21 documents, generated; do not edit by hand |
-| `engine/patch.h` | the saved-state document: `Patch`, `parsePatch`, `applyPatch`, `capturePatch`, `patchToJson` (native only) |
+| `engine/patch.h` | the saved-state document: `Patch`, `parsePatch`, `applyPatch`, `capturePatch`, `writePatchJson` (any sink, no libc; the wasm page saves with it) and `patchToJson` (native `std::string`) |
 | `scripts/make_factory.py` | the kits and patterns as code; `make factory` runs it |
 | `tools/factory_fmt.cpp` | writes the canonical text and measures the peaks (native renders at 44.1 and 48 kHz) |
 
@@ -33,6 +33,8 @@ To run SHOGUN as a rack device, compile one engine translation unit:
 - C++17, no other defines (`SHOGUN_NO_FORMAT` is only for the freestanding wasm build).
 
 Entry points: `shogun::Engine` (`prepare(fs, os)`, `loadInit()`, `setParam`/`setParamNow`, `setHostTransport`, `setRunning`, `trigger`/`noteOn`/`noteOff`, `processSample(values, connected)` with the `kPorts` jack buffer, `mainL`/`mainR`/`aux`, `latencySamples`), the parameter table in `engine/params.h` (`kParams`, `findParam`) and the jack table in `engine/ports.h` (`kPortTable`, `findPort`, `resolvePort`). The factory bank and the state reader are header-only: include `engine/factory.h` (it includes `engine/patch.h` and `engine/factory_bank.inc`) in the device source; there is no extra file to compile. Saved state is `patchToJson` / `parsePatch`.
+
+The panel is data: `plugin/layout/export_layout.py` records the spec mockups and binds every control, and writes `plugin/Source/PanelLayout.inc`. `scripts/check_panel_bindings.py` (`make panel-check`, run by `make test`, `make plugin` and `make probe-linux`) fails when an interactive op on any tab has no bind, or a bind kind the editor does not handle. Regenerate the layout after changing the binders: `python3 plugin/layout/export_layout.py`.
 
 If the rack reuses the JUCE processor and panel instead of its own wrapper, add `plugin/Source/PluginProcessor.cpp` and `plugin/Source/PluginEditor.cpp` (with `plugin/Source/` on the include path for `PluginProcessor.h`, `PluginEditor.h` and `PanelLayout.inc`). `plugin/Source/Probe.cpp` is the test console only. `make strict` checks all of these with the rack's flags.
 

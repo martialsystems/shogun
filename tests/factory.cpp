@@ -2,6 +2,8 @@
 // kit with its pattern renders 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz, names are unique and clean.
 #include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -235,9 +237,90 @@ void testFactoryNames() {
 
 }  // namespace
 
+
+// The libc-free writer (the wasm page saves documents with it) against the libc one: the same %.*g bytes, the same
+// shortest round-trip text for doubles and floats, and the same document for every program, sparse and full.
+static void testPatchWriterNoLibc() {
+  const char* T = "testPatchWriterNoLibc";
+  std::uint64_t x = 0x9e3779b97f4a7c15ull;
+  auto rnd = [&x]() {
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return x;
+  };
+  std::vector<double> ds = {0.0, -0.0, 1.0, 0.5, 0.1, 1.0 / 3.0, 5e-324, 2.2250738585072014e-308, 1.7976931348623157e308,
+                            9007199254740993.0, 123456789012345678.0, 1e-5, 1e-4, 99999.5, 100000.0, 0.00012345};
+  for (int k = 0; k <= 127; ++k) ds.push_back(k / 127.0);
+  for (int k = -1074; k <= 1023; ++k) ds.push_back(std::ldexp(1.0, k));
+  for (int i = 0; i < 60000; ++i) {
+    std::uint64_t b = rnd();
+    double v;
+    std::memcpy(&v, &b, sizeof v);
+    if (std::isfinite(v)) ds.push_back(v);
+    ds.push_back(static_cast<double>(rnd() >> 11) / 9007199254740992.0);  // [0, 1)
+    ds.push_back((static_cast<double>(rnd() % 2000001) - 1000000.0) / 1000.0);
+  }
+  long gChecks = 0, gBad = 0, nBad = 0, fBad = 0;
+  char a[64], b[64];
+  for (std::size_t i = 0; i < ds.size(); ++i) {
+    const double v = ds[i];
+    if (i % 7 == 0)
+      for (int p = 1; p <= 17; ++p) {
+        std::snprintf(a, sizeof a, "%.*g", p, v);
+        patchjson::fmtG(b, v, p);
+        ++gChecks;
+        gBad += std::strcmp(a, b) != 0;
+      }
+    std::string ref;
+    patchjson::putNum(ref, v);
+    patchjson::shortestNum(b, v);
+    nBad += ref != b;
+    const float f = static_cast<float>(v);
+    if (std::isfinite(f)) {
+      std::string rf;
+      patchjson::putFloat(rf, f);
+      patchjson::shortestFloat(b, f);
+      fBad += rf != b;
+    }
+  }
+  for (int i = 0; i < 100000; ++i) {  // every float exponent, random mantissas
+    const std::uint32_t bits = static_cast<std::uint32_t>(rnd());
+    float f;
+    std::memcpy(&f, &bits, sizeof f);
+    if (!std::isfinite(f)) continue;
+    std::string rf;
+    patchjson::putFloat(rf, f);
+    patchjson::shortestFloat(b, f);
+    fBad += rf != b;
+  }
+  bool docs = true;
+  static char buf[1 << 20];
+  for (int pr = 0; pr < factory::kPrograms; ++pr) {
+    Patch p;
+    factory::loadProgram(pr, p);
+    Engine e;
+    applyPatch(p, e);
+    Patch s;
+    capturePatch(e, s);
+    for (bool full : {false, true}) {
+      patchjson::BufOut o(buf, sizeof buf);
+      writePatchJson(o, full ? s : p, full);
+      docs = docs && o.ok && patchToJson(full ? s : p, full) == buf;
+    }
+  }
+  std::printf("%s: %ld %%.*g texts, %zu doubles and %zu+ floats, %d programs x 2 documents\n", T, gChecks, ds.size(),
+              ds.size(), factory::kPrograms);
+  truth(T, "%.*g bytes = snprintf", gBad == 0);
+  truth(T, "shortest double text = putNum", nBad == 0);
+  truth(T, "shortest float text = putFloat", fBad == 0);
+  truth(T, "documents = patchToJson (sparse and full)", docs);
+}
+
 void runFactoryTests() {
   testFactoryPresetsLoad();
   testFactoryRoundTrip();
+  testPatchWriterNoLibc();
   testFactoryRenderLevels();
   testFactoryNames();
 }

@@ -1,5 +1,5 @@
 // Runs web/parity_scenario.txt through the web entry points natively and prints every output sample.
-// web/test_wasm.mjs runs the same file through the wasm build and compares.
+// web/test_wasm.mjs runs the same file through the wasm build and compares. --docs prints every program's saved document.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -8,6 +8,16 @@
 
 int main(int argc, char** argv) {
   if (argc < 2) return 2;
+  if (!std::strcmp(argv[1], "--docs")) {  // every program's full document (sg_state_json), each followed by a NUL line
+    sg_init(48000.0);
+    for (int i = 0; i < sg_factory_count(); ++i) {
+      sg_factory_load(i);
+      const char* doc = sg_state_json(1);  // before sg_state_json_len()
+      std::fwrite(doc, 1, static_cast<std::size_t>(sg_state_json_len()), stdout);
+      std::fputc(0, stdout);
+    }
+    return 0;
+  }
   FILE* in = std::fopen(argv[1], "r");
   if (!in) return 2;
   sg_init(48000.0);

@@ -110,6 +110,7 @@ void ShogunAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
   osNow_ = os;
   // Coefficients at the host rate (§3.1): prepare() recomputes every filter for fs = sampleRate, no resampler.
   engine_->prepare(sr_, osNow_);
+  if (const std::uint32_t s = serialReq_.exchange(0, std::memory_order_acq_rel)) engine_->setSerial(s);
   applyParams(true);
   appliedEpoch_ = 0;  // re-apply pattern / matrix / cables
   pickUpEdits();
@@ -207,7 +208,133 @@ int ShogunAudioProcessor::getNumPrograms() { return factory::kPrograms; }
 const juce::String ShogunAudioProcessor::getProgramName(int program) {
   return juce::String::fromUTF8(factory::programName(program));
 }
-void ShogunAudioProcessor::setCurrentProgram(int program) { loadProgram(program); }
+void ShogunAudioProcessor::setCurrentProgram(int program) {
+  // A program load is one undo step. Hosts may call this off the message thread (state restore): no snapshot then.
+  const bool ui = juce::MessageManager::existsAndIsCurrentThread();
+  if (ui) beginUndoStep();
+  loadProgram(program);
+  if (ui) settleUndoStep();
+}
+
+void ShogunAudioProcessor::stepProgram(int delta) {
+  const int n = factory::kPrograms;
+  setCurrentProgram(((currentProgram_ + delta) % n + n) % n);
+}
+
+// ---------------------------------------------------------------- snapshots: A/B and undo
+
+ShogunAudioProcessor::Snapshot ShogunAudioProcessor::captureState() const {
+  Snapshot s;
+  const juce::var doc = patchToJson();
+  if (auto* o = doc.getDynamicObject()) o->removeProperty("unit");  // the unit is the machine, not the edit
+  s.json = juce::JSON::toString(doc, true);
+  s.program = currentProgram_;
+  return s;
+}
+
+void ShogunAudioProcessor::restoreState(const Snapshot& s) {
+  if (s.empty()) return;
+  for (int i = 0; i < kParamCount; ++i) param(i)->setValueNotifyingHost(kParams[i].def);
+  patchFromJson(juce::JSON::parse(s.json));
+  currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, s.program);
+  snapParams_.store(true, std::memory_order_release);  // a recalled state lands at once, like a program change
+}
+
+void ShogunAudioProcessor::pushBounded(std::deque<Snapshot>& d, Snapshot s) {
+  d.push_back(std::move(s));
+  while (static_cast<int>(d.size()) > kUndoLevels) d.pop_front();
+}
+
+void ShogunAudioProcessor::beginUndoStep() {
+  settleUndoStep();  // an earlier step still open (a menu that changed something late) is recorded first
+  undoPre_ = captureState();
+}
+
+bool ShogunAudioProcessor::settleUndoStep() {
+  if (undoPre_.empty()) return false;
+  Snapshot pre = std::move(undoPre_);
+  undoPre_ = Snapshot();
+  if (pre.sameAs(captureState())) return false;
+  pushBounded(undo_, std::move(pre));
+  redo_.clear();
+  return true;
+}
+
+bool ShogunAudioProcessor::undo() {
+  settleUndoStep();
+  const Snapshot cur = captureState();
+  while (!undo_.empty() && undo_.back().sameAs(cur)) undo_.pop_back();
+  if (undo_.empty()) return false;
+  pushBounded(redo_, cur);
+  restoreState(undo_.back());
+  undo_.pop_back();
+  return true;
+}
+
+bool ShogunAudioProcessor::redo() {
+  settleUndoStep();
+  const Snapshot cur = captureState();
+  while (!redo_.empty() && redo_.back().sameAs(cur)) redo_.pop_back();
+  if (redo_.empty()) return false;
+  pushBounded(undo_, cur);
+  restoreState(redo_.back());
+  redo_.pop_back();
+  return true;
+}
+
+void ShogunAudioProcessor::selectAB(int slot) {
+  slot &= 1;
+  if (slot == abSlot_) return;
+  beginUndoStep();
+  ab_[static_cast<size_t>(abSlot_)] = captureState();
+  if (ab_[static_cast<size_t>(slot)].empty())
+    ab_[static_cast<size_t>(slot)] = ab_[static_cast<size_t>(abSlot_)];  // first visit: B starts as a copy of A
+  else
+    restoreState(ab_[static_cast<size_t>(slot)]);
+  abSlot_ = slot;
+  settleUndoStep();
+}
+
+void ShogunAudioProcessor::copyAB(int from, int to) {
+  from &= 1;
+  to &= 1;
+  if (from == to) return;
+  const Snapshot src = from == abSlot_ ? captureState() : ab_[static_cast<size_t>(from)];
+  if (src.empty()) return;
+  if (to == abSlot_) {
+    beginUndoStep();
+    restoreState(src);
+    settleUndoStep();
+  } else {
+    ab_[static_cast<size_t>(to)] = src;
+  }
+}
+
+// ---------------------------------------------------------------- unit serial, velocity curve
+
+void ShogunAudioProcessor::requestSerial(std::uint32_t serial) {
+  if (serial == 0) serial = 0x5A31C0DEu;  // the engine's default unit (Engine::setSerial maps 0 to it too)
+  unitSerial_.store(serial, std::memory_order_relaxed);
+  serialReq_.store(serial, std::memory_order_release);
+}
+
+void ShogunAudioProcessor::rerollUnit() {
+  std::uint32_t s;
+  do {
+    s = static_cast<std::uint32_t>(juce::Random::getSystemRandom().nextInt());
+  } while (s == 0 || s == unitSerial());
+  requestSerial(s);
+}
+
+double ShogunAudioProcessor::velCurve(int mode, double x) {
+  x = juce::jlimit(0.0, 1.0, x);
+  switch (mode) {
+    case 1: return std::sqrt(x);  // SOFT: light playing reaches full level sooner
+    case 2: return x * x;         // HARD
+    case 3: return 1.0;           // FIXED: every note at full velocity
+    default: return x;            // LINEAR
+  }
+}
 
 void ShogunAudioProcessor::loadProgram(int program) {
   if (program < 0 || program >= factory::kPrograms) return;
@@ -247,7 +374,8 @@ void ShogunAudioProcessor::handleMidi(const juce::MidiMessage& m) {
   // note, 48 = C3 = 0 V). Notes 50/51 on other channels play LEAD/BASS at C3 (old map).
   const int ch = m.getChannel();
   if (m.isNoteOn()) {
-    const double vel = 5.0 * m.getVelocity() / 127.0;
+    const int curve = stepIndex(static_cast<double>(paramU(P_GLOBAL_VEL_CURVE)), 4);
+    const double vel = 5.0 * velCurve(curve, m.getVelocity() / 127.0);
     const int n = m.getNoteNumber();
     if (ch == 1 || ch == 2) {
       engine_->noteOn(ch == 1 ? LEAD : BASS, n, vel);
@@ -300,6 +428,7 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   }
   engine_->setHostTransport(ht);
   applyParams(snapParams_.exchange(false, std::memory_order_acq_rel));  // a program change lands at once
+  if (const std::uint32_t s = serialReq_.exchange(0, std::memory_order_acq_rel)) engine_->setSerial(s);  // RE-ROLL
   pickUpEdits();
 
   const int rq = runReq_.exchange(-1);
@@ -385,7 +514,7 @@ juce::var ShogunAudioProcessor::patchToJson() const {
   root->setProperty("format", "shogun-patch");
   root->setProperty("version", 2);
   root->setProperty("name", juce::String(uiPattern_.name));
-  root->setProperty("unit", "0x" + juce::String::toHexString(static_cast<juce::int64>(engine_->serial())).toUpperCase());
+  root->setProperty("unit", "0x" + juce::String::toHexString(static_cast<juce::int64>(unitSerial())).toUpperCase());
   root->setProperty("tolerance", static_cast<double>(paramU(P_GLOBAL_TOLERANCE)));
   root->setProperty("drift", static_cast<double>(paramU(P_GLOBAL_DRIFT)));
 
@@ -588,7 +717,10 @@ void ShogunAudioProcessor::setStateInformation(const void* data, int sizeInBytes
   std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
   if (xml == nullptr || !xml->hasTagName("SHOGUN")) return;
   if (xml->getIntAttribute("version", 1) < 2) return;  // v1 plugin states (old AudioParameterInt ids) are not migrated
-  patchFromJson(juce::JSON::parse(xml->getAllSubText()));
+  const juce::var doc = juce::JSON::parse(xml->getAllSubText());
+  patchFromJson(doc);
+  const juce::String unit = doc["unit"].toString();  // the unit serial travels with the plugin state
+  if (unit.startsWithIgnoreCase("0x")) requestSerial(static_cast<std::uint32_t>(unit.substring(2).getHexValue64()));
   currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, xml->getIntAttribute("program", 0));
 }
 

@@ -166,13 +166,27 @@ def bind_chrome(ops):
             o["bind"] = m.get(t, "")
         elif k == "TOGGLE" and t == "INT":
             o["bind"] = "p:CLOCK:MODE"
-        elif k == "KEY":
-            m = {"▶": "run", "RST": "rst", "FILL": "p:CLOCK:FILL", "A": "abA", "B": "abB", "↶": "undo", "↷": "redo"}
+        elif k == "KEY" and o["y"] < 30:
+            # program row: KIT ◀ ▶ ⌕ (x 774/794/814) and PATTERN ◀ ▶ ⌕ (x 1012/1032/1052) step / browse the factory
+            # bank (a program is a kit and its pattern); A/B compare; undo / redo
+            m = {"◀": "prog:-1", "▶": "prog:1", "⌕": "browse", "A": "ab:0", "B": "ab:1", "↶": "undo", "↷": "redo"}
             o["bind"] = m.get(t, "")
-            if o["bind"] in ("abA", "abB", "undo", "redo"):
-                o["bind"] = ""  # A/B and undo: not in this first pass (static)
-            if t == "SCENE A":
-                o["lit"] = 0
+            o["lit"] = 0
+        elif k == "KEY":
+            # transport and the SYNC box (was PERFORM: FILL / ROLL / MUTE GRP / SCENE A). The engine has no fill, roll,
+            # mute groups or scenes, so the box carries the two clock controls instead: CLK IN and SRC.
+            if t == "▶":
+                o["bind"] = "run"
+            elif t == "RST":
+                o["bind"] = "rst"
+            elif t == "FILL":
+                o.update(text="CLK IN: STEP", x=546, w=118, bind="disp:CLOCK:CLK IN")
+            elif t == "ROLL":
+                o.update(text="SRC HOST", x=670, w=118, bind="src")
+            elif t in ("MUTE GRP", "SCENE A"):
+                o["hide"] = True
+        elif k == "TEXT" and t == "PERFORM":
+            o["text"] = "SYNC"
         elif k == "LED" and o["x"] == 52:
             o["bind"] = "runled"
         elif k == "LED" and o["x"] == 1140 and abs(o["y"] - 62) < 1:
@@ -263,7 +277,7 @@ def bind_main(ops):
                 v = VOICES[int((o["x"] - X0) // pitch)]
                 # MAIN strip labels that are not that voice's knob names (§11.4 strips are TUNE/DECAY/LEVEL for all)
                 remap = {("SD", "DECAY"): ("SD:T.DECAY", "T.DECAY"), ("OH", "TUNE"): ("CH:TUNE", "HAT TUNE"),
-                         ("CP", "TUNE"): ("CP:FILTER", "FILTER"), ("RS", "DECAY"): ("", "—"), ("MA", "TUNE"): ("", "—")}
+                         ("CP", "TUNE"): ("CP:FILTER", "FILTER"), ("RS", "DECAY"): ("RS:PAN", "PAN"), ("MA", "TUNE"): ("MA:PAN", "PAN")}
                 if (v, t) in remap:
                     pid, lab = remap[(v, t)]
                     o["text"] = lab
@@ -296,6 +310,8 @@ def bind_main(ops):
                 o["hide"] = True
             elif k == "TEXT" and t.isdigit() and o["y"] > 460:
                 o["bind"] = "stepnum:%d" % (int(t) - 1)
+            elif k == "TEXT" and t.startswith("click = step on/off"):
+                o["text"] = "click = step on/off  ·  shift-click = accent  ·  right-click = select  ·  full 16-track grid on GRID"
         elif y >= 536:
             if k == "BOX":
                 o["text"] = "STEP %s · LOCKS"
@@ -382,9 +398,14 @@ def bind_grid(ops):
                 o["bind"] = "lockinfo"
             elif k == "KNOB" and t in STEP_KNOBS:
                 o["bind"] = "sk:" + STEP_KNOBS[t]
+            elif k == "KEY" and t == "LOCK RND":
+                o["hide"] = True  # no lock randomiser in the engine
             elif k == "KEY":
                 o["bind"] = {"TIE": "sk:tie", "LOCKS ✕": "clearlocks", "COPY": "copy", "PASTE": "paste", "CLEAR": "clear",
-                             "SHIFT ◀": "shiftl", "SHIFT ▶": "shiftr", "RANDOM": "random", "LOCK RND": ""}.get(t, "")
+                             "SHIFT ◀": "shiftl", "SHIFT ▶": "shiftr", "RANDOM": "random"}.get(t, "")
+                o["x"] += 56  # eight keys, centred where nine were
+            elif k == "TEXT" and t.startswith("hold a step"):
+                o["text"] = "click = on → accent → off  ·  shift / right-click = select  ·  knobs edit the selected step"
 
 
 def bind_mod(ops):
@@ -409,15 +430,48 @@ def bind_mod(ops):
                 o["bind"] = "lfoscope:%d" % li
             elif k == "TEXT" and t in ("SIN", "TRI", "SAW", "SQR", "S&H"):
                 o["bind"] = "disp:%s:SHAPE" % L
+            elif k == "KEY" and t.startswith("◉ LFO"):
+                o["bind"] = "assign:%d" % (li + 1)  # mod::SRC_LFO1 + li
+                o["lit"] = 0
+            elif k == "TEXT" and t == "DRAG ▸":
+                o["text"] = "ASSIGN ▸"
         elif 360 <= y < 650 and x < 790:
             if not (k == "TEXT" and abs(y - 356) < 1):
                 o["hide"] = True  # illustrative rows: the editor draws the engine's rows
-        elif x >= 798 and y >= 455 and y < 580 and k in ("RECT", "LINE"):
-            o["hide"] = True  # lane editor: deferred in this first pass (§15.0)
+        elif x >= 798 and y >= 336:
+            # PER-VOICE SOURCES: the six engine per-voice sources are assign keys. LANE A/B (and the lane editor
+            # below them) are not in the engine, so they are gone; the freed space holds the global sources.
+            src = {"◉ ENV": 5, "◉ PITCH ENV": 6, "◉ VEL": 7, "◉ ACC": 8, "◉ RND/HIT": 9, "◉ NOTE": 10}  # mod::SRC_*
+            if k == "BOX":
+                o["h"] = 116
+            elif k == "KEY" and t in src:
+                o["bind"] = "assign:%d" % src[t]
+                o["lit"] = 0
+                if t == "◉ PITCH ENV":
+                    o["x"] = 812
+                elif t == "◉ NOTE":
+                    o["x"] = 906
+            elif k == "TEXT" and y < 380:
+                pass
+            else:
+                o["hide"] = True  # LANE A/B keys, lane title, bars, SLEW/LEN/DEPTH, DRAW/CLEAR/RANDOM/LANE B
+        elif k == "TEXT" and t.startswith("right-click any knob"):
+            o["text"] = ("ASSIGN: click a ◉ source, then a knob = new row at +50 %  ·  "
+                         "drag DEPTH sideways  ·  click SOURCE / DEST / VIA / CURVE to change  ·  ✕ clears")
     ops.append(dict(kind="RECT", tab="MOD", x=14, y=364, w=772, h=284, r=0, fill=0, stroke=0, sw=0, opacity=1.0,
                     bind="matrix", hide=False))
-    ops.append(dict(kind="TEXT", tab="MOD", x=994, y=516, text="LANE A/B editor: next pass", z=8, anchor=1,
-                    fill=colour(mm.DIM), weight=600, ls=0.4, bind="", hide=False))
+    gl = dict(kind="BOX", tab="MOD", x=798, y=462, w=392, h=202, text="GLOBAL SOURCES  ·  one set for the machine", z=9.5,
+              bind="", hide=False)
+    ops.append(gl)
+    for i, (lab, s) in enumerate((("◉ RND", 11), ("◉ MOD W", 12), ("◉ AT", 13))):
+        ops.append(dict(kind="KEY", tab="MOD", x=812 + 94 * i, y=496, w=88, h=22, text=lab, lit=0, z=8.5,
+                        fill=colour("#0a0a0a"), bind="assign:%d" % s, hide=False))
+    for i, line in enumerate(("RND = a new random value every step.", "MOD W = MIDI CC 1.  AT = channel aftertouch.",
+                              "Click any ◉ key, then click a knob: the matrix gains",
+                              "a row from that source to that knob at +50 %.",
+                              "Click the lit key again to cancel.")):
+        ops.append(dict(kind="TEXT", tab="MOD", x=812, y=548 + 16 * i, text=line, z=8, anchor=0,
+                        fill=colour(mm.DIM if i < 2 else mm.INK), weight=600, ls=0.4, bind="", hide=False))
 
 
 def bind_route(ops):
@@ -425,6 +479,15 @@ def bind_route(ops):
     colw = 948 / 16.0
     for o in ops:
         k, t, x, y = o["kind"], o.get("text", ""), o.get("x", 0), o.get("y", 0)
+        if k == "JACK" and t in ("FILL IN", "LANE A"):
+            o["hide"] = True
+            continue
+        if k == "JACK" and x > 960 and abs(y - 292) < 1 and t in ("LD GATE", "BS GATE"):
+            o["x"] = x = x - 52
+        if k == "TEXT" and t.startswith("LFO/RND/LANE"):
+            o["text"] = "LFO/RND jacks are extras:"
+        if k == "TEXT" and t.startswith("right-click any jack"):
+            o["text"] = "drag jack to jack = cable  ·  right-click a jack = unplug  ·  CV AMT knobs below"
         if k == "JACK":
             if x < 960:
                 v = VOICES[int((x - 10) // colw)]
@@ -495,8 +558,12 @@ def bind_fx(ops):
                     o["bind"] = "clipled"
                 elif k == "KEY" and t.startswith("DELAY"):
                     o["bind"] = "disp:FX:DELAY TIME"
+                    o["text"] = "DELAY: 1/8D"
+                    o["w"] = 208
                 elif k == "KEY" and t.startswith("ROOM"):
-                    o["text"] = "ROOM  (next pass)"
+                    o["hide"] = True  # the FX send is a delay only
+                elif k == "TEXT" and t.startswith("FX SEND ="):
+                    o["text"] = "FX SEND = one stereo delay, kept clean"
 
 
 def bind_seq(ops):
@@ -526,15 +593,55 @@ def bind_seq(ops):
                 o["bind"] = "midinote:%d" % i
             elif k == "LCD" and abs(x - 578) < 1:
                 o["bind"] = "midich:%d" % i
-            elif k == "TOGGLE":
-                o["bind"] = "p:%s:TRIG MERGE" % v if i < 14 else ""
+            elif k == "KEY" and t == "LEARN":
+                o["hide"] = True  # the note map is fixed (36–49 drums, ch 1 LEAD, ch 2 BASS): nothing to learn
+            elif k == "TOGGLE" and i < 14:
+                o["bind"] = "p:%s:TRIG MERGE" % v
                 o["on"] = False
-        elif x >= 780 and 96 <= y < 346 and k == "LCD":
-            row = int((y - 120) // 31)
-            o["bind"] = ["disp:CLOCK:SOURCE", "disp:CLOCK:CLK IN", "disp:CLOCK:CLK OUT", "disp:CLOCK:RUN OUT", "", "", ""][row]
+                o["x"] = 652
+            elif k == "TOGGLE":
+                o["hide"] = True  # LEAD/BASS: their GATE jacks always play (no TRIG MERGE parameter)
+        elif x >= 780 and 96 <= y < 346:
+            row = int((y - (120 if k == "LCD" else 134)) // 31)
+            if row == 5:  # MIDI CLOCK OUT: the plugin sends no MIDI
+                o["hide"] = True
+            elif row == 6 and k in ("LCD", "TEXT"):
+                o["y"] -= 31  # START ON moves up into the freed row
+            if k == "LCD":
+                o["bind"] = ["disp:CLOCK:SOURCE", "disp:CLOCK:CLK IN", "disp:CLOCK:CLK OUT", "disp:CLOCK:RUN OUT", "", "", ""][row]
+        elif x >= 780 and y >= 356:
+            # CC MAP: the engine's fixed CC table (kParams[].cc); learn is not supported, so no LEARN keys
+            col = 0 if x < 990 else 1
+            row = int((y - (376 if k in ("LCD", "KEY") else 390)) // 33 + 0.01)
+            cc = [[("BD1 ATTACK", 2), ("BD1 DECAY", 64), ("BD1 PITCH", 65), ("BD1 TUNE", 3), ("BD1 NOISE", 4), ("BD1 FILTER", 5)],
+                  [("BD1 DRIVE", 6), ("BD1 SOUND", 66), ("HAT TUNE", 73), ("TOM NOISE", 84), ("CB TUNE", 85), ("CB DECAY", 86)]]
+            if k == "BOX":
+                o["text"] = "CC MAP  (fixed)"
+            elif k == "KEY":
+                o["hide"] = True
+            elif k in ("LCD", "TEXT") and 0 <= row < 8:
+                if row >= 6:
+                    o["hide"] = True
+                elif k == "LCD":
+                    o["text"] = str(cc[col][row][1])
+                    o["x"] += 50
+                else:
+                    o["text"] = cc[col][row][0]
     for o in ops:  # the "OUT NOTE" header reads "TRIG MERGE" (the per-jack opt-in, §12.2)
         if o["kind"] == "TEXT" and o.get("text") == "OUT NOTE":
             o["text"] = "MERGE"
+        if o["kind"] == "TEXT" and o.get("text") == "MERGE" and abs(o["y"] - 120) < 1:
+            o["x"] = 630
+        if o["kind"] == "TEXT" and o.get("text") == "LEARN" and abs(o["y"] - 120) < 1:
+            o["hide"] = True
+        if o["kind"] == "TEXT" and o.get("text") == "MUTE GRP" and abs(o["y"] - 120) < 1:
+            o["text"] = "CHOKE"  # the column shows each voice's CHOKE group
+    ops.append(dict(kind="TEXT", tab="SEQ/MIDI", x=792, y=320, text="MIDI IN: drums 36–49 (ch ≠ 1/2)  ·  ch 1 LEAD  ·  ch 2 BASS",
+                    z=8, anchor=0, fill=colour(mm.DIM), weight=600, ls=0.4, bind="", hide=False))
+    ops.append(dict(kind="TEXT", tab="SEQ/MIDI", x=792, y=600, text="CC 1 = MOD W source  ·  aftertouch = AT source",
+                    z=8, anchor=0, fill=colour(mm.DIM), weight=600, ls=0.4, bind="", hide=False))
+    ops.append(dict(kind="TEXT", tab="SEQ/MIDI", x=792, y=616, text="CC value 0–127 sets the parameter at once",
+                    z=8, anchor=0, fill=colour(mm.DIM), weight=600, ls=0.4, bind="", hide=False))
 
 
 def bind_global(ops):
@@ -543,12 +650,30 @@ def bind_global(ops):
         k, t, x, y = o["kind"], o.get("text", ""), o.get("x", 0), o.get("y", 0)
         if y < 90:
             continue
-        if k == "KEY" and t in ("1×", "2×", "4×"):
-            o["bind"] = "choice:GLOBAL:OS:%d" % ["1×", "2×", "4×"].index(t)
-            o["lit"] = 0
-        elif k == "KEY" and t in ("SAME",) or (k == "KEY" and t == "4×" and y > 180):
+        if k == "KEY" and (t == "SAME" or (t == "4×" and y > 180)):  # the offline row first: its 4× is OFFLINE:1
             o["bind"] = "choice:GLOBAL:OFFLINE:%d" % (0 if t == "SAME" else 1)
             o["lit"] = 0
+        elif k == "KEY" and t in ("1×", "2×", "4×"):
+            o["bind"] = "choice:GLOBAL:OS:%d" % ["1×", "2×", "4×"].index(t)
+            o["lit"] = 0
+        elif k == "KNOB" and t in ("NOISE FLOOR", "TRANSPOSE"):
+            o["hide"] = True  # the engine has no noise floor or transpose
+        elif k == "LCD" and "st" in t and x > 990:
+            o["hide"] = True  # the TRANSPOSE readout
+        elif k == "KEY" and t.endswith("%") and t[:-1].isdigit():
+            o["bind"] = "uiscale:%s" % t[:-1]
+            o["lit"] = 0
+        elif k == "TOGGLE" and 480 < y < 600:
+            o["hide"] = True  # TOOLTIPS / KNOB DRAG / SHOW VALUES / REMEMBER SCALE: not settings; the facts are listed
+        elif k == "TEXT" and 480 < y < 600 and x == 56:
+            o["x"] = 24
+            o["text"] = {497: "KNOBS: drag up / down  ·  shift = fine  ·  wheel = nudge",
+                         527: "DOUBLE-CLICK a knob = its default (the noon kit value)",
+                         557: "KEYS and LCDs: click = next choice  ·  right-click = previous",
+                         587: "UI SCALE resizes this window; the corner drag works too"}[int(round(y))]
+            o["fill"] = colour(mm.DIM)
+        elif k == "KEY" and t == "SAVE AS DEFAULT":
+            o["hide"] = True  # no user default store
         elif k == "LCD" and "smp" in t:
             o["bind"] = "latency"
         elif k == "LCD" and "host" in t:
@@ -557,12 +682,11 @@ def bind_global(ops):
             o["bind"] = "act:%s" % VOICES[int(round((x - 226) / 10))]
             o["on"] = False
         elif k == "KNOB":
-            o["bind"] = "p:" + {"DRIFT": "GLOBAL:DRIFT", "TOLERANCE": "GLOBAL:TOLERANCE", "NOISE FLOOR": "GLOBAL:NOISE FLOOR",
-                                "A4 REF": "GLOBAL:A4", "TRANSPOSE": "GLOBAL:TRANSPOSE"}[t]
+            o["bind"] = "p:" + {"DRIFT": "GLOBAL:DRIFT", "TOLERANCE": "GLOBAL:TOLERANCE", "A4 REF": "GLOBAL:A4"}[t]
+            o["x"] += {"DRIFT": 76, "TOLERANCE": 76, "A4 REF": 121}[t]  # recentred without NOISE FLOOR / TRANSPOSE
         elif k == "LCD" and "Hz" in t:
             o["bind"] = "disp:GLOBAL:A4"
-        elif k == "LCD" and "st" in t:
-            o["bind"] = "disp:GLOBAL:TRANSPOSE"
+            o["x"] += 121
         elif k == "LCD" and t.startswith("SN"):
             o["bind"] = "serial"
         elif k == "KEY" and t in ("GATE", "GATE+ACC", "GATE+DYN", "FULL DYN"):

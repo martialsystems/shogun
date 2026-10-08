@@ -289,14 +289,18 @@ int main(int argc, char** argv) {
     auto p = fresh();
     std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
     auto* se = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get());
+    // Every port has a jack on the ROUTE tab except FILL IN and LANE A: the engine neither reads FILL IN nor drives
+    // LANE A (no fill, no lanes), so the panel does not offer them (scripts/check_panel_bindings.py).
     int jacks = 0;
     for (int i = 0; i < kPorts; ++i) {
       juce::Point<float> pt;
       jacks += se->panel().jackPosition(i, pt) ? 1 : 0;
     }
-    check(ed->getWidth() == 1200 && ed->getHeight() == 672 && jacks == kPorts, "editor",
+    juce::Point<float> pt;
+    const bool hidden = !se->panel().jackPosition(findPort("CLOCK:FILL IN"), pt) && !se->panel().jackPosition(findPort("MOD:LANE A"), pt);
+    check(ed->getWidth() == 1200 && ed->getHeight() == 672 && jacks == kPorts - 2 && hidden, "editor",
           juce::String(ed->getWidth()) + "x" + juce::String(ed->getHeight()) + ", bay jacks " + juce::String(jacks) + "/" +
-              juce::String(kPorts) + ", ops " + juce::String(ShogunPanel::opCount()));
+              juce::String(kPorts) + " (FILL IN, LANE A not offered), ops " + juce::String(ShogunPanel::opCount()));
     static const char* const names[8] = {"main", "voice", "grid", "mod", "route", "fxmix", "seqmidi", "global"};
     int written = 0;
     for (int t = 0; t < 8; ++t) {
@@ -323,7 +327,7 @@ int main(int argc, char** argv) {
     p->editRows()[2] = {mod::SRC_LFO2, -1, findParam("CH:DECAY"), -0.16, mod::SRC_NONE, -1, mod::LIN, true};
     p->commitEdits();
     p->addCable(findPort("MOD:LFO 1"), findPort("BD1:PITCH"));
-    p->addCable(findPort("LTC:OUT"), findPort("CLOCK:FILL IN"));
+    p->addCable(findPort("LTC:OUT"), findPort("CLOCK:RST IN"));
     p->addCable(findPort("LEAD:NOTE OUT"), findPort("BASS:NOTE"));
     se->panel().setSelectedVoice(SD);
     for (int t : {0, 2, 3, 4}) {
@@ -340,6 +344,231 @@ int main(int argc, char** argv) {
       if (os.openedOk()) png.writeImageToStream(img, os);
     }
     check(written == 8, "tab renders", juce::String(written) + " PNGs in " + outDir.getFullPathName());
+  }
+
+
+  // ---- header: KIT / PATTERN ◀ ▶ step through the bank (INIT + kits) with wraparound; SRC cycles CLOCK:SOURCE
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    const int n = factory::kPrograms;
+    bool ok = p->getCurrentProgram() == 0;
+    int visited = 0;
+    for (int tab = 0; tab < 8; ++tab) {  // the header is on every tab
+      pn.setTab(tab);
+      for (int which = 0; which < 2; ++which) {  // 0 = KIT ▶ ◀, 1 = PATTERN ▶ ◀
+        for (int i = 1; i <= n; ++i) {
+          ok = ok && pn.pressBind("prog:1", false, false, which) && p->getCurrentProgram() == i % n;
+          ok = ok && pn.boundText("kit") == juce::String::fromUTF8(factory::programName(i % n)).toUpperCase();
+          ok = ok && pn.boundText("pattern") == juce::String(p->editPattern().name);
+          ++visited;
+        }
+        ok = ok && pn.pressBind("prog:-1", false, false, which) && p->getCurrentProgram() == n - 1;  // INIT ◀ = last
+        ok = ok && pn.pressBind("prog:1", false, false, which) && p->getCurrentProgram() == 0;       // last ▶ = INIT
+      }
+    }
+    pn.setTab(0);
+    pn.pressBind("prog:1");
+    pn.pressBind("prog:1");
+    const bool loaded = p->getCurrentProgram() == 2 && p->stateJson() == [&] {
+      auto q = fresh();
+      q->setCurrentProgram(2);
+      return q->stateJson();
+    }();
+    check(ok && loaded && visited == 8 * 2 * n, "KIT/PATTERN arrows",
+          juce::String(visited) + " steps over " + juce::String(n) + " programs on 8 tabs, both arrow pairs wrap INIT <-> " +
+              juce::String::fromUTF8(factory::programName(n - 1)) + ", ▶▶ = program 2 state");
+
+    // SRC: HOST → INT → EXT → HOST (from whatever the program set), labelled with the source; right-click steps back.
+    // The engine follows it: the host tempo under HOST, the TEMPO knob otherwise.
+    FakeHead head;
+    head.bpm = 100.0;
+    p->setPlayHead(&head);
+    setU(*p, "CLOCK:TEMPO", 0.5f);
+    const juce::StringArray order("SRC HOST", "SRC INT", "SRC EXT");
+    juce::StringArray labels;
+    bool srcOk = true;
+    juce::String tempos;
+    for (int i = 0; i < 4; ++i) {
+      const juce::String l = pn.boundText("src");
+      const int k = stepIndex(static_cast<double>(p->paramU(P_CLOCK_SOURCE)), 3);
+      render(*p, 512, nullptr, &head);
+      const double bpm = p->engine().tempo();
+      tempos << (i ? " / " : "") << juce::String(bpm, 1);
+      srcOk = srcOk && l == order[k] && std::fabs(bpm - (k == 0 ? 100.0 : tempoBpm(0.5))) < 1e-9;
+      if (i > 0) srcOk = srcOk && order.indexOf(l) == (order.indexOf(labels[i - 1]) + 1) % 3;
+      labels.add(l);
+      pn.pressBind("src");
+    }
+    const juce::String before = pn.boundText("src");
+    pn.pressBind("src", true);
+    const juce::String back = pn.boundText("src");
+    srcOk = srcOk && order.indexOf(back) == (order.indexOf(before) + 2) % 3;
+    check(srcOk, "SRC key", labels.joinIntoString(" > ") + ", right-click " + before + " > " + back + "; engine tempo " +
+                               tempos + " BPM (host 100, knob " + juce::String(tempoBpm(0.5), 1) + ")");
+    p->setPlayHead(nullptr);
+  }
+
+  // ---- A/B compare: two full-state slots; B starts as a copy; right-click B copies A onto B
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    p->setCurrentProgram(5);
+    const int dec = findParam("BD1:DECAY");
+    const juce::String a = p->stateJson();
+    const float aDec = p->paramU(dec);
+    pn.pressBind("ab:1");
+    bool ok = p->abSlot() == 1 && p->stateJson() == a;  // first visit: B = copy of A
+    p->setParamU(dec, 0.9f);
+    p->editPattern().tracks[SD].steps[3].on = !p->editPattern().tracks[SD].steps[3].on;
+    p->commitEdits();
+    const juce::String b = p->stateJson();
+    pn.pressBind("ab:0");
+    ok = ok && p->abSlot() == 0 && p->stateJson() == a && dsp::exactEq(p->paramU(dec), aDec);
+    pn.pressBind("ab:1");
+    ok = ok && p->abSlot() == 1 && p->stateJson() == b && dsp::exactEq(p->paramU(dec), 0.9f);
+    pn.pressBind("ab:1", true);  // copy A → B (B is live: A's state loads)
+    ok = ok && p->abSlot() == 1 && p->stateJson() == a;
+    pn.pressBind("ab:0");
+    ok = ok && p->stateJson() == a;
+    // a different program in A, then right-click A copies B (the program-5 state) back onto A
+    p->setCurrentProgram(9);
+    pn.pressBind("ab:0", true);
+    ok = ok && p->stateJson() == a && p->getCurrentProgram() == 5;
+    check(ok, "A/B compare", "B = copy on first visit, A/B recall exact (BD1:DECAY " + juce::String(aDec, 3) +
+                                 " / 0.900, SD step 4), copy A>B and B>A");
+  }
+
+  // ---- undo / redo: kit loads, knob gestures and step edits; no-op clicks leave the stacks alone; 64 levels
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    pn.setTab(0);
+    const int dec = findParam("BD1:DECAY");
+    juce::StringArray st;
+    st.add(p->stateJson());
+    pn.pressBind("prog:1");  // kit load
+    st.add(p->stateJson());
+    pn.pressBind("p:BD1:DECAY");  // knob gesture (press, drag, release)
+    p->param(dec)->setValueNotifyingHost(0.123f);
+    p->settleUndoStep();
+    st.add(p->stateJson());
+    pn.pressBind("step:0");  // step edit (BD1 step 1)
+    p->settleUndoStep();
+    st.add(p->stateJson());
+    bool ok = p->undoDepth() == 3 && p->redoDepth() == 0;
+    for (int i = 2; i >= 0; --i) {
+      pn.pressBind("undo");
+      ok = ok && p->stateJson() == st[i];
+    }
+    ok = ok && p->getCurrentProgram() == 0 && !p->undo() && p->redoDepth() == 3;
+    for (int i = 1; i <= 3; ++i) {
+      pn.pressBind("redo");
+      ok = ok && p->stateJson() == st[i];
+    }
+    ok = ok && p->getCurrentProgram() == 1 && !p->redo();
+    pn.pressBind("undo");
+    pn.pressBind("p:BD1:DECAY");  // a click that changes nothing: no step, redo kept
+    p->settleUndoStep();
+    ok = ok && p->undoDepth() == 2 && p->redoDepth() == 1;
+    pn.pressBind("redo");
+    ok = ok && p->stateJson() == st[3];
+    for (int i = 0; i < 70; ++i) {  // bounded: 64 levels
+      pn.pressBind("p:BD1:DECAY");
+      p->param(dec)->setValueNotifyingHost(0.2f + 0.01f * static_cast<float>(i));
+      p->settleUndoStep();
+    }
+    const int depth = p->undoDepth();
+    int undone = 0;
+    while (p->undo()) ++undone;
+    ok = ok && depth == ShogunAudioProcessor::kUndoLevels && undone == ShogunAudioProcessor::kUndoLevels;
+    check(ok, "undo/redo", "kit load + knob gesture + step edit undone and redone exactly; no-op click keeps redo; " +
+                               juce::String(depth) + " levels after 70 edits");
+  }
+
+  // ---- ASSIGN (MOD ◉ keys), UI SCALE, OS badge, offline 4×, RE-ROLL UNIT, VELOCITY CURVE
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    pn.setTab(3);
+    pn.pressBind("assign:5");
+    pn.pressBind("assign:5");
+    bool okA = pn.armedSource() == 0;  // a second press cancels
+    pn.pressBind("assign:1");
+    okA = okA && pn.armedSource() == mod::SRC_LFO1;
+    pn.setTab(0);
+    pn.pressBind("p:BD1:DECAY");
+    p->settleUndoStep();
+    const mod::Row r0 = p->editRows()[0];
+    okA = okA && pn.armedSource() == 0 && r0.src == mod::SRC_LFO1 && r0.dst == findParam("BD1:DECAY") &&
+          std::fabs(r0.depth - 0.5) < 1e-12 && r0.on && p->undoDepth() == 1;
+    pn.setTab(3);
+    pn.pressBind("assign:13");  // AT, global
+    pn.setTab(0);
+    pn.pressBind("p:BD2:TUNE");
+    okA = okA && p->editRows()[1].src == mod::SRC_AT && p->editRows()[1].dst == findParam("BD2:TUNE");
+    check(okA, "ASSIGN keys", "LFO 1 > BD1:DECAY +50 % in slot 1, AT > BD2:TUNE in slot 2, second press cancels");
+
+    pn.setTab(7);
+    pn.pressBind("uiscale:150");
+    const int w150 = ed->getWidth();
+    const juce::String lit150 = pn.boundText("uiscale:150");
+    pn.pressBind("uiscale:75");
+    const int w75 = ed->getWidth(), h75 = ed->getHeight();
+    pn.pressBind("uiscale:100");
+    check(w150 == 1800 && w75 == 900 && h75 == 504 && ed->getWidth() == 1200, "UI scale keys",
+          "150% = " + juce::String(w150) + " px, 75% = " + juce::String(w75) + "x" + juce::String(h75) + ", 100% = " +
+              juce::String(ed->getWidth()));
+
+    const int os0 = stepIndex(static_cast<double>(p->paramU(P_GLOBAL_OS)), 3);
+    pn.setTab(5);
+    pn.pressBind("osbadge");
+    const int os1 = stepIndex(static_cast<double>(p->paramU(P_GLOBAL_OS)), 3);
+    pn.pressBind("osbadge", true);
+    const int os2 = stepIndex(static_cast<double>(p->paramU(P_GLOBAL_OS)), 3);
+    pn.setTab(7);
+    pn.pressBind("choice:GLOBAL:OFFLINE:1");
+    const int off = stepIndex(static_cast<double>(p->paramU(P_GLOBAL_OFFLINE)), 2);
+    const int os3 = stepIndex(static_cast<double>(p->paramU(P_GLOBAL_OS)), 3);
+    check(os1 == (os0 + 1) % 3 && os2 == os0 && off == 1 && os3 == os0, "OS keys",
+          "badge " + juce::String(1 << os0) + "x > " + juce::String(1 << os1) + "x, right-click back; offline 4x sets OFFLINE (OS stays " +
+              juce::String(1 << os3) + "x)");
+
+    const std::uint32_t s0 = p->unitSerial();
+    pn.pressBind("reroll");
+    const std::uint32_t s1 = p->unitSerial();
+    render(*p, 512);
+    juce::MemoryBlock mb;
+    p->getStateInformation(mb);
+    auto q = fresh();
+    q->setStateInformation(mb.getData(), static_cast<int>(mb.getSize()));
+    render(*q, 512);
+    const juce::String serialText = pn.boundText("serial");
+    check(s1 != s0 && p->engine().serial() == s1 && q->engine().serial() == s1 && serialText.contains(juce::String::toHexString(static_cast<juce::int64>(s1)).toUpperCase().substring(4)),
+          "RE-ROLL UNIT", "0x" + juce::String::toHexString(static_cast<juce::int64>(s0)).toUpperCase() + " > 0x" +
+                              juce::String::toHexString(static_cast<juce::int64>(s1)).toUpperCase() + ", engine + saved state follow (" + serialText + ")");
+
+    // VELOCITY CURVE: LINEAR / SOFT / HARD / FIXED shape MIDI velocity (BD1 from note 36 at velocity 40)
+    auto peakAt = [](int curve) {
+      auto r = fresh();
+      setU(*r, "GLOBAL:VEL CURVE", static_cast<float>(stepU(curve, 4)));
+      render(*r, 512);
+      juce::MidiBuffer m;
+      m.addEvent(juce::MidiMessage::noteOn(10, 36, static_cast<juce::uint8>(40)), 0);
+      return render(*r, 48000, &m).peakMain;
+    };
+    const float pl = peakAt(0), ps = peakAt(1), ph = peakAt(2), pf = peakAt(3);
+    const bool curveFn = std::fabs(ShogunAudioProcessor::velCurve(0, 0.25) - 0.25) < 1e-12 &&
+                         std::fabs(ShogunAudioProcessor::velCurve(1, 0.25) - 0.5) < 1e-12 &&
+                         std::fabs(ShogunAudioProcessor::velCurve(2, 0.25) - 0.0625) < 1e-12 &&
+                         std::fabs(ShogunAudioProcessor::velCurve(3, 0.25) - 1.0) < 1e-12;
+    check(curveFn && ph < pl && pl < ps && ps <= pf, "VELOCITY CURVE",
+          "velocity 40 peaks HARD " + juce::String(ph, 3) + " < LINEAR " + juce::String(pl, 3) + " < SOFT " + juce::String(ps, 3) +
+              " <= FIXED " + juce::String(pf, 3));
   }
 
   std::cout << (failures == 0 ? "ShogunProbe: all checks passed" : "ShogunProbe: FAILURES " + juce::String(failures).toStdString())

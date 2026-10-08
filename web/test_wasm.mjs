@@ -188,5 +188,25 @@ async function bd1With(patch) {
   law.push(["factory bank: " + count + " programs (INIT + " + (count - 1) + "), unique names " + names.size + ", " + n + " renders peak " +
     lo.toFixed(2) + " .. " + hi.toFixed(2) + " dBFS", bad === 0 && count >= 17 && names.size === count && str0(y0, y0.sg_factory_name(0)) === "INIT"]);
 }
+// Full documents (the page's save path): the wasm writer gives the native bytes for every program, and loading a
+// document back (sg_patch_load) and writing it again gives the same bytes.
+{
+  const nat = execFileSync(root + "build/web_parity", ["--docs"], { maxBuffer: 1 << 26 }).toString("latin1").split("\0").slice(0, -1);
+  const y = await fresh();
+  const doc = () => { const p = y.sg_state_json(1), n = y.sg_state_json_len(); return Buffer.from(y.memory.buffer, p, n).toString("latin1"); };
+  const load = (t) => { const b = Buffer.from(t, "latin1"), p = y.sg_doc_buf(b.length); new Uint8Array(y.memory.buffer, p, b.length).set(b); return y.sg_patch_load(b.length); };
+  let same = 0, again = 0, bytes = 0;
+  for (let i = 0; i < y.sg_factory_count(); i++) {
+    y.sg_factory_load(i);
+    const d = doc();
+    bytes += d.length;
+    if (d === nat[i]) same++;
+    const h = y.sg_state_hash();
+    y.sg_factory_load(0);
+    if (load(d) && doc() === d && y.sg_state_hash() === h) again++;
+  }
+  law.push(["documents: " + same + "/" + nat.length + " programs write the native bytes (" + bytes + " bytes), " + again + " reload to the same text and state",
+    nat.length === y.sg_factory_count() && same === nat.length && again === nat.length]);
+}
 for (const [name, pass] of law) console.log((pass ? "ok   " : "FAIL ") + name);
 process.exit(ok && law.every((l) => l[1]) ? 0 : 1);

@@ -7,6 +7,7 @@
 
 #include <array>
 #include <atomic>
+#include <deque>
 #include <memory>
 
 #include "shogun.h"
@@ -63,6 +64,48 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   void requestIdeal();
   void initPatch();
   void loadProgram(int program);  // INIT, then the bank document through patchFromJson (the saved-state path)
+  void stepProgram(int delta);    // header ◀ ▶: the next / previous program, wrapping INIT ↔ the last kit
+
+  // Full-state snapshots (message thread): the patch document of patchToJson() plus the program number.
+  struct Snapshot {
+    juce::String json;
+    int program = 0;
+    bool empty() const { return json.isEmpty(); }
+    bool sameAs(const Snapshot& o) const { return program == o.program && json == o.json; }
+  };
+  Snapshot captureState() const;
+  void restoreState(const Snapshot& s);
+  juce::String stateJson() const { return captureState().json; }
+
+  // A/B compare: two full-state slots. selectAB stores the live state in the active slot and loads the other one (a
+  // slot never used starts as a copy of the live state). copyAB copies one slot onto the other; when the target is the
+  // active slot the copy is loaded. Both are undoable.
+  int abSlot() const { return abSlot_; }
+  bool abFilled(int slot) const { return slot == abSlot_ || !ab_[static_cast<size_t>(slot & 1)].empty(); }
+  void selectAB(int slot);
+  void copyAB(int from, int to);
+
+  // Undo / redo: bounded stacks of full-state snapshots. An edit is bracketed by beginUndoStep() (the state before)
+  // and settleUndoStep(), which records the step only if the state really changed (a click that changes nothing
+  // leaves the stacks alone and keeps redo). Knob gestures, step edits, matrix / cable edits and program loads are
+  // bracketed by the editor; setCurrentProgram brackets itself.
+  static constexpr int kUndoLevels = 64;
+  void beginUndoStep();
+  bool settleUndoStep();
+  bool undoPending() const { return !undoPre_.empty(); }
+  bool undo();
+  bool redo();
+  int undoDepth() const { return static_cast<int>(undo_.size()); }
+  int redoDepth() const { return static_cast<int>(redo_.size()); }
+
+  // Unit serial (GLOBAL ▸ RE-ROLL UNIT): the per-voice tolerance seed. Applied on the audio thread; saved in the
+  // plugin state ("unit") and restored by setStateInformation.
+  void rerollUnit();
+  void requestSerial(std::uint32_t serial);
+  std::uint32_t unitSerial() const { return unitSerial_.load(std::memory_order_relaxed); }
+
+  // MIDI velocity curve (GLOBAL ▸ VELOCITY CURVE: LINEAR / SOFT / HARD / FIXED), x and result in 0..1.
+  static double velCurve(int mode, double x);
 
   // ---------------------------------------------------------------- meters (written by the audio thread)
   struct Meters {
@@ -121,6 +164,14 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   std::atomic<std::uint32_t> padMask_{0};
   std::atomic<int> runReq_{-1};
   std::atomic<bool> restartReq_{false}, idealReq_{false};
+  std::atomic<std::uint32_t> serialReq_{0}, unitSerial_{0x5A31C0DEu};
+
+  // A/B and undo (message thread only)
+  int abSlot_ = 0;
+  std::array<Snapshot, 2> ab_{};
+  std::deque<Snapshot> undo_, redo_;
+  Snapshot undoPre_;
+  void pushBounded(std::deque<Snapshot>& d, Snapshot s);
 
   juce::AudioBuffer<float> scratch_;
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ShogunAudioProcessor)

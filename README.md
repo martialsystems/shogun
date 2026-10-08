@@ -18,9 +18,9 @@ SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every
 
 - Per-track length from 1 to 32 steps and per-track scale (1/32, 1/16, 1/8T, 1/8) for polymeter.
 - Per-track swing and shift. Per-step accent (3 levels), probability, micro-timing, flam (16 types), ratchets (up to 8), pitch bend, and notes and ties for the synth voices.
-- Parameter locks: hold a step and turn any knob to store a value for that step.
-- Clock from the host, the internal clock or the CLK IN jack. In HOST mode SHOGUN locks to your DAW's song position, including after loops and jumps.
-- Fill, copy, paste, clear, rotate, randomise, panic and INIT patch.
+- Parameter locks: a patch can lock any parameter to its own value on a step (the factory patterns use them). The GRID tab shows the selected step's locks and clears them.
+- Clock from the host, the internal clock or the CLK IN jack, picked with the SRC key in the header. In HOST mode SHOGUN locks to your DAW's song position, including after loops and jumps.
+- Copy, paste, clear, rotate, randomise, panic and INIT patch.
 
 ### Modulation
 
@@ -41,12 +41,15 @@ SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every
 
 ### Panel
 
-- Eight tabs (MAIN, VOICE, GRID, MOD, SEQ/MIDI, FX/MIX, ROUTE, GLOBAL) on a 1200 × 672 panel with rack ears, scalable for HiDPI screens.
+- Eight tabs (MAIN, VOICE, GRID, MOD, SEQ/MIDI, FX/MIX, ROUTE, GLOBAL) on a 1200 × 672 panel with rack ears, scalable from 75 % to 200 % for HiDPI screens.
+- KIT and PATTERN arrows step through INIT and the factory bank, and the search key opens the program list.
+- A/B compare (two full snapshots, either copied onto the other) and 64 levels of undo and redo over knob moves, step edits and kit loads.
+- Every key on the panel does something: the build checks that no control is left unbound.
 
 ### MIDI
 
 - Drums on notes 36 to 49 (BD1 to HTC). LEAD on channel 1 and BASS on channel 2, with MIDI note 48 at C3.
-- MIDI CC for the voice controls, the mod wheel on CC 1, and channel aftertouch.
+- Twelve voice controls on fixed MIDI CCs (the map is on the SEQ/MIDI tab), the mod wheel on CC 1 and channel aftertouch as mod sources, and a velocity curve (linear, soft, hard or fixed).
 
 ## Install and build
 
@@ -61,7 +64,7 @@ SHOGUN builds from source. You need CMake, a C++17 compiler and JUCE 8.0.4. Set 
 | `make factory` | Rebuilds the factory bank (`engine/factory_bank.inc`) from `scripts/make_factory.py`, trimming each kit to its peak target |
 | `make web` | Compiles the engine to WebAssembly (clang with wasm-ld, plus Node) and writes the playable page `web/shogun.html` |
 
-SHOGUN is built for VST3 hosts such as FL Studio. A new instance starts on the INIT kit with an empty pattern. The factory bank follows INIT: 21 kits, each with its own pattern, from house, techno, acid and electro to breakbeat, jungle, half-time and odd meters. Pick one from your host's program list, from the KIT or PATTERN display on the panel, or from the web page's pattern list.
+SHOGUN is built for VST3 hosts such as FL Studio. A new instance starts on the INIT kit with an empty pattern. The factory bank follows INIT: 21 kits, each with its own pattern, from house, techno, acid and electro to breakbeat, jungle, half-time and odd meters. Pick one from your host's program list, with the KIT or PATTERN arrows and displays on the panel, or from the web page's pattern list. A pattern saved on the web page keeps its whole patch document, so step probability, micro-timing, ratchets, parameter locks and mod rows the page has no controls for are kept.
 
 ## Documentation
 

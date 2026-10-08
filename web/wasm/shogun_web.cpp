@@ -338,31 +338,49 @@ EXPORT(sg_process) void sg_process(int n) {
 
 EXPORT(sg_knob_count) int sg_knob_count() { return kKnobCount; }
 EXPORT(sg_knob_name) const char* sg_knob_name(int i) { return i >= 0 && i < kKnobCount ? kKnobs[i].name : ""; }
+// The page re-sends whole panels (a kit, a track, the clock): a value equal to what the panel reads back leaves the
+// engine's own, finer value alone, so hidden precision survives (the setters below do the same).
 EXPORT(sg_set_knob) void sg_set_knob(int i, int cc) {
-  if (i >= 0 && i < kKnobCount) setU(kKnobs[i].id, cc / 127.0);  // §14: u = cc/127
+  if (i < 0 || i >= kKnobCount) return;
+  const int p = findParam(kKnobs[i].id);
+  if (p >= 0 && static_cast<int>(std::floor(gE->param(p) * 127.0 + 0.5)) == cc) return;
+  setU(kKnobs[i].id, cc / 127.0);  // §14: u = cc/127
 }
 // level x: linear gain → LEVEL u (gLevel = 1.4125 u²); master x → MASTER:VOLUME u (2 u²).
 EXPORT(sg_set_level) void sg_set_level(int v, double x) {
   const int nv = voiceOf(v);
-  if (nv >= 0) setVoiceU(nv, "LEVEL", x > 0 ? std::sqrt(x / 1.4125) : 0.0);
+  if (nv < 0) return;
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%s:LEVEL", kVoiceNames[nv]);
+  const double u = gE->param(findParam(buf));
+  if (dsp::exactEq(1.4125 * u * u, x)) return;  // sg_get_level's own value
+  setVoiceU(nv, "LEVEL", x > 0 ? std::sqrt(x / 1.4125) : 0.0);
 }
 EXPORT(sg_set_master) void sg_set_master(double x) { setU("MASTER:VOLUME", x > 0 ? std::sqrt(x / 2.0) : 0.0); }
 EXPORT(sg_set_solo) void sg_set_solo(int v) {
   for (int k = 0; k < 16; ++k) setVoiceU(voiceOf(k), "SOLO", k == v ? 1.0 : 0.0);
 }
-EXPORT(sg_set_mode) void sg_set_mode(int ext) {
-  setU("CLOCK:SOURCE", stepU(SRC_INT, 3));
-  setU("CLOCK:MODE", stepU(ext ? 1 : 0, 2));
+namespace {
+void setStep(int p, int idx, int n) {  // a stepped parameter, untouched when it already reads as idx
+  if (stepIndex(gE->param(p), n) != idx) applyU(p, stepU(idx, n));
 }
+}  // namespace
+EXPORT(sg_set_mode) void sg_set_mode(int ext) {
+  setStep(P_CLOCK_SOURCE, SRC_INT, 3);
+  setStep(findParam("CLOCK:MODE"), ext ? 1 : 0, 2);
+}
+// A tempo the panel shows (0.1 BPM) for the engine's own tempo keeps that tempo.
 EXPORT(sg_set_tempo) void sg_set_tempo(double bpm) {
-  setU("CLOCK:SOURCE", stepU(SRC_INT, 3));
+  setStep(P_CLOCK_SOURCE, SRC_INT, 3);
+  const double cur = 40.0 + 160.0 * gE->param(P_CLOCK_TEMPO);
+  if (std::fabs(std::floor(cur * 10.0 + 0.5) / 10.0 - bpm) < 1e-6) return;
   setU("CLOCK:TEMPO", (bpm - 40.0) / 160.0);
 }
 EXPORT(sg_set_scale) void sg_set_scale(int stepsPerQuarter) {
   const int idx = stepsPerQuarter >= 8 ? 0 : (stepsPerQuarter == 4 ? 1 : (stepsPerQuarter == 3 ? 2 : 3));
-  setU("CLOCK:SCALE", stepU(idx, 4));
+  setStep(P_CLOCK_SCALE, idx, 4);
 }
-EXPORT(sg_set_bar) void sg_set_bar(int len) { setU("CLOCK:BAR", stepU((len < 1 ? 1 : (len > 32 ? 32 : len)) - 1, 32)); }
+EXPORT(sg_set_bar) void sg_set_bar(int len) { setStep(P_CLOCK_BAR, (len < 1 ? 1 : (len > 32 ? 32 : len)) - 1, 32); }
 // The page LFO is LFO 1: tempo-synced, unipolar, DEPTH = amount, phase 0 at transport start. Its jack is MOD:LFO 1.
 EXPORT(sg_set_lfo) void sg_set_lfo(double cyclesPerBeat, double phase, int shape, double amount) {
   int div = 0;
@@ -384,6 +402,33 @@ EXPORT(sg_set_lfo) void sg_set_lfo(double cyclesPerBeat, double phase, int shape
   setU("LFO 1:MODE", stepU(mod::M_FREE_RUN, 3));
   setU("LFO 1:DEPTH", amount);
 }
+// One page LFO control at a time, so the rest of a kit's LFO 1 (POL, MODE, SLEW, ...) stays as loaded:
+// 0 division (cycles per beat, nearest of the 30, turns SYNC on), 1 shape (page order SINE TRI SAW SQUARE S+H),
+// 2 phase (of a cycle), 3 amount (DEPTH).
+EXPORT(sg_set_lfo_field) void sg_set_lfo_field(int field, double v) {
+  if (field == 0) {
+    int div = 0;
+    double best = 1e9;
+    const double beats = v > 0 ? 1.0 / v : 32.0;
+    for (int i = 0; i < kLfoDivCount; ++i) {
+      const double d = std::fabs(std::log2(kLfoDivBeats[i] / beats));
+      if (d < best) {
+        best = d;
+        div = i;
+      }
+    }
+    setU("LFO 1:SYNC", 1.0);
+    setU("LFO 1:DIV", stepU(div, kLfoDivCount));
+  } else if (field == 1) {
+    static const int kShape[5] = {mod::L_SIN, mod::L_TRI, mod::L_RAMP, mod::L_SQR, mod::L_SH};
+    const int sh = static_cast<int>(v);
+    setU("LFO 1:SHAPE", stepU(kShape[sh < 0 || sh > 4 ? 0 : sh], 6));
+  } else if (field == 2) {
+    setU("LFO 1:PHASE", v);
+  } else if (field == 3) {
+    setU("LFO 1:DEPTH", v);
+  }
+}
 EXPORT(sg_lfo_volts) double sg_lfo_volts() { return static_cast<double>(gE->portValues()[findPort("MOD:LFO 1")]); }
 EXPORT(sg_lfo_phase) double sg_lfo_phase() { return gE->modulation().lfo[0].instanceFor(-1).ph; }
 
@@ -392,9 +437,9 @@ EXPORT(sg_set_track) void sg_set_track(int v, int len, int shuffle, int shiftCc,
   if (t < 0) return;
   Track& tr = gPattern.tracks[t];
   tr.len = len < 1 ? 1 : (len > kMaxSteps ? kMaxSteps : len);
-  tr.swing = swingFromShuffle(shuffle < 0 ? 0 : (shuffle > 15 ? 15 : shuffle));  // §10.2
-  tr.shift = shiftCc / 127.0;
-  setVoiceU(t, "MUTE", mute ? 1.0 : 0.0);
+  if (shuffle != sg_get_track(v, 1)) tr.swing = swingFromShuffle(shuffle < 0 ? 0 : (shuffle > 15 ? 15 : shuffle));  // §10.2
+  if (shiftCc != sg_get_track(v, 2)) tr.shift = shiftCc / 127.0;
+  if ((mute != 0) != (sg_get_track(v, 3) != 0)) setVoiceU(t, "MUTE", mute ? 1.0 : 0.0);
 }
 // accent 0..2 → 1..3; flam −1 none / index 0..15; bend −1 none / CC → 12·(2u − 1) semitones.
 EXPORT(sg_set_drum) void sg_set_drum(int v, int s, int on, int accent, int flam, int bend) {
@@ -404,7 +449,7 @@ EXPORT(sg_set_drum) void sg_set_drum(int v, int s, int on, int accent, int flam,
   st.on = on != 0;
   st.acc = static_cast<std::uint8_t>(accent < 0 ? 1 : (accent > 2 ? 3 : accent + 1));
   st.flam = static_cast<std::uint8_t>(flam >= 0 ? flam + 1 : 0);
-  st.bend = bend >= 0 ? static_cast<float>(12.0 * (2.0 * bend / 127.0 - 1.0)) : 0.0f;
+  if (bend != sg_get_step(v, s, 3)) st.bend = bend >= 0 ? static_cast<float>(12.0 * (2.0 * bend / 127.0 - 1.0)) : 0.0f;
 }
 EXPORT(sg_set_note) void sg_set_note(int v, int s, int note, int accent, int tie) {
   const int t = voiceOf(v);
@@ -483,6 +528,56 @@ EXPORT(sg_factory_kit) int sg_factory_kit(int i) {
   for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
   return 1;
 }
+// ---- full documents (engine/patch.h, the plugin's state format): the page saves and loads patterns through these
+namespace {
+char* gDoc = nullptr;  // the last document written
+unsigned long gDocCap = 0, gDocLen = 0;
+char* gIn = nullptr;  // a document from the page
+unsigned long gInCap = 0;
+}  // namespace
+// The engine's whole state as patch JSON (full = every parameter), what the plugin saves; pointer to the text.
+EXPORT(sg_state_json) const char* sg_state_json(int full) {
+  capturePatch(*gE, gLoad);
+  for (;;) {
+    if (!gDoc) {
+      gDocCap = gDocCap ? gDocCap : 65536;
+      gDoc = new char[gDocCap];
+    }
+    patchjson::BufOut o(gDoc, gDocCap);
+    writePatchJson(o, gLoad, full != 0);
+    if (o.ok) {
+      gDocLen = o.n;
+      return gDoc;
+    }
+    delete[] gDoc;
+    gDoc = nullptr;
+    gDocCap *= 2;
+  }
+}
+EXPORT(sg_state_json_len) int sg_state_json_len() { return static_cast<int>(gDocLen); }
+// A buffer for n bytes of document text from the page (then sg_patch_load(n)).
+EXPORT(sg_doc_buf) char* sg_doc_buf(int n) {
+  const unsigned long need = static_cast<unsigned long>(n < 0 ? 0 : n) + 1;
+  if (need > gInCap) {
+    delete[] gIn;
+    gInCap = need < 65536 ? 65536 : need;
+    gIn = new char[gInCap];
+  }
+  return gIn;
+}
+// Loads the document in sg_doc_buf like a factory program: parameters, mod rows, cables and pattern (1 = read).
+EXPORT(sg_patch_load) int sg_patch_load(int n) {
+  if (!gIn || n < 0 || static_cast<unsigned long>(n) >= gInCap) return 0;
+  gIn[n] = 0;
+  if (!parsePatch(gIn, gLoad)) return 0;
+  applyPatch(gLoad, *gE);
+  gPattern = gLoad.pattern;
+  for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
+  return 1;
+}
+EXPORT(sg_param_steps) int sg_param_steps(int i) { return i >= 0 && i < kParamCount ? kParams[i].steps : 0; }
+EXPORT(sg_param_choices) const char* sg_param_choices(int i) { return i >= 0 && i < kParamCount ? kParams[i].choices : ""; }
+
 // A chained pattern starts on counter rot: every track's steps rotate so its step 0 plays on that counter.
 EXPORT(sg_rotate) void sg_rotate(double rot) {
   for (auto& tr : gPattern.tracks) {

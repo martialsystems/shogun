@@ -37,6 +37,11 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   // Panel-unit position of a jack (probe / tests); returns false when the id is not on the ROUTE tab.
   bool jackPosition(int port, juce::Point<float>& out) const;
   static int opCount();
+  // Test hooks (probe): press the nth control (0 = first) on the current tab whose binding is `bind`, as a click at its
+  // centre (right button / shift optional), and read the text a bound op draws now.
+  bool pressBind(const char* bind, bool right = false, bool shift = false, int nth = 0);
+  juce::String boundText(const char* bind);
+  int armedSource() const { return armedSrc_; }
 
  private:
   struct Bound {
@@ -51,8 +56,11 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   void paintCables(juce::Graphics& g);
   void paintMatrix(juce::Graphics& g, const LayoutOp& o);
   int findBound(juce::Point<float> p) const;  // index into bounds_, or −1
-  void click(int bi, const juce::MouseEvent& e, juce::Point<float> p);
-  void matrixClick(const LayoutOp& o, juce::Point<float> p, const juce::MouseEvent& e);
+  void click(int bi, juce::ModifierKeys mods, juce::Point<float> p);
+  void matrixClick(const LayoutOp& o, juce::Point<float> p, juce::ModifierKeys mods);
+  void showProgramMenu();
+  bool assignTo(int pid);
+  int uiScalePercent() const;
   int selWaveVoice() const;
   int stepParamU(const Bound& b, float& u) const;
   void setStepField(const Bound& b, float u);
@@ -83,6 +91,9 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   float vPeak_[shogun::kVoices] = {};
   std::array<shogun::Step, shogun::kMaxSteps> clipboard_{};
   int clipLen_ = 0;
+  int armedSrc_ = 0;   // ASSIGN: the armed mod source (mod::SRC_*), 0 = none
+  int menuOpen_ = 0;   // async popup menus still open (their callbacks settle the undo step)
+  juce::String lastText_;  // the text paintOp drew last (boundText)
 };
 
 class ShogunAudioProcessorEditor : public juce::AudioProcessorEditor {

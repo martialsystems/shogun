@@ -12,8 +12,8 @@
 //
 // Step fields left out take the defaults above (on true, acc 2, prob 1, micro 0, flam 0, ratchet 1, bend 0, note 48,
 // tie false). Parameters are host floats in the plugin, so applyPatch() rounds each u through float: the engine,
-// the plugin and the web page then load bit-identical values. Reading needs no libc (the wasm build); writing
-// (patchToJson) is native only.
+// the plugin and the web page then load bit-identical values. Neither reading nor writing (writePatchJson) needs
+// libc: the wasm page saves full documents too. patchToJson() is the native std::string form.
 
 #include <cstdint>
 #include <cstring>
@@ -452,17 +452,310 @@ inline void capturePatch(const Engine& e, Patch& pt) {
   pt.pattern = e.pattern();
 }
 
-#ifndef SHOGUN_NO_FORMAT
 namespace patchjson {
-inline void put(std::string& s, const char* t) { s += t; }
-inline void putStr(std::string& s, const char* t) {
-  s += '"';
-  for (; *t; ++t) {
-    if (*t == '"' || *t == '\\') s += '\\';
-    s += *t;
+// Number text without libc (the wasm build writes documents too). fmtG() gives the bytes of snprintf("%.*g") and
+// shortestNum()/shortestFloat() the text putNum()/putFloat() pick with snprintf and strtod: the shortest %.*g that
+// reads back (correctly rounded, ties to even) to the same double, or through double to the same float. Exact
+// arithmetic on the binary value (a small bignum), so no rounding of its own; tests/factory.cpp checks it against libc.
+namespace exact {
+struct Big {
+  std::uint32_t w[100];
+  int n = 1;
+};
+inline void mulSmall(Big& b, std::uint32_t m) {
+  std::uint64_t c = 0;
+  for (int i = 0; i < b.n; ++i) {
+    const std::uint64_t t = static_cast<std::uint64_t>(b.w[i]) * m + c;
+    b.w[i] = static_cast<std::uint32_t>(t);
+    c = t >> 32;
   }
-  s += '"';
+  if (c) b.w[b.n++] = static_cast<std::uint32_t>(c);
 }
+inline std::uint32_t divSmall(Big& b, std::uint32_t d) {
+  std::uint64_t r = 0;
+  for (int i = b.n - 1; i >= 0; --i) {
+    const std::uint64_t t = (r << 32) | b.w[i];
+    b.w[i] = static_cast<std::uint32_t>(t / d);
+    r = t % d;
+  }
+  while (b.n > 1 && b.w[b.n - 1] == 0) --b.n;
+  return static_cast<std::uint32_t>(r);
+}
+// A positive decimal: digits d[0..len) (d[0] != '0', no trailing zeros), value 0.d1d2... shifted so d[0] sits at 10^x.
+struct Dec {
+  char d[800];
+  int len = 0;
+  int x = 0;
+};
+// The exact decimal value of a * 2^e (a > 0): every dyadic number has a finite expansion.
+inline void dyadic(std::uint64_t a, int e, Dec& out) {
+  Big b;
+  b.w[0] = static_cast<std::uint32_t>(a);
+  b.w[1] = static_cast<std::uint32_t>(a >> 32);
+  b.n = b.w[1] ? 2 : 1;
+  int scale = 0;
+  if (e >= 0) {
+    for (int k = e; k > 0; k -= 31) mulSmall(b, 1u << (k < 31 ? k : 31));
+  } else {
+    for (int k = -e; k > 0; k -= 13) {
+      std::uint32_t m = 1;
+      for (int j = 0; j < (k < 13 ? k : 13); ++j) m *= 5;
+      mulSmall(b, m);
+    }
+    scale = e;  // a * 5^-e * 10^e
+  }
+  char rev[820];
+  int n = 0;
+  while (b.n > 1 || b.w[0] != 0) {
+    std::uint32_t r = divSmall(b, 1000000000u);
+    const bool last = b.n == 1 && b.w[0] == 0;
+    for (int j = 0; j < 9 && (!last || r); ++j) {
+      rev[n++] = static_cast<char>('0' + r % 10);
+      r /= 10;
+    }
+  }
+  int lo = 0;
+  while (lo < n && rev[lo] == '0') ++lo;  // trailing zeros of the number
+  out.len = 0;
+  for (int i = n - 1; i >= lo; --i) out.d[out.len++] = rev[i];
+  out.x = n - 1 + scale;
+}
+// -1, 0, 1: a < b, a == b, a > b (positive decimals)
+inline int cmp(const Dec& a, const Dec& b) {
+  if (a.x != b.x) return a.x < b.x ? -1 : 1;
+  const int n = a.len > b.len ? a.len : b.len;
+  for (int i = 0; i < n; ++i) {
+    const char ca = i < a.len ? a.d[i] : '0', cb = i < b.len ? b.d[i] : '0';
+    if (ca != cb) return ca < cb ? -1 : 1;
+  }
+  return 0;
+}
+// v rounded to p significant digits (ties to even, as printf does on the exact value)
+inline void roundTo(const Dec& v, int p, Dec& out) {
+  out.x = v.x;
+  out.len = p;
+  for (int i = 0; i < p; ++i) out.d[i] = i < v.len ? v.d[i] : '0';
+  if (v.len > p) {
+    const char c = v.d[p];
+    const bool up = c > '5' || (c == '5' && (v.len > p + 1 || ((out.d[p - 1] - '0') & 1)));
+    if (up) {
+      int i = p - 1;
+      while (i >= 0 && out.d[i] == '9') out.d[i--] = '0';
+      if (i >= 0) {
+        ++out.d[i];
+      } else {
+        out.d[0] = '1';
+        for (int j = 1; j < p; ++j) out.d[j] = '0';
+        ++out.x;
+      }
+    }
+  }
+  while (out.len > 1 && out.d[out.len - 1] == '0') --out.len;
+}
+// %.*g text of a rounded decimal r (at most p digits) with sign
+inline int gText(char* o, bool neg, const Dec& r, int p) {
+  int n = 0;
+  if (neg) o[n++] = '-';
+  if (r.x < -4 || r.x >= p) {
+    o[n++] = r.d[0];
+    if (r.len > 1) {
+      o[n++] = '.';
+      for (int i = 1; i < r.len; ++i) o[n++] = r.d[i];
+    }
+    o[n++] = 'e';
+    o[n++] = r.x < 0 ? '-' : '+';
+    int e = r.x < 0 ? -r.x : r.x;
+    char t[8];
+    int k = 0;
+    do {
+      t[k++] = static_cast<char>('0' + e % 10);
+      e /= 10;
+    } while (e);
+    if (k < 2) t[k++] = '0';
+    while (k) o[n++] = t[--k];
+  } else if (r.x >= 0) {
+    for (int i = 0; i <= r.x; ++i) o[n++] = i < r.len ? r.d[i] : '0';
+    if (r.len > r.x + 1) {
+      o[n++] = '.';
+      for (int i = r.x + 1; i < r.len; ++i) o[n++] = r.d[i];
+    }
+  } else {
+    o[n++] = '0';
+    o[n++] = '.';
+    for (int i = 0; i < -r.x - 1; ++i) o[n++] = '0';
+    for (int i = 0; i < r.len; ++i) o[n++] = r.d[i];
+  }
+  o[n] = 0;
+  return n;
+}
+inline std::uint64_t bitsOf(double v) {
+  std::uint64_t b;
+  std::memcpy(&b, &v, sizeof b);
+  return b;
+}
+inline std::uint32_t bitsOf(float v) {
+  std::uint32_t b;
+  std::memcpy(&b, &v, sizeof b);
+  return b;
+}
+// The interval of reals that round to the binary value m * 2^q (mantissa bits mb, smallest exponent field 1):
+// (lo, hi), both ends included when m is even.
+inline void bounds(std::uint64_t m, int q, bool lowGapHalf, Dec& lo, Dec& hi) {
+  if (lowGapHalf) dyadic(4 * m - 1, q - 2, lo);
+  else dyadic(2 * m - 1, q - 1, lo);
+  dyadic(2 * m + 1, q - 1, hi);
+}
+}  // namespace exact
+
+// snprintf(o, ..., "%.*g", p, v) for finite v (o: 40 bytes)
+inline int fmtG(char* o, double v, int p) {
+  if (p < 1) p = 1;
+  const std::uint64_t b = exact::bitsOf(v);
+  const bool neg = (b >> 63) != 0;
+  const int ef = static_cast<int>((b >> 52) & 0x7ff);
+  const std::uint64_t f = b & ((std::uint64_t{1} << 52) - 1);
+  if (ef == 0 && f == 0) {
+    int n = 0;
+    if (neg) o[n++] = '-';
+    o[n++] = '0';
+    o[n] = 0;
+    return n;
+  }
+  exact::Dec d, r;
+  exact::dyadic(ef ? f | (std::uint64_t{1} << 52) : f, ef ? ef - 1075 : -1074, d);
+  exact::roundTo(d, p, r);
+  return exact::gText(o, neg, r, p);
+}
+// the text putNum() writes: shortest %.*g that strtod reads back to v
+inline void shortestNum(char* o, double v) {
+  const std::uint64_t b = exact::bitsOf(v);
+  const int ef = static_cast<int>((b >> 52) & 0x7ff);
+  const std::uint64_t f = b & ((std::uint64_t{1} << 52) - 1);
+  if (ef == 0 && f == 0) {
+    fmtG(o, v, 1);
+    return;
+  }
+  const std::uint64_t m = ef ? f | (std::uint64_t{1} << 52) : f;
+  const int q = ef ? ef - 1075 : -1074;
+  exact::Dec d, lo, hi, r;
+  exact::dyadic(m, q, d);
+  exact::bounds(m, q, f == 0 && ef > 1, lo, hi);
+  const bool even = (m & 1) == 0;
+  for (int p = 1; p <= 17; ++p) {
+    exact::roundTo(d, p, r);
+    const int a = exact::cmp(r, lo), c = exact::cmp(r, hi);
+    if (p == 17 || ((a > 0 || (a == 0 && even)) && (c < 0 || (c == 0 && even)))) {
+      exact::gText(o, (b >> 63) != 0, r, p);
+      return;
+    }
+  }
+}
+// the text putFloat() writes: shortest %.*g that strtod reads back to a double that rounds to v
+inline void shortestFloat(char* o, float v) {
+  const std::uint32_t b = exact::bitsOf(v);
+  const int ef = static_cast<int>((b >> 23) & 0xff);
+  const std::uint32_t f = b & ((1u << 23) - 1);
+  if (ef == 0 && f == 0) {
+    fmtG(o, static_cast<double>(v), 1);
+    return;
+  }
+  const std::uint64_t m = ef ? f | (1u << 23) : f;
+  const int q = ef ? ef - 150 : -149;
+  // The float's rounding interval ends B are doubles; a decimal reads to B itself within half a double ulp of B, and
+  // B then rounds to the even float of the two.
+  struct End {
+    exact::Dec below, above;  // the decimals that read to exactly B: [below, above]
+  };
+  auto endOf = [](std::uint64_t bm, int bq, End& e) {
+    while (bm < (std::uint64_t{1} << 52)) {
+      bm <<= 1;
+      --bq;
+    }
+    exact::bounds(bm, bq, bm == (std::uint64_t{1} << 52), e.below, e.above);
+  };
+  static End lo, hi;  // static: large for the wasm stack
+  if (f == 0 && ef > 1) endOf(4 * m - 1, q - 2, lo);
+  else endOf(2 * m - 1, q - 1, lo);
+  endOf(2 * m + 1, q - 1, hi);
+  exact::Dec d, r;
+  exact::dyadic(m, q, d);
+  const bool even = (m & 1) == 0;
+  for (int p = 1; p <= 9; ++p) {
+    exact::roundTo(d, p, r);
+    // strictly between the two ends: reads to a double inside the interval; on an end: the tie goes to the even float
+    const bool inside = exact::cmp(r, lo.above) > 0 && exact::cmp(r, hi.below) < 0;
+    const bool onEnd = (exact::cmp(r, lo.below) >= 0 && exact::cmp(r, lo.above) <= 0) ||
+                       (exact::cmp(r, hi.below) >= 0 && exact::cmp(r, hi.above) <= 0);
+    if (p == 9 || inside || (onEnd && even)) {
+      exact::gText(o, (b >> 31) != 0, r, p);
+      return;
+    }
+  }
+}
+inline void intText(char* o, long v) {
+  char t[24];
+  int k = 0;
+  unsigned long u = v < 0 ? 0ul - static_cast<unsigned long>(v) : static_cast<unsigned long>(v);
+  do {
+    t[k++] = static_cast<char>('0' + u % 10);
+    u /= 10;
+  } while (u);
+  int n = 0;
+  if (v < 0) o[n++] = '-';
+  while (k) o[n++] = t[--k];
+  o[n] = 0;
+}
+
+// The writer, on any sink with put(const char*), put(char) and num(double) / flt(float) (the number text).
+template <class Out>
+void putStr(Out& s, const char* a, const char* b = nullptr, const char* c = nullptr) {
+  s.put('"');
+  const char* const parts[3] = {a, b, c};
+  for (const char* t : parts)
+    for (; t && *t; ++t) {
+      if (*t == '"' || *t == '\\') s.put('\\');
+      s.put(*t);
+    }
+  s.put('"');
+}
+template <class Out>
+void putInt(Out& s, long v) {
+  char b[24];
+  intText(b, v);
+  s.put(b);
+}
+// A sink into a caller's buffer (no libc): text up to cap - 1 bytes, then ok = false.
+struct BufOut {
+  char* p;
+  unsigned long cap;
+  unsigned long n = 0;
+  bool ok = true;
+  BufOut(char* buf, unsigned long size) : p(buf), cap(size) {
+    if (cap) p[0] = 0;
+  }
+  void put(char c) {
+    if (n + 1 >= cap) {
+      ok = false;
+      return;
+    }
+    p[n++] = c;
+    p[n] = 0;
+  }
+  void put(const char* t) {
+    while (*t) put(*t++);
+  }
+  void num(double v) {
+    char b[40];
+    shortestNum(b, v);
+    put(b);
+  }
+  void flt(float v) {
+    char b[40];
+    shortestFloat(b, v);
+    put(b);
+  }
+};
+#ifndef SHOGUN_NO_FORMAT
 inline void putNum(std::string& s, double v) {  // shortest text that reads back to the same double
   char b[40];
   for (int prec = 1; prec <= 17; ++prec) {
@@ -479,145 +772,152 @@ inline void putFloat(std::string& s, float v) {  // shortest text that reads bac
   }
   s += b;
 }
-inline void putInt(std::string& s, long v) {
-  char b[24];
-  std::snprintf(b, sizeof b, "%ld", v);
-  s += b;
-}
+// The native sink: std::string, numbers by libc.
+struct StringOut {
+  std::string s;
+  void put(char c) { s += c; }
+  void put(const char* t) { s += t; }
+  void num(double v) { putNum(s, v); }
+  void flt(float v) { putFloat(s, v); }
+};
+#endif
 }  // namespace patchjson
 
 // The patch as JSON. full = every parameter (a saved state); otherwise only those that differ from INIT and only
-// non-default step fields (the factory bank style). Deterministic: the same patch gives the same bytes.
-inline std::string patchToJson(const Patch& pt, bool full) {
-  using namespace patchjson;
-  std::string s;
-  put(s, "{\"format\": \"shogun-patch\", \"version\": 2, \"name\": ");
+// non-default step fields (the factory bank style). Deterministic: the same patch gives the same bytes, on either
+// sink (libc numbers natively, the exact formatter in the wasm build).
+template <class Out>
+void writePatchJson(Out& s, const Patch& pt, bool full) {
+  using patchjson::putInt;
+  using patchjson::putStr;
+  s.put("{\"format\": \"shogun-patch\", \"version\": 2, \"name\": ");
   putStr(s, pt.name);
-  put(s, ",\n \"params\": {");
+  s.put(",\n \"params\": {");
   bool first = true;
   for (int i = 0; i < kParamCount; ++i) {
     if (!full && dsp::exactEq(static_cast<float>(pt.u[i]), kParams[i].def)) continue;
-    put(s, first ? "\n  " : ",\n  ");
+    s.put(first ? "\n  " : ",\n  ");
     first = false;
     putStr(s, kParams[i].id);
-    put(s, ": ");
-    putFloat(s, static_cast<float>(pt.u[i]));
+    s.put(": ");
+    s.flt(static_cast<float>(pt.u[i]));
   }
-  put(s, "},\n \"mod\": [");
+  s.put("},\n \"mod\": [");
   first = true;
   for (const mod::Row& r : pt.rows) {
     if (r.src == mod::SRC_NONE || r.dst < 0) continue;
-    put(s, first ? "\n  {\"src\": " : ",\n  {\"src\": ");
+    s.put(first ? "\n  {\"src\": " : ",\n  {\"src\": ");
     first = false;
-    std::string src = kStateSrcNames[r.src];
-    if (mod::perVoiceSource(r.src) && r.srcVoice >= 0) src = src + "@" + kVoiceNames[r.srcVoice];
-    putStr(s, src.c_str());
-    put(s, ", \"dst\": ");
+    if (mod::perVoiceSource(r.src) && r.srcVoice >= 0) putStr(s, kStateSrcNames[r.src], "@", kVoiceNames[r.srcVoice]);
+    else putStr(s, kStateSrcNames[r.src]);
+    s.put(", \"dst\": ");
     putStr(s, kParams[r.dst].id);
-    put(s, ", \"depth\": ");
-    putNum(s, r.depth);
-    put(s, ", \"via\": ");
-    if (r.via == mod::SRC_NONE) {
-      put(s, "null");
-    } else {
-      std::string via = kStateSrcNames[r.via];
-      if (mod::perVoiceSource(r.via) && r.viaVoice >= 0) via = via + "@" + kVoiceNames[r.viaVoice];
-      putStr(s, via.c_str());
-    }
-    put(s, ", \"curve\": ");
+    s.put(", \"depth\": ");
+    s.num(r.depth);
+    s.put(", \"via\": ");
+    if (r.via == mod::SRC_NONE) s.put("null");
+    else if (mod::perVoiceSource(r.via) && r.viaVoice >= 0) putStr(s, kStateSrcNames[r.via], "@", kVoiceNames[r.viaVoice]);
+    else putStr(s, kStateSrcNames[r.via]);
+    s.put(", \"curve\": ");
     putStr(s, kStateCurveNames[r.curve & 3]);
-    put(s, r.on ? ", \"on\": true}" : ", \"on\": false}");
+    s.put(r.on ? ", \"on\": true}" : ", \"on\": false}");
   }
-  put(s, "],\n \"cables\": [");
+  s.put("],\n \"cables\": [");
   for (int i = 0; i < pt.nCables; ++i) {
-    put(s, i ? ", [" : "[");
-    putStr(s, (std::string("SHOGUN/") + kPortTable[pt.cableFrom[i]].id).c_str());
-    put(s, ", ");
-    putStr(s, (std::string("SHOGUN/") + kPortTable[pt.cableTo[i]].id).c_str());
-    put(s, "]");
+    s.put(i ? ", [" : "[");
+    putStr(s, "SHOGUN/", kPortTable[pt.cableFrom[i]].id);
+    s.put(", ");
+    putStr(s, "SHOGUN/", kPortTable[pt.cableTo[i]].id);
+    s.put("]");
   }
-  put(s, "],\n \"cvAmt\": {");
+  s.put("],\n \"cvAmt\": {");
   first = true;
   for (int i = 0; i < kPorts; ++i)
     if (kPortTable[i].dir == PortDir::In && !dsp::exactEq(pt.cvAmt[i], 1.0)) {
-      put(s, first ? "" : ", ");
+      s.put(first ? "" : ", ");
       first = false;
       putStr(s, kPortTable[i].id);
-      put(s, ": ");
-      putNum(s, pt.cvAmt[i]);
+      s.put(": ");
+      s.num(pt.cvAmt[i]);
     }
-  put(s, "},\n \"inLaw\": {");
+  s.put("},\n \"inLaw\": {");
   first = true;
   for (int i = 0; i < kPorts; ++i)
     if (pt.inLaw[i] != 0) {
-      put(s, first ? "" : ", ");
+      s.put(first ? "" : ", ");
       first = false;
       putStr(s, kPortTable[i].id);
-      put(s, ": ");
+      s.put(": ");
       putInt(s, pt.inLaw[i]);
     }
-  put(s, "},\n \"seq\": {\"pattern\": ");
+  s.put("},\n \"seq\": {\"pattern\": ");
   putStr(s, pt.pattern.name);
-  put(s, ", \"seed\": ");
+  s.put(", \"seed\": ");
   putInt(s, static_cast<long>(pt.pattern.seed));
-  put(s, ", \"tracks\": [");
+  s.put(", \"tracks\": [");
   const Step def;
   const Track defT;
   for (int t = 0; t < 16; ++t) {
     const Track& tr = pt.pattern.tracks[t];
-    put(s, t ? ",\n  {\"id\": " : "\n  {\"id\": ");
+    s.put(t ? ",\n  {\"id\": " : "\n  {\"id\": ");
     putStr(s, kVoiceNames[t]);
-    put(s, ", \"len\": ");
+    s.put(", \"len\": ");
     putInt(s, tr.len);
     if (full || tr.scale >= 0) {
-      put(s, ", \"scale\": ");
-      if (tr.scale < 0) put(s, "null");
+      s.put(", \"scale\": ");
+      if (tr.scale < 0) s.put("null");
       else putStr(s, kStateScaleNames[tr.scale & 3]);
     }
     if (full || tr.swing >= 0.0) {
-      put(s, ", \"swing\": ");
-      if (tr.swing < 0.0) put(s, "null");
-      else putNum(s, tr.swing);
+      s.put(", \"swing\": ");
+      if (tr.swing < 0.0) s.put("null");
+      else s.num(tr.swing);
     }
     if (full || !dsp::exactEq(tr.shift, defT.shift)) {
-      put(s, ", \"shift\": ");
-      putNum(s, tr.shift);
+      s.put(", \"shift\": ");
+      s.num(tr.shift);
     }
-    put(s, ", \"steps\": [");
+    s.put(", \"steps\": [");
     bool firstStep = true;
     for (int i = 0; i < kMaxSteps; ++i) {
       const Step& st = tr.steps[i];
       if (!st.on && st.nLocks == 0) continue;
-      put(s, firstStep ? "\n   {\"i\": " : ",\n   {\"i\": ");
+      s.put(firstStep ? "\n   {\"i\": " : ",\n   {\"i\": ");
       firstStep = false;
       putInt(s, i);
-      if (full || !st.on) put(s, st.on ? ", \"on\": true" : ", \"on\": false");
-      if (full || st.acc != def.acc) put(s, ", \"acc\": "), putInt(s, st.acc);
-      if (full || !dsp::exactEq(st.prob, def.prob)) put(s, ", \"prob\": "), putFloat(s, st.prob);
-      if (full || !dsp::exactEq(st.micro, def.micro)) put(s, ", \"micro\": "), putFloat(s, st.micro);
-      if (full || st.flam != def.flam) put(s, ", \"flam\": "), putInt(s, st.flam);
-      if (full || st.ratchet != def.ratchet) put(s, ", \"ratchet\": "), putInt(s, st.ratchet);
-      if (full || !dsp::exactEq(st.bend, def.bend)) put(s, ", \"bend\": "), putFloat(s, st.bend);
+      if (full || !st.on) s.put(st.on ? ", \"on\": true" : ", \"on\": false");
+      if (full || st.acc != def.acc) s.put(", \"acc\": "), putInt(s, st.acc);
+      if (full || !dsp::exactEq(st.prob, def.prob)) s.put(", \"prob\": "), s.flt(st.prob);
+      if (full || !dsp::exactEq(st.micro, def.micro)) s.put(", \"micro\": "), s.flt(st.micro);
+      if (full || st.flam != def.flam) s.put(", \"flam\": "), putInt(s, st.flam);
+      if (full || st.ratchet != def.ratchet) s.put(", \"ratchet\": "), putInt(s, st.ratchet);
+      if (full || !dsp::exactEq(st.bend, def.bend)) s.put(", \"bend\": "), s.flt(st.bend);
       if (!isDrum(t)) {
-        if (full || st.note != def.note) put(s, ", \"note\": "), putInt(s, st.note);
-        if (full || st.tie) put(s, st.tie ? ", \"tie\": true" : ", \"tie\": false");
+        if (full || st.note != def.note) s.put(", \"note\": "), putInt(s, st.note);
+        if (full || st.tie) s.put(st.tie ? ", \"tie\": true" : ", \"tie\": false");
       }
       if (full || st.nLocks) {
-        put(s, ", \"locks\": {");
+        s.put(", \"locks\": {");
         for (int k = 0; k < st.nLocks; ++k) {
-          put(s, k ? ", " : "");
+          s.put(k ? ", " : "");
           putStr(s, kParams[st.locks[k].param].id);
-          put(s, ": ");
-          putFloat(s, st.locks[k].u);
+          s.put(": ");
+          s.flt(st.locks[k].u);
         }
-        put(s, "}");
+        s.put("}");
       }
-      put(s, "}");
+      s.put("}");
     }
-    put(s, "]}");
+    s.put("]}");
   }
-  put(s, "]}}\n");
-  return s;
+  s.put("]}}\n");
+}
+
+#ifndef SHOGUN_NO_FORMAT
+inline std::string patchToJson(const Patch& pt, bool full) {
+  patchjson::StringOut o;
+  writePatchJson(o, pt, full);
+  return o.s;
 }
 #endif
 

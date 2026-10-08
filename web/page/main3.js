@@ -32,7 +32,7 @@ function describe(c){const t=tracks[sel];
 function setP(id,v){v=clamp(v);if(STEPS[id]){const n=STEPS[id]-1;v=Math.round(v*n)/n}P[id]=v;syncLinked(id);const t=tracks[sel],st=t.steps[edit];
   if(MAP[id]){sendParam(id);if(!MAP[id].master){dirty=true;curKit.dirty=true}}
   else if(id.startsWith("CLOCK:")){sendClock();dirty=true}
-  else if(id.startsWith("LFO:"))sendLfo();
+  else if(id.startsWith("LFO:"))sendLfo(id);
   else if(id=="SEQ:LENGTH"){t.len=1+Math.round(v*31);if(edit>=t.len)edit=t.len-1;dirty=true;sendTrack(sel)}
   else if(id=="SEQ:SHUFFLE"){t.shuffle=Math.round(v*15);dirty=true;sendTrack(sel)}
   else if(id=="SEQ:SHIFT"){t.shift=Math.round(v*127);dirty=true;sendTrack(sel)}
@@ -107,6 +107,6 @@ $("tabs").onclick=e=>{const b=e.target.closest(".tab");if(b&&b.dataset.v!=view)s
 
 // ================= start =================
 function loop(){if(grab&&cables[grab.i]&&cables[grab.i].el)pins(cables[grab.i]);step();paint();drawAll();requestAnimationFrame(loop)}
-loadLfo();showZones();{const fb=factoryBank();FACT.push(...fb);FKITS.push(...fb.map(r=>({n:r.n,knobs:r.knobs,fx:r.fx})))}loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
+showZones();{const fb=factoryBank();FACT.push(...fb);FKITS.push(...fb.filter(r=>r.fx>0).map(r=>({n:r.n,knobs:r.knobs,fx:r.fx})))}loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
 try{navigator.permissions.query({name:"midi"}).then(r=>{if(r.state=="granted")midiInit(false)},()=>{})}catch(e){}drawAll();build();requestAnimationFrame(loop);
 window.SHOGUN={P,get tracks(){return tracks},get cables(){return cables},JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel},get bay(){return bay},setBay,get view(){return view},setView,get lfoV(){return lfoV}};

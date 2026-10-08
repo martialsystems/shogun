@@ -8,15 +8,19 @@ JIDAI_INC = -I$(JIDAI_COMMON)
 GRAPHFORGE_SRC ?= $(HOME)/graphforge/src
 JUCE_SRC ?= $(HOME)/jidai-collection/jidai-rack/build/fl-release/_deps/juce-src
 
-.PHONY: test clean asan law calib plugin plugin-linux probe-linux install-vst web web-levels strict strict-clang strict-gcc factory
+.PHONY: test panel-check clean asan law calib plugin plugin-linux probe-linux install-vst web web-levels strict strict-clang strict-gcc factory
 
-test: build/shogun_tests law
+test: build/shogun_tests panel-check law
 	./build/shogun_tests
+
+# No dead panel keys: every key / toggle / knob / jack in PanelLayout.inc is bound, handled and live.
+panel-check:
+	python3 scripts/check_panel_bindings.py
 
 law:
 	PYTHONPATH="$(GRAPHFORGE_SRC)" python3 forge/tests/test_switch_law.py
 
-plugin:
+plugin: panel-check
 	cmake -S plugin -B build/plugin -G "Unix Makefiles" \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
@@ -35,7 +39,7 @@ plugin-linux:
 		-DFETCHCONTENT_SOURCE_DIR_JUCE="$(JUCE_LINUX)"
 	cmake --build build/plugin-linux --target Shogun_VST3 ShogunProbe -j 8
 
-probe-linux: plugin-linux
+probe-linux: panel-check plugin-linux
 	./build/plugin-linux/ShogunProbe_artefacts/Release/ShogunProbe build/plugin-linux/tabs
 
 install-vst: plugin
@@ -94,6 +98,7 @@ build/web_parity: $(ENGINE_DEPS) web/wasm/shogun_web.cpp web/wasm/shogun_web.h t
 web: build/shogun.wasm build/web_parity
 	node web/test_wasm.mjs
 	node web/build_page.mjs
+	node web/test_page.mjs
 
 # Re-measure the LEVEL table in web/page/kits.js after a kit or engine change, then make web.
 web-levels: build/shogun.wasm
