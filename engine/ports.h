@@ -119,26 +119,75 @@ inline const PortDesc kPortTable[kPorts] = {
 // Shogun is a plain-volt device (§13.1, BushidoDevice.cpp L44).
 constexpr bool kPlainVoltGates = true;
 
-// Load-time alias table (§12.3). law: 0 = same volts, 1 = lin55 (V' = log2 V − 1.25), 2 = drum PITCH sim migration
-// (CV AMT = 1/12, 1 V/semitone → 1 V/oct). An alias may fan out to several new ids (to[] ends at nullptr).
-struct PortAlias {
+// Load-time aliases (§12.3). Every one-to-one rename between R6 ids is a row of the shared jidai::jcs::AliasTable
+// (jidai-common 1.1.1), which also carries its input law: LEAD/BASS:HZ/V -> :NOTE convert with
+// AliasLaw::Lin55ToVoct (V' = log2 V − 1.25, exactly jcs::pitch::lin55ToVoct). kPortRenames is only the list the table
+// is built from; resolve() is the shared one.
+struct PortRename {
+  const char* from;
+  const char* to;
+  jidai::jcs::AliasLaw law;
+};
+inline const PortRename kPortRenames[] = {
+    {"LEAD:HZ/V", "LEAD:NOTE", jidai::jcs::AliasLaw::Lin55ToVoct},
+    {"BASS:HZ/V", "BASS:NOTE", jidai::jcs::AliasLaw::Lin55ToVoct},
+    {"LEAD:HZ/V OUT", "LEAD:NOTE OUT", jidai::jcs::AliasLaw::Identity},
+    {"BASS:HZ/V OUT", "BASS:NOTE OUT", jidai::jcs::AliasLaw::Identity},
+    {"SD:SNAPPY", "SD:TONE", jidai::jcs::AliasLaw::Identity},
+    {"LFO:OUT", "MOD:LFO 1", jidai::jcs::AliasLaw::Identity},
+};
+
+// Shogun-side shim, only for what the shared table cannot hold (see TESTPLAN "jidai-common"):
+// 1. Fan-out. AliasTable maps one old id to ONE canonical id (add() refuses a second target for the same old id), but
+//    one v2.0 cable becomes several: HAT:DECAY -> CH + OH:DECAY, TOM:PITCH -> LTC/MTC/HTC:PITCH. TOM:PITCH also sets
+//    each new cable's CV AMT to 1/12 (1 V/semitone -> 1 V/oct, law 2): a cable amount the user can edit afterwards,
+//    not a hidden volts conversion.
+// 2. Legacy names that are not R6 ids. MIX L, MIX R and LFO OUT have no SECTION:, so isValidLocalId() is false and
+//    AliasTable::add() refuses them. They are matched whole, never split.
+struct PortFanOut {
   const char* from;
   const char* to[3];
-  int law;
+  int law;  // 0 same volts, 2 drum PITCH sim migration (CV AMT 1/12)
 };
-inline const PortAlias kPortAliases[] = {
-    {"MIX L", {"MIX:L", nullptr, nullptr}, 0},
-    {"MIX R", {"MIX:R", nullptr, nullptr}, 0},
-    {"LEAD:HZ/V", {"LEAD:NOTE", nullptr, nullptr}, 1},
-    {"BASS:HZ/V", {"BASS:NOTE", nullptr, nullptr}, 1},
-    {"LEAD:HZ/V OUT", {"LEAD:NOTE OUT", nullptr, nullptr}, 0},
-    {"BASS:HZ/V OUT", {"BASS:NOTE OUT", nullptr, nullptr}, 0},
-    {"SD:SNAPPY", {"SD:TONE", nullptr, nullptr}, 0},
+inline const PortFanOut kPortFanOuts[] = {
     {"HAT:DECAY", {"CH:DECAY", "OH:DECAY", nullptr}, 0},
     {"TOM:PITCH", {"LTC:PITCH", "MTC:PITCH", "HTC:PITCH"}, 2},
-    {"LFO:OUT", {"MOD:LFO 1", nullptr, nullptr}, 0},
-    {"LFO OUT", {"MOD:LFO 1", nullptr, nullptr}, 0},
 };
+struct PortLegacyName {
+  const char* from;
+  const char* to;
+};
+inline const PortLegacyName kPortLegacyNames[] = {
+    {"MIX L", "MIX:L"},
+    {"MIX R", "MIX:R"},
+    {"LFO OUT", "MOD:LFO 1"},
+};
+
+// The shared table, built once on first use (load time, never on the audio path).
+inline const jidai::jcs::AliasTable& portAliasTable() {
+  static const jidai::jcs::AliasTable* const table = [] {
+    auto* t = new jidai::jcs::AliasTable;
+    for (const PortRename& r : kPortRenames) t->add(r.from, r.to, r.law);
+    return t;
+  }();
+  return *table;
+}
+
+// Engine law code of a conversion (state files store it as "inLaw"): 0 same volts, 1 lin55.
+inline int aliasLawCode(const jidai::jcs::AliasConversion& c) {
+  return c.law == jidai::jcs::AliasLaw::Lin55ToVoct ? 1 : 0;
+}
+inline jidai::jcs::AliasConversion aliasConversion(int lawCode) {
+  return lawCode == 1 ? jidai::jcs::AliasConversion{jidai::jcs::AliasLaw::Lin55ToVoct} : jidai::jcs::AliasConversion{};
+}
+
+inline bool sameText(const char* a, const char* b) {
+  while (*a && *a == *b) {
+    ++a;
+    ++b;
+  }
+  return *a == 0 && *b == 0;
+}
 
 inline int findPort(const char* id) {
   for (int i = 0; i < kPorts; ++i) {
@@ -153,8 +202,9 @@ inline int findPort(const char* id) {
   return -1;
 }
 
-// Resolves a saved jack id: a current id, or an alias (§12.3). Returns the number of ports written to out[3]
-// (0 = unknown) and the alias law (0 same volts, 1 lin55, 2 drum PITCH AMT 1/12).
+// Resolves a saved jack id: a current id, or an alias (§12.3): the shared AliasTable first, then the fan-out and
+// legacy-name shim. Returns the number of ports written to out[3] (0 = unknown) and the alias law (0 same volts,
+// 1 lin55 = AliasLaw::Lin55ToVoct, 2 drum PITCH AMT 1/12).
 // Every SECTION:LABEL id is parsed with the shared JCS R6 parser (jidai::jcs::parseJackId). It accepts the global
 // form SHOGUN#N/SECTION:LABEL, the first-instance form SHOGUN/SECTION:LABEL and the bare form. The split is at the
 // first '/' before the first ':', so labels keep '/', spaces and digits (LEAD:V/OCT, LEAD:HZ/V OUT, MOD:LD GATE).
@@ -175,18 +225,23 @@ inline int resolvePort(const char* text, int out[3], int* law) {
     out[0] = p;
     return 1;
   }
-  for (const PortAlias& a : kPortAliases) {
-    const char* x = a.from;
-    const char* y = id;
-    while (*x && *x == *y) {
-      ++x;
-      ++y;
-    }
-    if (*x != 0 || *y != 0) continue;
+  const jidai::jcs::AliasTable::Resolved r = portAliasTable().resolve(local);
+  if (r.aliased) {
+    out[0] = findPort(r.id.c_str());
+    if (law) *law = aliasLawCode(r.conversion);
+    return out[0] >= 0 ? 1 : 0;
+  }
+  for (const PortFanOut& a : kPortFanOuts) {
+    if (!sameText(a.from, id)) continue;
     int n = 0;
     for (int i = 0; i < 3 && a.to[i]; ++i) out[n++] = findPort(a.to[i]);
     if (law) *law = a.law;
     return n;
+  }
+  for (const PortLegacyName& a : kPortLegacyNames) {
+    if (!sameText(a.from, id)) continue;
+    out[0] = findPort(a.to);
+    return 1;
   }
   return 0;
 }

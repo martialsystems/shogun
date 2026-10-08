@@ -2,6 +2,7 @@
 #include <cstring>
 #include <jidai/CableStandard.h>
 #include <string>
+#include <vector>
 
 #include "rig.h"
 
@@ -504,12 +505,23 @@ void testJackIdsJcsShared() {
   }
   int aliasIds = 0, aliasOk = 0, legacyOk = 0;
   std::string legacy;
-  for (const PortAlias& a : kPortAliases) {
+  // Every alias id: the shared-table renames, the fan-out shim and the legacy-name shim.
+  struct AliasRow {
+    const char* from;
+    const char* to[3];
+    int law;
+  };
+  std::vector<AliasRow> rows;
+  for (const PortRename& r : kPortRenames)
+    rows.push_back({r.from, {r.to, nullptr, nullptr}, r.law == jidai::jcs::AliasLaw::Lin55ToVoct ? 1 : 0});
+  for (const PortFanOut& f : kPortFanOuts) rows.push_back({f.from, {f.to[0], f.to[1], f.to[2]}, f.law});
+  for (const PortLegacyName& l : kPortLegacyNames) rows.push_back({l.from, {l.to, nullptr, nullptr}, 0});
+  for (const AliasRow& a : rows) {
     int out[3], law = -1;
     const int want = resolvePort(a.from, out, &law) > 0 ? out[0] : -2;
     ++aliasIds;
     if (parseJackId(a.from)) {
-      aliasOk += roundTrip(a.from, want) ? 1 : 0;
+      aliasOk += (roundTrip(a.from, want) && law == a.law) ? 1 : 0;
     } else {
       legacy += " [" + std::string(a.from) + "]";  // v2.0/2.1 names with no SECTION: (not R6 ids): matched whole
       legacyOk += (want >= 0 && law == a.law) ? 1 : 0;
@@ -519,6 +531,21 @@ void testJackIdsJcsShared() {
       aliasOk += roundTrip(a.to[k], findPort(a.to[k])) ? 1 : 0;
     }
   }
+  // The shared AliasTable holds every one-to-one rename with its law, and refuses exactly what the shim keeps.
+  const jidai::jcs::AliasTable& tab = portAliasTable();
+  const auto hz = tab.resolve("BASS:HZ/V");
+  const bool sharedOk = tab.size() == sizeof kPortRenames / sizeof kPortRenames[0] && hz.aliased &&
+                        hz.id == "BASS:NOTE" && hz.conversion.law == jidai::jcs::AliasLaw::Lin55ToVoct &&
+                        hz.conversion.convert(2.0) == -0.25 && tab.resolve("SD:SNAPPY").id == "SD:TONE";
+  jidai::jcs::AliasTable probe;
+  const bool fanRefused = probe.add("HAT:DECAY", "CH:DECAY") && !probe.add("HAT:DECAY", "OH:DECAY");
+  const bool legacyRefused = !probe.add("MIX L", "MIX:L") && !probe.add("LFO OUT", "MOD:LFO 1");
+  std::printf("%s: shared AliasTable %zu renames (BASS:HZ/V -> %s, Lin55ToVoct(2.0 V) = %.17g V); shim: fan-out %zu "
+              "(shared add of a 2nd target refused %d), legacy names %zu (shared add refused %d)\n",
+              T, tab.size(), hz.id.c_str(), hz.conversion.convert(2.0), sizeof kPortFanOuts / sizeof kPortFanOuts[0],
+              fanRefused ? 1 : 0, sizeof kPortLegacyNames / sizeof kPortLegacyNames[0], legacyRefused ? 1 : 0);
+  truth(T, "one-to-one renames live in the shared AliasTable with their laws", sharedOk);
+  truth(T, "shim only for what the shared table refuses", fanRefused && legacyRefused);
   int foreign[3];
   const bool refused = resolvePort("RONIN#1/BD1:TRIG", foreign, nullptr) == 0;
   int paramsOk = 0;

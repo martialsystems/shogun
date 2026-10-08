@@ -29,7 +29,7 @@ struct Bd1Voice : Voice {
     nzf.reset();
     eb.reset();
     drive.reset();
-    wave.ts.reset();
+    wave.reset();
     p = 0.0;
     last = lastNz = 0.0;
   }
@@ -45,7 +45,7 @@ struct Bd1Voice : Voice {
     d = 9.0 * ue[P_BD1_DRIVE];
     attack = ue[P_BD1_ATTACK];
     eb.setDecay(tauB, fsE_);
-    wave.control(ue);
+    wave.control(c);
   }
   double freqAt(double pe) const {
     return clampPitch(fTune * std::exp2((depth + bend) * pe / 12.0) * fMul, 35.0, 140.0);

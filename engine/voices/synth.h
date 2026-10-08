@@ -28,7 +28,7 @@ struct SynthVoice : Voice {
   // TUNE, A4, V/OCT and tolerance are applied only to the audible frequency.
   double noteTarget = 48.0, noteGlided = 48.0, aGlide = 0.0;
   double vOct = 0.0, cutoffOct = 0.0, acc = 0.0, accAmt = 0.5, a4 = 440.0;
-  double f = 130.81, fc = 1000.0, k = 0.0, R = 0.5, envAmt = 0.5, last = 0.0;
+  double f = jidai::jcs::pitch::kC3Hz, fc = 1000.0, k = 0.0, R = 0.5, envAmt = 0.5, last = 0.0;
   bool gate = false, sqr = false, glideNext = false, over = false;
   int oct = 0;
 
@@ -54,7 +54,8 @@ struct SynthVoice : Voice {
     noteGlided = noteGlided + (1.0 - aGlide) * (noteTarget - noteGlided);
     if (std::fabs(noteTarget - noteGlided) < 1e-9) noteGlided = noteTarget;
     const double tuneCents = 100.0 * bip(ue[pTune]);
-    f = a4 * std::exp2((noteGlided - 69.0) / 12.0 + tuneCents / 1200.0 + vOct) * c.tolPitch;
+    // JCS R4: note 48 = 0 V = C3 = the shared kC3Hz (exact 55·2^(15/12)) at A4 440; A4 scales it (R4.6 receiver side).
+    f = jidai::jcs::pitch::kC3Hz * (a4 / 440.0) * std::exp2((noteGlided - 48.0) / 12.0 + tuneCents / 1200.0 + vOct) * c.tolPitch;
     envAmt = ue[pEnv];
     accAmt = ue[pAcc];
     ef.setDecay(decayTau(ue[pDecay]) * c.tolTau, fsE_);

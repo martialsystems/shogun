@@ -46,7 +46,7 @@ struct TomVoice : Voice {
     r2.reset();
     e.reset();
     nzLp.reset();
-    wave.ts.reset();
+    wave.reset();
     b = nzEnv = 0.0;
     ring = 1.0;
     ringMode = false;
@@ -60,7 +60,7 @@ struct TomVoice : Voice {
     const bool full = ue[pDecay] >= 126.5 / 127.0;
     tauR = (full ? 20.0 : decayTau(ue[pDecay])) * c.tolTau;
     e.setDecay(tauR, fsE_);
-    wave.control(ue);
+    wave.control(c);
   }
   double freq() const { return clampPitch(fTune * std::exp2(bend * b / 12.0) * fMul, fMin, fMax); }
   void trigger(const VoiceCtx& c, const HitInfo& h) override {

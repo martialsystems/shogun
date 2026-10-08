@@ -32,7 +32,7 @@ struct Bd2Voice : Voice {
     cur = 0;
     env_.reset();
     click.reset();
-    wave.ts.reset();
+    wave.reset();
     b = 0.0;
     last = lastNz = 0.0;
   }
@@ -49,7 +49,7 @@ struct Bd2Voice : Voice {
       env_.setSustain(0.0);
       env_.setDecay(decayTau(ue[P_BD2_DECAY]) * c.tolTau, fsE_);
     }
-    wave.control(ue);
+    wave.control(c);
   }
   double freq() const { return clampPitch(fTune * std::exp2(bend * b / 12.0) * fMul, 45.0, 100.0); }
   void trigger(const VoiceCtx& c, const HitInfo& h) override {

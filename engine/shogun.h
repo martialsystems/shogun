@@ -62,8 +62,12 @@ class Engine {
   double param(int id) const { return target_[id]; }
   double effective(int id) const { return ue_[id]; }  // u_eff of the last processed sample (mod + CV + lock)
   void setCvAmt(int port, double amt) { cvAmt_[port] = amt; }
-  // Input law of a pitch jack loaded through an alias (§12.3): 0 = 1 V/oct, 1 = lin55 (old HZ/V cable).
-  void setInputLaw(int port, int law) { inLaw_[port] = static_cast<std::uint8_t>(law); }
+  // Input law of a pitch jack loaded through an alias (§12.3): 0 = 1 V/oct, 1 = lin55 (old HZ/V cable), applied with
+  // the shared jidai::jcs::AliasConversion (AliasLaw::Lin55ToVoct = jcs::pitch::lin55ToVoct).
+  void setInputLaw(int port, int law) {
+    inLaw_[port] = static_cast<std::uint8_t>(law);
+    inConv_[port] = aliasConversion(law);  // the shared AliasTable law (1 = AliasLaw::Lin55ToVoct)
+  }
   int inputLaw(int port) const { return inLaw_[port]; }
   double cvAmt(int port) const { return cvAmt_[port]; }
   void setSerial(std::uint32_t serial);
@@ -298,6 +302,7 @@ class Engine {
   bool connected_[kPorts] = {};
   float inBuf_[kPorts] = {};
   std::uint8_t inLaw_[kPorts] = {};
+  jidai::jcs::AliasConversion inConv_[kPorts] = {};
   int moving_[kParamCount] = {}, touchedList_[kParamCount] = {};
   int nMoving_ = 0, nTouched_ = 0;
   bool isMoving_[kParamCount] = {}, touched_[kParamCount] = {};

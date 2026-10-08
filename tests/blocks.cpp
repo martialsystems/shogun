@@ -499,6 +499,50 @@ void testWaveAliasStatic() {
   }
 }
 
+// jidai-common 1.1.1 per-block plan (§4.6): a stage is a wire for a block only when the block is steady, its a and b
+// are exactly 0 and no live VC has depth on it. A moving block or a live VC keeps the stage's ADAA.
+void testWavePlanBlock() {
+  const char* t = "testWavePlanBlock";
+  TripleShaper s;
+  s.prepare(96000.0);
+  TripleShaperParams p;
+  p.macro = 0.25;  // c = (0.5, 0, 0): stage 1 live, stages 2 and 3 at a = b = 0
+  auto wires = [&s] { return (s.stageIsWire(0) ? 4 : 0) + (s.stageIsWire(1) ? 2 : 0) + (s.stageIsWire(2) ? 1 : 0); };
+  s.setParams(p, true, true);
+  const int steady = wires();
+  s.setParams(p, false, true);
+  const int moving = wires();
+  p.vcAmt[2] = 0.5;
+  s.setParams(p, true, true);
+  const int vcLive = wires();
+  s.setParams(p, true, false);
+  const int vcOff = wires();
+  // A moving block whose stage 2 sits at (0, 0) runs ADAA on it: one sample of the identity's ADAA is the mean of
+  // x[n] and x[n-1] (half-sample delay), never a mid-stream switch to the wire.
+  TripleShaperParams q;
+  q.levelComp = false;
+  q.sym[0] = 0.25;  // stage 1 live through SYM only; stages 2 and 3 at (0, 0)
+  TripleShaper w, m;
+  w.prepare(96000.0);
+  m.prepare(96000.0);
+  w.setParams(q, true, false);
+  m.setParams(q, false, false);
+  double maxWire = 0.0;
+  for (int n = 0; n < 64; ++n) {
+    const double x = 0.5 * std::sin(0.3 * n);
+    const double yw = w.process(x), ym = m.process(x);
+    maxWire = std::max(maxWire, std::fabs(yw - ym));
+  }
+  std::printf("%s: wires (stage 1 2 3) steady %d%d%d, moving %d%d%d; VC depth on 3: live %d%d%d, not live %d%d%d; "
+              "moving block vs wire max diff %.3e (ADAA half-sample delay kept)\n",
+              t, steady >> 2 & 1, steady >> 1 & 1, steady & 1, moving >> 2 & 1, moving >> 1 & 1, moving & 1,
+              vcLive >> 2 & 1, vcLive >> 1 & 1, vcLive & 1, vcOff >> 2 & 1, vcOff >> 1 & 1, vcOff & 1, maxWire);
+  tu::truth(t, "steady block: zero stages are wires", steady == 3);
+  tu::truth(t, "moving block: no stage skipped", moving == 0);
+  tu::truth(t, "live VC with depth keeps the stage", vcLive == 2 && vcOff == 3);
+  tu::truth(t, "moving block keeps ADAA on (0, 0) stages", maxWire > 1e-3);
+}
+
 void testWaveAudioRateVc() {
   const char* t = "testWaveAudioRateVc";
   const int q = 44, F1 = 4 * q, F2 = 21 * q;
@@ -687,6 +731,7 @@ void runBlockTests() {
   testWaveStageLaw();
   testWaveAliasStatic();
   testWaveAudioRateVc();
+  testWavePlanBlock();
   testWaveLevelComp();
   testWavePreVca();
   testShapeMorph();

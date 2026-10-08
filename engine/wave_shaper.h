@@ -7,20 +7,16 @@
 //   - PRE-VCA input normalisation (preVcaInput);
 //   - the exact v2.1 single-stage migration (migrateV21, v21Law).
 //
-// Two behaviours are kept from the SHOGUN tests / verify_folder.py where the shared header differs (do not patch the
-// vendored copy; see TESTPLAN.md "jidai-common"):
-//   1. Wire rule. A stage is a wire when its STATIC amount and symmetry are 0 and no VC depth is routed to it
-//      (verify_folder.py skips a stage only when its a and b are 0 over the whole render). The shared AdaaStage
-//      skips per sample whenever the current (a, b) = (0, 0), so with FOLD VC routed, a stage whose amount the VC
-//      clamps to 0 would toggle the half-sample ADAA delay at audio rate. Each stage therefore runs in its own
-//      shared TripleShaper (the other two stages are exact wires there), driven by the shared
-//      process(x, ShaperControls, vc). On a sample where a non-wire stage hits (0, 0), its output is replaced by
-//      the ADAA value from the shared antiderivative ShaperStage::F. The shared stage still records x[n-1]
-//      correctly on that sample.
-//   2. Bypass. WAVE 0 with every trim, SYM, SHAPE and VC depth at 0 returns the input bit for bit, updates the
-//      stage histories, and skips LEVEL COMP (LevelComp::track() is not called: §4.6 "LEVEL COMP skipped").
-// LEVEL COMP is the shared LevelComp fed by a shared 8 Hz DcBlocker on the wet path. It has the same detectors as
-// before. The detector floor is 1e-30 on both powers; the old local copy floored only the wet power, at 1e-12.
+// Stage skipping is the shared per-block plan (jidai-common 1.1.1 TripleShaper::planBlock): a stage is a wire for a
+// block only when the block is steady (no smoothing ramp, no modulation, no control change), its a and b are exactly
+// 0, and no live VC has depth on it. A stage whose (a, b) merely passes through 0 (VC, a ramp, a matrix row) keeps its
+// ADAA, so the half-sample delay never toggles at audio rate (spec §4.6 / verify_folder.py: skip only if 0 over the
+// whole render). SHOGUN reads its parameters once per base sample, so its block is one base sample (M samples at
+// fsEff): setParams() plans it. The caller says whether the block is steady and whether a VC source is live.
+// Bypass: WAVE 0 with every trim, SYM, SHAPE and live VC depth at 0 returns the input bit for bit, keeps the stage
+// histories (every stage a wire), and skips LEVEL COMP (LevelComp::track() is not called: §4.6 "LEVEL COMP skipped").
+// LEVEL COMP is the shared LevelComp fed by a shared 8 Hz DcBlocker on the wet path. Its detector floor is 1e-30 on
+// both powers (documented upstream); the pre-1.1 local copy floored only the wet power, at 1e-12.
 
 #include <jidai/dsp/TripleShaper.h>
 
@@ -50,38 +46,30 @@ class WaveShaper {
     reset();
   }
   void reset() {
-    for (int i = 0; i < 3; ++i) {
-      st_[i].reset();
-      xin_[i] = 0.0;
-    }
+    st_.reset();
     comp_.reset();
     dc_.reset();
+    plan();
   }
 
-  void setParams(const TripleShaperParams& p) {
+  // Parameters for the next block (one base sample in the engine) and that block's plan.
+  // steady: nothing moved since the previous block and no ramp or modulation is active on these parameters (a static
+  //         render, e.g. every test that sets the parameters once, is steady).
+  // vcLive: a VC source contributes (FOLD VC jack or internal source at a non-zero level).
+  void setParams(const TripleShaperParams& p, bool steady = true, bool vcLive = true) {
     p_ = p;
-    // Full controls (bypass test, documentation) and one isolated control set per stage: stage i alone is live in
-    // st_[i]; a_i = clamp01((0 + c_i) + trim_i + vc·dA_i), b_i = clampSym(sym_i + 0 + vc·dB_i), bit-equal to the
-    // single-instance sum because the other terms are exact zeros.
+    steady_ = steady;
+    vcLive_ = vcLive;
     ctl_ = jidai::dsp::ShaperControls{};
     ctl_.macro = p.macro;
-    double c[3];
-    jidai::dsp::macroAmounts(p.macro, c);
     for (int i = 0; i < 3; ++i) {
       ctl_.trim[i] = p.trim[i];
       ctl_.sym[i] = p.sym[i];
       ctl_.vcToAmt[i] = p.vcAmt[i];
       ctl_.vcToSym[i] = p.vcSym[i];
-      jidai::dsp::ShaperControls& s = stageCtl_[i];
-      s = jidai::dsp::ShaperControls{};
-      s.trim[i] = c[i];
-      s.modAmt[i] = p.trim[i];
-      s.sym[i] = p.sym[i];
-      s.vcToAmt[i] = p.vcAmt[i];
-      s.vcToSym[i] = p.vcSym[i];
-      wire_[i] = c[i] + p.trim[i] <= 0.0 && p.sym[i] == 0.0 && p.vcAmt[i] == 0.0 && p.vcSym[i] == 0.0;
     }
-    bypass_ = !(p.shape > 0.0) && ctl_.isBypass(true);
+    bypass_ = !(p.shape > 0.0) && ctl_.isBypass(vcLive);
+    plan();
   }
   const TripleShaperParams& params() const { return p_; }
   const jidai::dsp::ShaperControls& controls() const { return ctl_; }
@@ -91,20 +79,11 @@ class WaveShaper {
   // One sample at fsEff. x: body (after SHAPE / PRE-VCA), vc: audio-rate VC (unsmoothed, V/5).
   double process(double x, double vc = 0.0) {
     if (bypass_) {
-      for (int i = 0; i < 3; ++i) {
-        st_[i].process(x, kWireCtl, 0.0);  // every stage a wire: records x[n-1] = x
-        xin_[i] = x;
-      }
+      st_.process(x, kWireCtl, 0.0);  // every stage planned as a wire: records x[n-1] = x
       return x;
     }
     const double in = x;
-    double y = x;
-    for (int i = 0; i < 3; ++i) {
-      const double xi = y;
-      y = st_[i].process(xi, stageCtl_[i], vc);
-      if (!wire_[i] && stageA(i, vc) == 0.0 && stageB(i, vc) == 0.0) y = adaaAtZero(xi, xin_[i], kK[i]);
-      xin_[i] = xi;
-    }
+    const double y = st_.process(x, ctl_, vc);
     if (!p_.levelComp) return y;
     // LEVEL COMP: C = sqrt(<x²>/<y²>), clamped to ±12 dB, smoothed 5 ms; the wet detector reads y after an 8 Hz DC
     // block (the asymmetric DC from SYM is removed by the voice's own DC block after the chain).
@@ -112,7 +91,7 @@ class WaveShaper {
     return y * comp_.gainFor(in * in, yac * yac);
   }
 
-  bool stageIsWire(int i) const { return wire_[i]; }
+  bool stageIsWire(int i) const { return st_.stageIsWire(i); }
   double stageA(int i, double vc = 0.0) const {
     return clamp(macroStage(i, p_.macro) + p_.trim[i] + vc * p_.vcAmt[i], 0.0, 1.0);
   }
@@ -185,12 +164,10 @@ class WaveShaper {
   static double v21Law(double x, double w) { return (1.0 - w) * x + w * std::sin(0.5 * kPi * (1.0 + 4.0 * w) * x); }
 
  private:
-  // A live (non-wire) stage whose (a, b) is (0, 0) on this sample: first-order ADAA of the identity, computed with the
-  // shared antiderivative exactly as for any other (a, b).
-  static double adaaAtZero(double x, double xp, double K) {
-    const double d = x - xp;
-    if (std::fabs(d) < 1e-6) return stage(0.5 * (x + xp), 0.0, 0.0, K);
-    return (stageAntiderivative(x, 0.0, 0.0, K) - stageAntiderivative(xp, 0.0, 0.0, K)) / d;
+  // The block plan: in bypass every stage is a wire; otherwise the shared planBlock decides.
+  void plan() {
+    if (bypass_) st_.planBlock(kWireCtl, true, false);
+    else st_.planBlock(ctl_, steady_, vcLive_);
   }
   static double polyBlep(double t, double dt) {
     if (t < dt) {
@@ -230,12 +207,10 @@ class WaveShaper {
   static inline const jidai::dsp::ShaperControls kWireCtl{};
   TripleShaperParams p_{};
   jidai::dsp::ShaperControls ctl_{};
-  jidai::dsp::ShaperControls stageCtl_[3]{};
-  jidai::dsp::TripleShaper st_[3];
+  jidai::dsp::TripleShaper st_;
   jidai::dsp::LevelComp comp_;
   jidai::dsp::DcBlocker dc_;
-  double xin_[3] = {0.0, 0.0, 0.0};
-  bool wire_[3] = {true, true, true};
+  bool steady_ = true, vcLive_ = true;
   bool bypass_ = true;
 };
 
