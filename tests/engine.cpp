@@ -403,6 +403,88 @@ void testPitchVoct() {
   }
 }
 
+// LEAD/BASS CV AMT scales the pitch CV into the voice (NOTE, an old HZ/V cable on NOTE, V/OCT): 1.0 = exact 1 V/oct
+// (the default, so presets play as before), 0.5 = half tracking, 0 = NOTE reads 0 V = C3, -1 = inverted around C3.
+void testSynthCvAmtNote() {
+  const char* T = "testSynthCvAmtNote";
+  struct Case { double amt, volts, wantNote; };
+  const Case cases[] = {{1.0, 1.0, 60.0}, {0.5, 1.0, 54.0}, {0.0, 1.0, 48.0}, {-1.0, 1.0, 36.0}, {0.5, -2.0, 36.0},
+                        {2.0, 0.5, 60.0}};
+  for (int voice : {LEAD, BASS})
+    for (const Case& c : cases) {
+      auto e = make();
+      e->setParamNow(P_CLOCK_MODE, stepU(1, 2));
+      const int np = synthPort(voice - LEAD, SJ_NOTE), gp = synthPort(voice - LEAD, SJ_GATE);
+      e->setCvAmt(np, c.amt);
+      Graph g;
+      g.con[np] = g.con[gp] = true;
+      g.vals[np] = static_cast<float>(c.volts);
+      g.vals[gp] = 5.0f;
+      g.step(*e);
+      g.step(*e);
+      const SynthVoice& s = e->synth(voice);
+      const double cents = 1200.0 * std::log2(s.f / (440.0 * std::exp2((c.wantNote - 69.0) / 12.0)));
+      std::printf("%s: %s AMT %+.1f, NOTE %+.1f V -> note %.4f (want %.0f), pitch error %.5f cents\n", T,
+                  voice == LEAD ? "LEAD" : "BASS", c.amt, c.volts, s.noteTarget, c.wantNote, cents);
+      near(T, "NOTE scaled by CV AMT", s.noteTarget, c.wantNote, 1e-9);
+      near(T, "pitch follows", cents, 0.0, 0.01);
+    }
+  // A held note follows a moving NOTE CV at the scaled depth (continuous path, not only the trigger).
+  {
+    auto e = make();
+    e->setParamNow(P_CLOCK_MODE, stepU(1, 2));
+    const int np = synthPort(0, SJ_NOTE), gp = synthPort(0, SJ_GATE);
+    e->setCvAmt(np, 0.5);
+    Graph g;
+    g.con[np] = g.con[gp] = true;
+    g.vals[gp] = 5.0f;
+    g.vals[np] = 0.0f;
+    g.step(*e);
+    g.step(*e);
+    g.vals[np] = 2.0f;
+    g.step(*e);
+    std::printf("%s: held LEAD, AMT 0.5, NOTE 0 -> +2 V: note %.4f\n", T, e->synth(LEAD).noteTarget);
+    near(T, "held note moves 12 st for 2 V at AMT 0.5", e->synth(LEAD).noteTarget, 60.0, 1e-9);
+  }
+  // Old HZ/V cable on BASS:NOTE: Lin55ToVoct first, then the AMT. 2.0 V = A2 (45) at 1.0; AMT 0.5 halves the offset
+  // from C3 (45 - 48 = -3 st -> -1.5 st).
+  for (double amt : {1.0, 0.5}) {
+    auto e = make();
+    e->setParamNow(P_CLOCK_MODE, stepU(1, 2));
+    const int np = synthPort(1, SJ_NOTE), gp = synthPort(1, SJ_GATE);
+    e->setInputLaw(np, 1);
+    e->setCvAmt(np, amt);
+    Graph g;
+    g.con[np] = g.con[gp] = true;
+    g.vals[np] = 2.0f;
+    g.vals[gp] = 5.0f;
+    g.step(*e);
+    g.step(*e);
+    const double want = 48.0 + amt * (45.0 - 48.0);
+    std::printf("%s: BASS HZ/V 2.0 V, AMT %.1f -> note %.4f (want %.2f)\n", T, amt, e->synth(BASS).noteTarget, want);
+    near(T, "HZ/V cable then AMT", e->synth(BASS).noteTarget, want, 1e-9);
+  }
+  // V/OCT: the voice AMT (on NOTE) scales it; V/OCT's own per-jack AMT stays a second factor.
+  for (double amt : {1.0, 0.5, 0.0}) {
+    auto e = make();
+    e->setParamNow(P_CLOCK_MODE, stepU(1, 2));
+    const int np = synthPort(0, SJ_NOTE), gp = synthPort(0, SJ_GATE), vo = synthPort(0, SJ_VOCT);
+    e->setCvAmt(np, amt);
+    Graph g;
+    g.con[np] = g.con[gp] = true;
+    g.vals[gp] = 5.0f;
+    g.step(*e);
+    g.step(*e);
+    const double f0 = e->synth(LEAD).f;
+    g.con[vo] = true;
+    g.vals[vo] = 1.0f;
+    g.step(*e);
+    const double st = 12.0 * std::log2(e->synth(LEAD).f / f0);
+    std::printf("%s: LEAD AMT %.1f, V/OCT +1 V adds %.6f semitones\n", T, amt, st);
+    near(T, "V/OCT scaled by voice AMT", st * 100.0, amt * 1200.0, 0.01);
+  }
+}
+
 void testPitchRail() {
   const char* T = "testPitchRail";
   auto e = make();
@@ -786,6 +868,7 @@ void runEngineTests() {
   testControlOutsZeroLatency();
   testOsLatency();
   testPitchVoct();
+  testSynthCvAmtNote();
   testPitchRail();
   testTuningIsNotTheVoltLaw();
   testLin55Migration();

@@ -740,13 +740,18 @@ void Engine::processSample(float* extValues, const bool* extCon) {
       const double x = static_cast<double>(in[port]);
       return inConv_[port].identity() ? x : inConv_[port].convert(x);  // old HZ/V cable: shared Lin55ToVoct (§12.3)
     };
-    sv.vOct = (con && con[vo]) ? cvAmt_[vo] * pitchIn(vo) : 0.0;
+    // The voice's CV AMT (the ROUTE knob for LEAD/BASS, stored on the NOTE port) scales the depth of the pitch CV into
+    // that voice: NOTE, an old HZ/V cable on NOTE (after Lin55ToVoct) and V/OCT. 1.0 = exact 1 V/oct tracking (the
+    // default), 0.5 = half, -1 = inverted around 0 V = C3. V/OCT keeps its own per-jack AMT as a second factor, so a
+    // patch that set only V/OCT's AMT plays as before.
+    const double pitchAmt = cvAmt_[np];
+    sv.vOct = (con && con[vo]) ? pitchAmt * cvAmt_[vo] * pitchIn(vo) : 0.0;
     sv.cutoffOct = (con && con[cp]) ? cvAmt_[cp] * static_cast<double>(in[cp]) : 0.0;
     sv.a4 = a4Hz(target_[P_GLOBAL_A4]);
     const bool noteJack = con && con[np];
     // A patched NOTE jack is a continuous pitch: it moves the held note at once (slew is the patch's job; GLIDE is for
     // tied steps and legato notes).
-    if (noteJack && sv.gate) sv.noteTarget = sv.noteGlided = voctNote(pitchIn(np)) + 12.0 * sv.oct;
+    if (noteJack && sv.gate) sv.noteTarget = sv.noteGlided = voctNote(pitchAmt * pitchIn(np)) + 12.0 * sv.oct;
     if (con && con[gp]) {
       const bool wasHigh = gateDet_[s].high;
       const bool edge = gateDet_[s].rising(static_cast<float>(in[gp]));
@@ -755,7 +760,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
         Pending& p = pending_[v];
         p.on = true;
         p.kind = 1;
-        p.note = noteJack ? voctNote(pitchIn(np)) : synthSeqNote_[s];
+        p.note = noteJack ? voctNote(pitchAmt * pitchIn(np)) : synthSeqNote_[s];
         const int vp = synthPort(s, SJ_VEL);
         p.velVolts = con[vp] ? static_cast<double>(in[vp]) : 5.0;
         p.velPatched = con[vp];
@@ -818,8 +823,10 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     if (v == LEAD || v == BASS) {
       SynthVoice& sv = synth(v);
       const int np = synthPort(v - LEAD, SJ_NOTE);
-      if (con && con[np])  // NOTE jack overrides the sequencer note
-        h.note = voctNote(inConv_[np].identity() ? static_cast<double>(in[np]) : inConv_[np].convert(static_cast<double>(in[np])));
+      if (con && con[np]) {  // NOTE jack overrides the sequencer note; the voice's CV AMT scales its depth
+        const double x = static_cast<double>(in[np]);
+        h.note = voctNote(cvAmt_[np] * (inConv_[np].identity() ? x : inConv_[np].convert(x)));
+      }
       const bool legato = h.tie && sv.gate;
       sv.noteOn(c, h.note, h.acc * ue_[sv.pAcc] > 0.0 ? h.acc : 0.0, h.tie);
       if (!legato) hitGain_[v] = h.gVel;

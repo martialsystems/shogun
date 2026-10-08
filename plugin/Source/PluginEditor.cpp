@@ -1328,7 +1328,8 @@ void ShogunPanel::mouseDrag(const juce::MouseEvent& e) {
       break;
     }
     case B_CVAMT: {
-      // CV AMT applies to the voice's PITCH/DECAY/TONE jacks (§11 ROUTE); right-click menus set them separately.
+      // CV AMT (§11 ROUTE): drums = PITCH/DECAY/TONE; LEAD/BASS = NOTE (and V/OCT, read from the NOTE port's AMT).
+      // Right-click menus can set each jack's AMT separately.
       const double amt = 2.0 * static_cast<double>(u) - 1.0;
       if (isDrum(b.a)) for (int j : {DJ_PITCH, DJ_DECAY, DJ_TONE}) proc_.setCvAmt(drumPort(b.a, j), amt);
       else proc_.setCvAmt(synthPort(b.a - LEAD, SJ_NOTE), amt);
