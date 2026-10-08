@@ -1,5 +1,6 @@
 # One scenario for tests/web_parity.cpp (native) and web/test_wasm.mjs (wasm): the same calls, then compare.
-# Knobs by name, then a pattern at 130 BPM with flams, shuffle, shift, bends, notes and a tie.
+# Knobs by name, then a pattern at 130 BPM with flams, shuffle, shift, bends, notes and a tie. Then every factory
+# program (engine/factory.h) through the wasm patch reader: its state hash must equal the native one, and it plays.
 knob bd1Attack 64
 knob bd1Decay 80
 knob bd1Pitch 40
@@ -85,3 +86,75 @@ call sg_commit
 process 24000
 call sg_set_running 0
 process 12000
+call sg_set_running 1
+call sg_factory_load 1
+hash
+process 3072
+call sg_factory_load 2
+hash
+process 3072
+call sg_factory_load 3
+hash
+process 3072
+call sg_factory_load 4
+hash
+process 3072
+call sg_factory_load 5
+hash
+process 3072
+call sg_factory_load 6
+hash
+process 3072
+call sg_factory_load 7
+hash
+process 3072
+call sg_factory_load 8
+hash
+process 3072
+call sg_factory_load 9
+hash
+process 3072
+call sg_factory_load 10
+hash
+process 3072
+call sg_factory_load 11
+hash
+process 3072
+call sg_factory_load 12
+hash
+process 3072
+call sg_factory_load 13
+hash
+process 3072
+call sg_factory_load 14
+hash
+process 3072
+call sg_factory_load 15
+hash
+process 3072
+call sg_factory_load 16
+hash
+process 3072
+call sg_factory_load 17
+hash
+process 3072
+call sg_factory_load 18
+hash
+process 3072
+call sg_factory_load 19
+hash
+process 3072
+call sg_factory_load 20
+hash
+process 3072
+call sg_factory_load 21
+hash
+process 3072
+call sg_factory_load 13
+call sg_rotate 5
+call sg_commit
+hash
+process 3072
+call sg_factory_load 0
+hash
+process 1024

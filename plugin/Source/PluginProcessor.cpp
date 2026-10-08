@@ -1,281 +1,759 @@
 #include "PluginProcessor.h"
-#include "PluginEditor.h"
+
+#include <jidai/CableStandard.h>
 
 #include <cmath>
+#include <cstring>
+
+#include "PluginEditor.h"
+#include "factory.h"
+
+using namespace shogun;
 
 namespace {
 
-constexpr int kMidiBase = 36;
-constexpr int kScaleSteps[4] = {8, 6, 4, 3};
+// Mod source and curve names of the saved state: the engine's (engine/patch.h), shared with the factory bank.
+const char* const* const kSrcNames = kStateSrcNames;
+constexpr int kSrcCount = mod::kSourceCount;
+const char* const* const kCurveNames = kStateCurveNames;
 
-int ccOf(const std::atomic<float>* value) {
-  if (value == nullptr) return 0;
-  const int cc = static_cast<int>(std::lround(value->load(std::memory_order_relaxed)));
-  if (cc < 0) return 0;
-  if (cc > 127) return 127;
-  return cc;
+juce::String srcToString(int src, int voice) {
+  if (src <= mod::SRC_NONE || src >= kSrcCount) return {};
+  juce::String s(kSrcNames[src]);
+  if (mod::perVoiceSource(src) && voice >= 0) s << "@" << kVoiceNames[voice];
+  return s;
 }
+void srcFromString(const juce::String& s, int& src, int& voice) {
+  src = mod::SRC_NONE;
+  voice = -1;
+  if (s.isEmpty()) return;
+  const juce::String name = s.upToFirstOccurrenceOf("@", false, false);
+  const juce::String v = s.fromFirstOccurrenceOf("@", false, false);
+  for (int i = 1; i < kSrcCount; ++i)
+    if (name == kSrcNames[i]) src = i;
+  for (int i = 0; i < kVoices; ++i)
+    if (v == kVoiceNames[i]) voice = i;
+}
+
+// Display text (host automation lanes): the engine's formatParam, the same text the panel LCDs show.
+juce::String paramText(int id, float u) {
+  char buf[48];
+  formatParam(id, static_cast<double>(u), buf, sizeof buf);
+  return juce::String::fromUTF8(buf);
+}
+
+int osFromParam(double u) { return 1 << stepIndex(u, 3); }  // 1X / 2X / 4X
 
 }  // namespace
 
 ShogunAudioProcessor::ShogunAudioProcessor()
-    : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, "PARAMS", createLayout()) {
-  // INIT: an empty pattern. Every step starts off.
-  for (auto& bits : stepOn_) bits.store(0u);
-
-  knobCount_ = 0;
-  for (const auto& voice : shogun_ui::voices()) {
-    for (int i = 0; i < voice.count; ++i) {
-      knobs_[static_cast<size_t>(knobCount_++)] =
-          BoundKnob{voice.knobs[static_cast<size_t>(i)].field,
-                    apvts.getRawParameterValue(voice.knobs[static_cast<size_t>(i)].id)};
-    }
-    levels_[static_cast<size_t>(voice.voice)] = apvts.getRawParameterValue(voice.levelId);
+    : AudioProcessor(BusesProperties()
+                         .withOutput("Main", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Aux 1", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 2", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 3", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 4", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 5", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 6", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 7", juce::AudioChannelSet::stereo(), false)
+                         .withOutput("Aux 8", juce::AudioChannelSet::stereo(), false)),
+      apvts(*this, nullptr, "SHOGUN", createLayout()),
+      engine_(std::make_unique<Engine>()) {
+  params_.resize(kParamCount);
+  raw_.resize(kParamCount);
+  last_.assign(kParamCount, -1.0f);
+  for (int i = 0; i < kParamCount; ++i) {
+    params_[static_cast<size_t>(i)] = apvts.getParameter(kParams[i].id);
+    raw_[static_cast<size_t>(i)] = apvts.getRawParameterValue(kParams[i].id);
+    jassert(params_[static_cast<size_t>(i)] != nullptr);
+    if (kParams[i].cc >= 0 && kParams[i].cc < 128) ccToParam_[kParams[i].cc].push_back(i);
   }
-  clock_ = apvts.getRawParameterValue("clock");
-  tempo_ = apvts.getRawParameterValue("tempo");
-  master_ = apvts.getRawParameterValue("master");
-  scale_ = apvts.getRawParameterValue("scale");
+  engine_->prepare(sr_, osNow_);
+  engine_->loadInit();
+  uiPattern_ = engine_->pattern();
+  for (int i = 0; i < kPorts; ++i) uiCvAmt_[static_cast<size_t>(i)] = 1.0;
+  for (auto& gr : meters.busGr) gr.store(1.0f);  // compressor gain 1 = no reduction
+  setLatencySamples(engine_->latencySamples());
+  startTimerHz(10);
 }
+
+ShogunAudioProcessor::~ShogunAudioProcessor() { stopTimer(); }
 
 juce::AudioProcessorValueTreeState::ParameterLayout ShogunAudioProcessor::createLayout() {
   juce::AudioProcessorValueTreeState::ParameterLayout layout;
-  layout.add(std::make_unique<juce::AudioParameterChoice>(
-      juce::ParameterID{"clock", 1}, "Clock", juce::StringArray{"INT", "EXT"}, 0));
-  layout.add(std::make_unique<juce::AudioParameterFloat>(
-      juce::ParameterID{"tempo", 1}, "Tempo",
-      juce::NormalisableRange<float>(60.0f, 180.0f, 0.1f), 120.0f));
-  layout.add(std::make_unique<juce::AudioParameterFloat>(
-      juce::ParameterID{"master", 1}, "Master",
-      juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.45f));
-  layout.add(std::make_unique<juce::AudioParameterChoice>(
-      juce::ParameterID{"scale", 1}, "Scale", juce::StringArray{"8", "6", "4", "3"}, 2));
-
-  for (const auto& voice : shogun_ui::voices()) {
-    layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{voice.levelId, 1}, juce::String(voice.name) + " level",
-        juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 1.0f));
-    for (int i = 0; i < voice.count; ++i) {
-      const auto& knob = voice.knobs[static_cast<size_t>(i)];
-      layout.add(std::make_unique<juce::AudioParameterInt>(
-          juce::ParameterID{knob.id, 1}, juce::String(voice.name) + " " + knob.label, 0, 127,
-          knob.initial));
-    }
+  for (int i = 0; i < kParamCount; ++i) {
+    const ParamInfo& p = kParams[i];
+    const int id = i;
+    auto attrs = juce::AudioParameterFloatAttributes().withStringFromValueFunction(
+        [id](float v, int) { return paramText(id, v); });
+    layout.add(std::make_unique<juce::AudioParameterFloat>(juce::ParameterID{p.id, 1}, p.id,
+                                                           juce::NormalisableRange<float>(0.0f, 1.0f), p.def,
+                                                           attrs));
   }
   return layout;
 }
 
-void ShogunAudioProcessor::prepareToPlay(double sampleRate, int) {
-  hostSr_ = sampleRate > 0.0 ? sampleRate : shogun::kFs;
-  engine_.reset();
-  appliedEpoch_ = 0;
-  applyControls(false, 120.0);
-  prime();
-}
-
 bool ShogunAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
-  const auto& out = layouts.getMainOutputChannelSet();
-  return layouts.getMainInputChannelSet().isDisabled() && (out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo());
+  if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()) return false;
+  for (int b = 1; b < layouts.outputBuses.size(); ++b) {
+    const auto& set = layouts.outputBuses.getReference(b);
+    if (!set.isDisabled() && set != juce::AudioChannelSet::stereo()) return false;
+  }
+  return layouts.inputBuses.isEmpty();
 }
 
-shogun::Pattern ShogunAudioProcessor::makePattern() const {
-  shogun::Pattern pattern;
-  pattern.length = kSteps;
-  for (int vi = 0; vi < kVoices; ++vi) {
-    shogun::Track& track = pattern.track[vi];
-    track.length = kSteps;
-    const std::uint32_t bits = stepOn_[static_cast<size_t>(vi)].load(std::memory_order_relaxed);
-    const bool notes = vi >= static_cast<int>(shogun::Voice::Lead);
-    const int held = (vi == static_cast<int>(shogun::Voice::Bass)) ? 36 : 60;
-    for (int step = 0; step < kSteps; ++step) {
-      const bool on = (bits & (1u << step)) != 0;
-      if (notes) {
-        track.note[step].note = on ? held : -1;
-        track.note[step].accent = 2;
-      } else if (on) {
-        track.drum[step].on = true;
-        track.drum[step].accent = 2;
-      }
-    }
-  }
-  return pattern;
+void ShogunAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
+  sr_ = sampleRate;
+  block_ = samplesPerBlock;
+  offlineNow_ = isNonRealtime();
+  int os = osFromParam(static_cast<double>(paramU(P_GLOBAL_OS)));
+  if (offlineNow_ && stepIndex(static_cast<double>(paramU(P_GLOBAL_OFFLINE)), 2) == 1) os = 4;
+  osNow_ = os;
+  // Coefficients at the host rate (§3.1): prepare() recomputes every filter for fs = sampleRate, no resampler.
+  engine_->prepare(sr_, osNow_);
+  if (const std::uint32_t s = serialReq_.exchange(0, std::memory_order_acq_rel)) engine_->setSerial(s);
+  applyParams(true);
+  appliedEpoch_ = 0;  // re-apply pattern / matrix / cables
+  pickUpEdits();
+  meters.latency.store(engine_->latencySamples());
+  meters.sampleRate.store(sr_);
+  setLatencySamples(engine_->latencySamples());
 }
 
-void ShogunAudioProcessor::applyControls(bool hostPlaying, double hostBpm) {
-  shogun::Knobs knobs;
-  for (int i = 0; i < knobCount_; ++i) {
-    if (knobs_[static_cast<size_t>(i)].field == nullptr) continue;
-    knobs.*(knobs_[static_cast<size_t>(i)].field) = ccOf(knobs_[static_cast<size_t>(i)].value);
-  }
-  engine_.setKnobs(knobs);
-  for (int i = 0; i < kVoices; ++i) {
-    const float level = levels_[static_cast<size_t>(i)] == nullptr
-                            ? 1.0f
-                            : levels_[static_cast<size_t>(i)]->load(std::memory_order_relaxed);
-    engine_.setLevel(static_cast<shogun::Voice>(i), static_cast<double>(level));
-  }
-  const float master = master_ == nullptr ? 0.45f : master_->load(std::memory_order_relaxed);
-  engine_.setMaster(static_cast<double>(master));
-
-  const int clock = clock_ == nullptr ? 0 : static_cast<int>(std::lround(clock_->load(std::memory_order_relaxed)));
-  engine_.setMode(clock == 0 ? shogun::ClockMode::Int : shogun::ClockMode::Ext);
-
-  const float tempo = tempo_ == nullptr ? 120.0f : tempo_->load(std::memory_order_relaxed);
-  engine_.setTempo(static_cast<double>(tempo));
-  engine_.setHostTempo(hostBpm, hostPlaying);
-
-  int scaleIndex = scale_ == nullptr ? 2 : static_cast<int>(std::lround(scale_->load(std::memory_order_relaxed)));
-  if (scaleIndex < 0 || scaleIndex > 3) scaleIndex = 2;
-  engine_.setScaleSteps(kScaleSteps[scaleIndex]);
-
-  const std::uint32_t epoch = patternEpoch_.load(std::memory_order_acquire);
-  if (epoch != appliedEpoch_) {
-    engine_.setPattern(makePattern());
-    appliedEpoch_ = epoch;
-  }
+void ShogunAudioProcessor::timerCallback() {
+  // GLOBAL:OS changed: re-prepare off the audio thread and report the new latency (0 / 23 / 26).
+  // This used to be an AsyncUpdater triggered from processBlock. That posted a message from the audio
+  // thread, which is not realtime-safe, and it raced plugin teardown: a host that is about to delete the
+  // instance can find the plugin's message socket readable in the same event-loop round as its own
+  // delete message (see TESTPLAN, pluginval teardown). Polling a flag from the message thread posts
+  // nothing from the audio thread.
+  if (!osChangeWanted_.load(std::memory_order_acquire)) return;
+  suspendProcessing(true);  // waits out a block in flight; no processBlock runs until resumed
+  osChangeWanted_.store(false, std::memory_order_release);
+  prepareToPlay(sr_, block_);
+  suspendProcessing(false);
+  updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withLatencyChanged(true));
 }
 
-void ShogunAudioProcessor::prime() {
-  shogun::TrigIn silent;
-  engine_.process(silent, newer_);
-  older_ = shogun::Frame{};
-  frac_ = 0.0;
-}
-
-void ShogunAudioProcessor::drainPads() {
-  int read = padRead_.load(std::memory_order_relaxed);
-  const int write = padWrite_.load(std::memory_order_acquire);
-  while (read != write) {
-    const Pad& pad = pads_[static_cast<size_t>(read)];
-    if (pad.voice >= 0 && pad.voice < kVoices) {
-      if (pad.note < 0) engine_.trigger(static_cast<shogun::Voice>(pad.voice), pad.gain, 0.0);
-      else engine_.triggerNote(static_cast<shogun::Voice>(pad.voice), pad.note, pad.gain);
-    }
-    read = (read + 1) % kPadCap;
-  }
-  padRead_.store(read, std::memory_order_release);
-}
-
-void ShogunAudioProcessor::handleMidi(const juce::MidiMessage& msg) {
-  if (msg.isNoteOn()) {
-    const int voice = msg.getNoteNumber() - kMidiBase;
-    if (voice < 0 || voice >= kVoices) return;
-    const double gain = shogun::gVel(msg.getVelocity());
-    if (voice >= static_cast<int>(shogun::Voice::Lead))
-      engine_.triggerNote(static_cast<shogun::Voice>(voice), msg.getNoteNumber(), gain);
+void ShogunAudioProcessor::applyParams(bool now) {
+  for (int i = 0; i < kParamCount; ++i) {
+    const float u = raw_[static_cast<size_t>(i)]->load(std::memory_order_relaxed);
+    if (shogun::dsp::exactEq(u, last_[static_cast<size_t>(i)])) continue;
+    last_[static_cast<size_t>(i)] = u;
+    if (now)
+      engine_->setParamNow(i, static_cast<double>(u));
     else
-      engine_.trigger(static_cast<shogun::Voice>(voice), gain, 0.0);
+      engine_->setParam(i, static_cast<double>(u));
+  }
+}
+
+void ShogunAudioProcessor::setParamU(int id, float u) {
+  auto* p = param(id);
+  p->beginChangeGesture();
+  p->setValueNotifyingHost(juce::jlimit(0.0f, 1.0f, u));
+  p->endChangeGesture();
+}
+
+// ---------------------------------------------------------------- UI copies
+
+void ShogunAudioProcessor::commitEdits() { editEpoch_.fetch_add(1, std::memory_order_release); }
+
+bool ShogunAudioProcessor::addCable(int from, int to) {
+  if (from < 0 || to < 0 || from >= kPorts || to >= kPorts) return false;
+  if (kPortTable[from].dir != PortDir::Out || kPortTable[to].dir != PortDir::In) return false;
+  if (kPortTable[to].type == PortType::Gate && kPortTable[from].type != PortType::Gate) return false;
+  const juce::SpinLock::ScopedLockType sl(editLock_);
+  for (int i = 0; i < uiCableCount_; ++i)
+    if (uiCables_[static_cast<size_t>(i)] == std::make_pair(from, to)) return true;
+  if (uiCableCount_ >= kMaxCables) return false;
+  uiCables_[static_cast<size_t>(uiCableCount_++)] = {from, to};
+  commitEdits();
+  return true;
+}
+
+void ShogunAudioProcessor::removeCablesAt(int port) {
+  const juce::SpinLock::ScopedLockType sl(editLock_);
+  int n = 0;
+  for (int i = 0; i < uiCableCount_; ++i) {
+    const auto c = uiCables_[static_cast<size_t>(i)];
+    if (c.first != port && c.second != port) uiCables_[static_cast<size_t>(n++)] = c;
+  }
+  uiCableCount_ = n;
+  commitEdits();
+}
+
+void ShogunAudioProcessor::setCvAmt(int port, double amt) {
+  uiCvAmt_[static_cast<size_t>(port)] = juce::jlimit(-1.0, 1.0, amt);
+  commitEdits();
+}
+
+void ShogunAudioProcessor::pushPad(int voice) {
+  if (voice >= 0 && voice < kVoices) padMask_.fetch_or(1u << voice);
+}
+void ShogunAudioProcessor::requestRun(bool run) { runReq_.store(run ? 1 : 0); }
+void ShogunAudioProcessor::requestRestart() { restartReq_.store(true); }
+void ShogunAudioProcessor::requestIdeal() {
+  setParamU(P_GLOBAL_TOLERANCE, 0.0f);
+  setParamU(P_GLOBAL_DRIFT, 0.0f);
+}
+
+// CLOCK:SOURCE (HOST / INT / EXT) is an instance setting, as on the rack: a factory program, INIT PATCH and an A/B
+// recall keep the current SRC. The instance's own state (host save/restore, undo/redo) still restores it.
+void ShogunAudioProcessor::resetParams(bool keepSource) {
+  for (int i = 0; i < kParamCount; ++i)
+    if (!(keepSource && i == P_CLOCK_SOURCE)) param(i)->setValueNotifyingHost(kParams[i].def);
+}
+
+void ShogunAudioProcessor::initPatch() {
+  resetParams(true);  // INIT PATCH / program 0: everything to INIT except SRC
+  {
+    const juce::SpinLock::ScopedLockType sl(editLock_);
+    uiPattern_ = Pattern();
+    uiRows_ = {};
+    uiCableCount_ = 0;
+    for (int i = 0; i < kPorts; ++i) {
+      uiCvAmt_[static_cast<size_t>(i)] = 1.0;
+      uiLaw_[static_cast<size_t>(i)] = 0;
+    }
+  }
+  commitEdits();
+}
+
+int ShogunAudioProcessor::getNumPrograms() { return factory::kPrograms; }
+const juce::String ShogunAudioProcessor::getProgramName(int program) {
+  return juce::String::fromUTF8(factory::programName(program));
+}
+void ShogunAudioProcessor::setCurrentProgram(int program) {
+  // A program load is one undo step. Hosts may call this off the message thread (state restore): no snapshot then.
+  const bool ui = juce::MessageManager::existsAndIsCurrentThread();
+  if (ui) beginUndoStep();
+  loadProgram(program);
+  if (ui) settleUndoStep();
+}
+
+void ShogunAudioProcessor::stepProgram(int delta) {
+  const int n = factory::kPrograms;
+  setCurrentProgram(((currentProgram_ + delta) % n + n) % n);
+}
+
+// ---------------------------------------------------------------- snapshots: A/B and undo
+
+ShogunAudioProcessor::Snapshot ShogunAudioProcessor::captureState() const {
+  Snapshot s;
+  const juce::var doc = patchToJson();
+  if (auto* o = doc.getDynamicObject()) o->removeProperty("unit");  // the unit is the machine, not the edit
+  s.json = juce::JSON::toString(doc, true);
+  s.program = currentProgram_;
+  return s;
+}
+
+void ShogunAudioProcessor::restoreState(const Snapshot& s, bool keepSource) {
+  if (s.empty()) return;
+  resetParams(keepSource);
+  patchFromJson(juce::JSON::parse(s.json), !keepSource);
+  currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, s.program);
+  snapParams_.store(true, std::memory_order_release);  // a recalled state lands at once, like a program change
+}
+
+void ShogunAudioProcessor::pushBounded(std::deque<Snapshot>& d, Snapshot s) {
+  d.push_back(std::move(s));
+  while (static_cast<int>(d.size()) > kUndoLevels) d.pop_front();
+}
+
+void ShogunAudioProcessor::beginUndoStep() {
+  settleUndoStep();  // an earlier step still open (a menu that changed something late) is recorded first
+  undoPre_ = captureState();
+}
+
+bool ShogunAudioProcessor::settleUndoStep() {
+  if (undoPre_.empty()) return false;
+  Snapshot pre = std::move(undoPre_);
+  undoPre_ = Snapshot();
+  if (pre.sameAs(captureState())) return false;
+  pushBounded(undo_, std::move(pre));
+  redo_.clear();
+  return true;
+}
+
+bool ShogunAudioProcessor::undo() {
+  settleUndoStep();
+  const Snapshot cur = captureState();
+  while (!undo_.empty() && undo_.back().sameAs(cur)) undo_.pop_back();
+  if (undo_.empty()) return false;
+  pushBounded(redo_, cur);
+  restoreState(undo_.back());
+  undo_.pop_back();
+  return true;
+}
+
+bool ShogunAudioProcessor::redo() {
+  settleUndoStep();
+  const Snapshot cur = captureState();
+  while (!redo_.empty() && redo_.back().sameAs(cur)) redo_.pop_back();
+  if (redo_.empty()) return false;
+  pushBounded(undo_, cur);
+  restoreState(redo_.back());
+  redo_.pop_back();
+  return true;
+}
+
+void ShogunAudioProcessor::selectAB(int slot) {
+  slot &= 1;
+  if (slot == abSlot_) return;
+  beginUndoStep();
+  ab_[static_cast<size_t>(abSlot_)] = captureState();
+  if (ab_[static_cast<size_t>(slot)].empty())
+    ab_[static_cast<size_t>(slot)] = ab_[static_cast<size_t>(abSlot_)];  // first visit: B starts as a copy of A
+  else
+    restoreState(ab_[static_cast<size_t>(slot)], true);  // A/B compares patches: SRC stays
+  abSlot_ = slot;
+  settleUndoStep();
+}
+
+void ShogunAudioProcessor::copyAB(int from, int to) {
+  from &= 1;
+  to &= 1;
+  if (from == to) return;
+  const Snapshot src = from == abSlot_ ? captureState() : ab_[static_cast<size_t>(from)];
+  if (src.empty()) return;
+  if (to == abSlot_) {
+    beginUndoStep();
+    restoreState(src, true);
+    settleUndoStep();
+  } else {
+    ab_[static_cast<size_t>(to)] = src;
+  }
+}
+
+// ---------------------------------------------------------------- unit serial, velocity curve
+
+void ShogunAudioProcessor::requestSerial(std::uint32_t serial) {
+  if (serial == 0) serial = 0x5A31C0DEu;  // the engine's default unit (Engine::setSerial maps 0 to it too)
+  unitSerial_.store(serial, std::memory_order_relaxed);
+  serialReq_.store(serial, std::memory_order_release);
+}
+
+void ShogunAudioProcessor::rerollUnit() {
+  std::uint32_t s;
+  do {
+    s = static_cast<std::uint32_t>(juce::Random::getSystemRandom().nextInt());
+  } while (s == 0 || s == unitSerial());
+  requestSerial(s);
+}
+
+double ShogunAudioProcessor::velCurve(int mode, double x) {
+  x = juce::jlimit(0.0, 1.0, x);
+  switch (mode) {
+    case 1: return std::sqrt(x);  // SOFT: light playing reaches full level sooner
+    case 2: return x * x;         // HARD
+    case 3: return 1.0;           // FIXED: every note at full velocity
+    default: return x;            // LINEAR
+  }
+}
+
+void ShogunAudioProcessor::loadProgram(int program) {
+  if (program < 0 || program >= factory::kPrograms) return;
+  currentProgram_ = program;
+  if (program == 0) {
+    initPatch();
+    snapParams_.store(true, std::memory_order_release);
     return;
   }
-  if (msg.isNoteOff()) {
-    const int voice = msg.getNoteNumber() - kMidiBase;
-    if (voice == static_cast<int>(shogun::Voice::Lead) || voice == static_cast<int>(shogun::Voice::Bass))
-      engine_.release(static_cast<shogun::Voice>(voice));
+  // The bank documents are sparse: INIT first, then the document as a saved state loads, except that SRC (an instance
+  // setting) is neither reset nor taken from the document.
+  resetParams(true);
+  patchFromJson(juce::JSON::parse(juce::String::fromUTF8(factory::programJson(program))), false);
+  snapParams_.store(true, std::memory_order_release);  // the kit's values, not a glide from INIT's
+}
+
+void ShogunAudioProcessor::pickUpEdits() {
+  const std::uint32_t e = editEpoch_.load(std::memory_order_acquire);
+  if (e == appliedEpoch_) return;
+  const juce::SpinLock::ScopedTryLockType tl(editLock_);
+  if (!tl.isLocked()) return;  // the UI is mid-edit: take it next block
+  engine_->setPattern(uiPattern_);
+  for (int i = 0; i < mod::kRows; ++i) engine_->modulation().rows[i] = uiRows_[static_cast<size_t>(i)];
+  engine_->clearCables();
+  for (int i = 0; i < uiCableCount_; ++i)
+    engine_->addCable(uiCables_[static_cast<size_t>(i)].first, uiCables_[static_cast<size_t>(i)].second);
+  for (int i = 0; i < kPorts; ++i) {
+    engine_->setCvAmt(i, uiCvAmt_[static_cast<size_t>(i)]);
+    engine_->setInputLaw(i, uiLaw_[static_cast<size_t>(i)]);
+  }
+  appliedEpoch_ = e;
+}
+
+// ---------------------------------------------------------------- audio
+
+void ShogunAudioProcessor::handleMidi(const juce::MidiMessage& m) {
+  // Drums: notes 36–49 (BD1 … HTC) on any channel but 1/2. LEAD on channel 1, BASS on channel 2 (MIDI note = SHOGUN
+  // note, 48 = C3 = 0 V). Notes 50/51 on other channels play LEAD/BASS at C3 (old map).
+  const int ch = m.getChannel();
+  if (m.isNoteOn()) {
+    const int curve = stepIndex(static_cast<double>(paramU(P_GLOBAL_VEL_CURVE)), 4);
+    const double vel = 5.0 * velCurve(curve, m.getVelocity() / 127.0);
+    const int n = m.getNoteNumber();
+    if (ch == 1 || ch == 2) {
+      engine_->noteOn(ch == 1 ? LEAD : BASS, n, vel);
+      return;
+    }
+    const int v = n - 36;
+    if (v >= 0 && v < LEAD) engine_->trigger(v, vel, 0.0, 3);
+    else if (v == LEAD || v == BASS) engine_->noteOn(v, 48, vel);
+  } else if (m.isNoteOff()) {
+    const int n = m.getNoteNumber();
+    if (ch == 1 || ch == 2) engine_->noteOff(ch == 1 ? LEAD : BASS);
+    else if (n - 36 == LEAD || n - 36 == BASS) engine_->noteOff(n - 36);
+  } else if (m.isController()) {
+    const int cc = m.getControllerNumber();
+    const double u = m.getControllerValue() / 127.0;  // old CC integer → u = cc/127 (§14)
+    if (cc == 1) {
+      engine_->setModWheel(u);
+      return;
+    }
+    for (int id : ccToParam_[cc]) {
+      engine_->setParam(id, u);
+      last_[static_cast<size_t>(id)] = -1.0f;  // the host parameter wins again at its next change
+    }
+  } else if (m.isChannelPressure()) {
+    engine_->setAftertouch(m.getChannelPressureValue() / 127.0);
   }
 }
 
 void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
   juce::ScopedNoDenormals noDenormals;
-  buffer.clear();
-
-  bool hostPlaying = false;
-  double hostBpm = tempo_ == nullptr ? 120.0 : static_cast<double>(tempo_->load(std::memory_order_relaxed));
-  if (auto* head = getPlayHead()) {
-    if (auto pos = head->getPosition()) {
-      hostPlaying = pos->getIsPlaying();
-      if (auto bpm = pos->getBpm()) hostBpm = *bpm;
-    }
-  }
-  applyControls(hostPlaying, hostBpm);
-  drainPads();
-
   const int n = buffer.getNumSamples();
-  const int channels = buffer.getNumChannels();
-  float* left = channels > 0 ? buffer.getWritePointer(0) : nullptr;
-  float* right = channels > 1 ? buffer.getWritePointer(1) : left;
-  if (left == nullptr) return;
+  const double t0 = juce::Time::getMillisecondCounterHiRes();
 
-  const double advance = shogun::kFs / hostSr_;
-  shogun::TrigIn silent;
-  auto midiIt = midi.begin();
-  const auto midiEnd = midi.end();
+  // OS / OFFLINE changes re-prepare off the audio thread.
+  int wantOs = osFromParam(static_cast<double>(paramU(P_GLOBAL_OS)));
+  if (isNonRealtime() && stepIndex(static_cast<double>(paramU(P_GLOBAL_OFFLINE)), 2) == 1) wantOs = 4;
+  if (wantOs != osNow_) osChangeWanted_.store(true, std::memory_order_release);
 
-  for (int i = 0; i < n; ++i) {
-    while (midiIt != midiEnd && (*midiIt).samplePosition <= i) {
-      handleMidi((*midiIt).getMessage());
-      ++midiIt;
-    }
-    const double t = frac_;
-    left[i] = static_cast<float>((1.0 - t) * older_.mainL + t * newer_.mainL);
-    if (right != nullptr && right != left)
-      right[i] = static_cast<float>((1.0 - t) * older_.mainR + t * newer_.mainR);
-    else if (right != nullptr)
-      right[i] = left[i];
-
-    frac_ += advance;
-    while (frac_ >= 1.0) {
-      frac_ -= 1.0;
-      older_ = newer_;
-      engine_.process(silent, newer_);
+  // Host lock (§10.1): ppq / bpm / playing at the first sample of the block.
+  HostTransport ht;
+  if (auto* ph = getPlayHead()) {
+    if (auto pos = ph->getPosition()) {
+      if (auto ppq = pos->getPpqPosition()) {
+        ht.valid = true;
+        ht.ppq = *ppq;
+      }
+      if (auto bpm = pos->getBpm()) ht.bpm = *bpm;
+      ht.playing = pos->getIsPlaying();
     }
   }
-  shownStep_.store(engine_.displayStep(), std::memory_order_relaxed);
+  engine_->setHostTransport(ht);
+  applyParams(snapParams_.exchange(false, std::memory_order_acq_rel));  // a program change lands at once
+  if (const std::uint32_t s = serialReq_.exchange(0, std::memory_order_acq_rel)) engine_->setSerial(s);  // RE-ROLL
+  pickUpEdits();
+
+  const int rq = runReq_.exchange(-1);
+  if (rq >= 0) engine_->setRunning(rq == 1);
+  if (restartReq_.exchange(false)) engine_->restart();
+  const std::uint32_t pads = padMask_.exchange(0);
+  for (int v = 0; v < kVoices; ++v)
+    if (pads & (1u << v)) {
+      if (isDrum(v)) engine_->trigger(v, 5.0, 0.0, 3);
+      else engine_->noteOn(v, 48, 5.0);
+    }
+
+  // Outputs: main pair + the enabled aux pairs.
+  auto mainBus = getBusBuffer(buffer, false, 0);
+  float* L = mainBus.getWritePointer(0);
+  float* R = mainBus.getNumChannels() > 1 ? mainBus.getWritePointer(1) : nullptr;
+  float* aux[8][2] = {};
+  const int nBuses = getBusCount(false);
+  for (int b = 1; b < nBuses && b <= 8; ++b) {
+    auto* bus = getBus(false, b);
+    if (bus == nullptr || !bus->isEnabled()) continue;
+    auto bb = getBusBuffer(buffer, false, b);
+    if (bb.getNumChannels() < 2) continue;
+    aux[b - 1][0] = bb.getWritePointer(0);
+    aux[b - 1][1] = bb.getWritePointer(1);
+  }
+
+  float pkL = 0.0f, pkR = 0.0f;
+  float vpk[kVoices] = {};
+  auto it = midi.cbegin();
+  for (int i = 0; i < n; ++i) {
+    while (it != midi.cend() && (*it).samplePosition <= i) {
+      handleMidi((*it).getMessage());
+      ++it;
+    }
+    engine_->processSample();
+    const float l = static_cast<float>(engine_->mainL());
+    const float r = static_cast<float>(engine_->mainR());
+    L[i] = l;
+    if (R) R[i] = r;
+    pkL = std::fmax(pkL, std::fabs(l));
+    pkR = std::fmax(pkR, std::fabs(r));
+    const double* ax = engine_->aux();
+    for (int b = 0; b < 8; ++b)
+      if (aux[b][0]) {
+        aux[b][0][i] = static_cast<float>(ax[2 * b]);
+        aux[b][1][i] = static_cast<float>(ax[2 * b + 1]);
+      }
+    for (int v = 0; v < kVoices; ++v) vpk[v] = std::fmax(vpk[v], static_cast<float>(std::fabs(engine_->voiceOut(v))));
+  }
+  while (it != midi.cend()) {
+    handleMidi((*it).getMessage());
+    ++it;
+  }
+  midi.clear();
+
+  // Meters (relaxed; the editor decays them).
+  auto maxStore = [](std::atomic<float>& a, float v) {
+    if (v > a.load(std::memory_order_relaxed)) a.store(v, std::memory_order_relaxed);
+  };
+  maxStore(meters.peakL, pkL);
+  maxStore(meters.peakR, pkR);
+  for (int v = 0; v < kVoices; ++v) {
+    maxStore(meters.voicePeak[static_cast<size_t>(v)], vpk[v]);
+    meters.voiceActive[static_cast<size_t>(v)].store(engine_->voiceActive(v), std::memory_order_relaxed);
+  }
+  for (int b = 0; b < 4; ++b) meters.busGr[static_cast<size_t>(b)].store(static_cast<float>(engine_->busGain(b)));
+  for (int l = 0; l < 4; ++l)
+    meters.lfo[static_cast<size_t>(l)].store(static_cast<float>(engine_->modulation().lfo[l].value(-1)));
+  meters.step.store(engine_->displayStep(), std::memory_order_relaxed);
+  meters.globalStep.store(static_cast<int>(engine_->globalStep()), std::memory_order_relaxed);
+  meters.running.store(engine_->running(), std::memory_order_relaxed);
+  if (engine_->clipOver()) meters.clip.store(true, std::memory_order_relaxed);
+  const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
+  const double budget = 1000.0 * n / sr_;
+  meters.cpu.store(static_cast<float>(budget > 0 ? ms / budget : 0.0), std::memory_order_relaxed);
 }
 
-void ShogunAudioProcessor::toggleStep(int voice, int step) {
-  if (voice < 0 || voice >= kVoices || step < 0 || step >= kSteps) return;
-  stepOn_[static_cast<size_t>(voice)].fetch_xor(1u << step, std::memory_order_relaxed);
-  patternEpoch_.fetch_add(1, std::memory_order_release);
+// ---------------------------------------------------------------- state (§14)
+
+juce::var ShogunAudioProcessor::patchToJson() const {
+  auto* root = new juce::DynamicObject();
+  root->setProperty("format", "shogun-patch");
+  root->setProperty("version", 2);
+  root->setProperty("name", juce::String(uiPattern_.name));
+  root->setProperty("unit", "0x" + juce::String::toHexString(static_cast<juce::int64>(unitSerial())).toUpperCase());
+  root->setProperty("tolerance", static_cast<double>(paramU(P_GLOBAL_TOLERANCE)));
+  root->setProperty("drift", static_cast<double>(paramU(P_GLOBAL_DRIFT)));
+
+  auto* params = new juce::DynamicObject();
+  for (int i = 0; i < kParamCount; ++i) params->setProperty(kParams[i].id, static_cast<double>(paramU(i)));
+  root->setProperty("params", juce::var(params));
+
+  juce::Array<juce::var> mods;
+  for (const auto& r : uiRows_) {
+    if (r.src == mod::SRC_NONE || r.dst < 0) continue;
+    auto* o = new juce::DynamicObject();
+    o->setProperty("src", srcToString(r.src, r.srcVoice));
+    o->setProperty("dst", kParams[r.dst].id);
+    o->setProperty("depth", r.depth);
+    o->setProperty("via", r.via == mod::SRC_NONE ? juce::var() : juce::var(srcToString(r.via, r.viaVoice)));
+    o->setProperty("curve", kCurveNames[r.curve & 3]);
+    o->setProperty("on", r.on);
+    mods.add(juce::var(o));
+  }
+  root->setProperty("mod", mods);
+
+  juce::Array<juce::var> cables;
+  for (int i = 0; i < uiCableCount_; ++i) {
+    juce::Array<juce::var> c;
+    c.add(juce::String("SHOGUN/") + kPortTable[uiCables_[static_cast<size_t>(i)].first].id);
+    c.add(juce::String("SHOGUN/") + kPortTable[uiCables_[static_cast<size_t>(i)].second].id);
+    // no colour entry: the cable takes its source jack's role colour (JCS R14); an entry would be an override
+    cables.add(c);
+  }
+  root->setProperty("cables", cables);
+
+  auto* cv = new juce::DynamicObject();
+  for (int i = 0; i < kPorts; ++i)
+    if (kPortTable[i].dir == PortDir::In && !shogun::dsp::exactEq(uiCvAmt_[static_cast<size_t>(i)], 1.0))
+      cv->setProperty(kPortTable[i].id, uiCvAmt_[static_cast<size_t>(i)]);
+  root->setProperty("cvAmt", juce::var(cv));
+  auto* laws = new juce::DynamicObject();  // alias laws of migrated inputs (lin55 / drum PITCH 1/12)
+  for (int i = 0; i < kPorts; ++i)
+    if (uiLaw_[static_cast<size_t>(i)] != 0) laws->setProperty(kPortTable[i].id, uiLaw_[static_cast<size_t>(i)]);
+  root->setProperty("inLaw", juce::var(laws));
+
+  static const char* const kScale[] = {"1/32", "1/16", "1/8T", "1/8"};
+  auto* seq = new juce::DynamicObject();
+  seq->setProperty("pattern", juce::String(uiPattern_.name));
+  seq->setProperty("seed", static_cast<juce::int64>(uiPattern_.seed));
+  juce::Array<juce::var> tracks;
+  for (int t = 0; t < 16; ++t) {
+    const Track& tr = uiPattern_.tracks[t];
+    auto* to = new juce::DynamicObject();
+    to->setProperty("id", kVoiceNames[t]);
+    to->setProperty("len", tr.len);
+    to->setProperty("scale", tr.scale < 0 ? juce::var() : juce::var(kScale[tr.scale & 3]));
+    to->setProperty("swing", tr.swing < 0 ? juce::var() : juce::var(tr.swing));
+    to->setProperty("shift", tr.shift);
+    juce::Array<juce::var> steps;
+    for (int s = 0; s < kMaxSteps; ++s) {
+      const Step& st = tr.steps[s];
+      if (!st.on && st.nLocks == 0) continue;
+      auto* so = new juce::DynamicObject();
+      so->setProperty("i", s);
+      so->setProperty("on", st.on);
+      so->setProperty("acc", st.acc);
+      so->setProperty("prob", static_cast<double>(st.prob));
+      so->setProperty("micro", static_cast<double>(st.micro));
+      so->setProperty("flam", st.flam);
+      so->setProperty("ratchet", st.ratchet);
+      if (!shogun::dsp::exactEq(st.bend, 0.0f)) so->setProperty("bend", static_cast<double>(st.bend));
+      if (!isDrum(t)) {
+        so->setProperty("note", st.note);
+        so->setProperty("tie", st.tie);
+      }
+      auto* locks = new juce::DynamicObject();
+      for (int k = 0; k < st.nLocks; ++k) locks->setProperty(kParams[st.locks[k].param].id, static_cast<double>(st.locks[k].u));
+      so->setProperty("locks", juce::var(locks));
+      steps.add(juce::var(so));
+    }
+    to->setProperty("steps", steps);
+    tracks.add(juce::var(to));
+  }
+  seq->setProperty("tracks", tracks);
+  root->setProperty("seq", juce::var(seq));
+  return juce::var(root);
 }
 
-bool ShogunAudioProcessor::isStepOn(int voice, int step) const {
-  if (voice < 0 || voice >= kVoices || step < 0 || step >= kSteps) return false;
-  const std::uint32_t bits = stepOn_[static_cast<size_t>(voice)].load(std::memory_order_relaxed);
-  return (bits & (1u << step)) != 0;
-}
+void ShogunAudioProcessor::patchFromJson(const juce::var& v, bool applySource) {
+  if (!v.isObject()) return;
+  if (auto* params = v["params"].getDynamicObject())
+    for (const auto& kv : params->getProperties()) {
+      const int id = findParam(kv.name.toString().toRawUTF8());
+      if (id == P_CLOCK_SOURCE && !applySource) continue;  // a preset does not apply SRC (instance setting)
+      if (id >= 0) param(id)->setValueNotifyingHost(static_cast<float>(static_cast<double>(kv.value)));
+    }
+  const juce::SpinLock::ScopedLockType sl(editLock_);
+  uiRows_ = {};
+  if (auto* mods = v["mod"].getArray()) {
+    int i = 0;
+    for (const auto& m : *mods) {
+      if (i >= mod::kRows) break;
+      mod::Row r;
+      srcFromString(m["src"].toString(), r.src, r.srcVoice);
+      r.dst = findParam(m["dst"].toString().toRawUTF8());
+      r.depth = static_cast<double>(m["depth"]);
+      if (!m["via"].isVoid()) srcFromString(m["via"].toString(), r.via, r.viaVoice);
+      const juce::String c = m["curve"].toString();
+      for (int k = 0; k < 4; ++k)
+        if (c == kCurveNames[k]) r.curve = k;
+      r.on = m.hasProperty("on") ? static_cast<bool>(m["on"]) : true;
+      if (r.src != mod::SRC_NONE && r.dst >= 0) uiRows_[static_cast<size_t>(i++)] = r;
+    }
+  }
+  for (int i = 0; i < kPorts; ++i) {
+    uiCvAmt_[static_cast<size_t>(i)] = 1.0;
+    uiLaw_[static_cast<size_t>(i)] = 0;
+  }
+  // Saved jack ids resolve through the alias table (§12.3): HZ/V → NOTE (lin55), TOM:PITCH → 3 toms (AMT 1/12).
+  // resolvePort parses every form (SHOGUN#N/…, SHOGUN/…, bare) with the shared JCS R6 parseJackId (engine/ports.h).
+  auto resolve = [](const juce::String& full, int out[3], int* law) { return resolvePort(full.toRawUTF8(), out, law); };
+  uiCableCount_ = 0;
+  droppedCables_ = droppedRemoved_ = 0;
+  loadReport_ = {};
+  juce::StringArray dropped;
+  if (auto* cables = v["cables"].getArray())
+    for (const auto& c : *cables) {
+      if (!c.isArray() || c.size() < 2) continue;
+      int from[3], to[3], lf = 0, lt = 0;
+      const int nf = resolve(c[0].toString(), from, &lf);
+      const int nt = resolve(c[1].toString(), to, &lt);
+      if (nf < 1 || nt < 1) {  // dropped and reported, never an error (old CLOCK:FILL IN / MOD:LANE A cables)
+        ++droppedCables_;
+        if (isRemovedPort(c[0].toString().toRawUTF8()) || isRemovedPort(c[1].toString().toRawUTF8())) ++droppedRemoved_;
+        dropped.add(c[0].toString() + " -> " + c[1].toString());
+        continue;
+      }
+      for (int k = 0; k < nt && uiCableCount_ < kMaxCables; ++k) {
+        if (to[k] < 0) continue;
+        uiCables_[static_cast<size_t>(uiCableCount_++)] = {from[0], to[k]};
+        if (lt == 1) uiLaw_[static_cast<size_t>(to[k])] = 1;
+        if (lt == 2) uiCvAmt_[static_cast<size_t>(to[k])] = 1.0 / 12.0;
+      }
+    }
+  if (droppedCables_ > 0) {
+    loadReport_ = "SHOGUN: dropped " + juce::String(droppedCables_) + " saved cable(s) (" + juce::String(droppedRemoved_) +
+                  " on removed jacks CLOCK:FILL IN / MOD:LANE A): " + dropped.joinIntoString(", ");
+    juce::Logger::writeToLog(loadReport_);
+  }
+  if (auto* cv = v["cvAmt"].getDynamicObject())
+    for (const auto& kv : cv->getProperties()) {
+      int p[3], law = 0;
+      const int np = resolve(kv.name.toString(), p, &law);
+      for (int k = 0; k < np; ++k)
+        if (p[k] >= 0) uiCvAmt_[static_cast<size_t>(p[k])] = static_cast<double>(kv.value) * (law == 2 ? 1.0 / 12.0 : 1.0);
+    }
+  if (auto* laws = v["inLaw"].getDynamicObject())
+    for (const auto& kv : laws->getProperties()) {
+      const int p = portFromId(kv.name.toString().toRawUTF8());
+      if (p >= 0) uiLaw_[static_cast<size_t>(p)] = static_cast<std::uint8_t>(static_cast<int>(kv.value));
+    }
 
-void ShogunAudioProcessor::pushPad(int voice) {
-  if (voice < 0 || voice >= kVoices) return;
-  int note = -1;
-  if (voice == static_cast<int>(shogun::Voice::Lead)) note = 60;
-  if (voice == static_cast<int>(shogun::Voice::Bass)) note = 36;
-  const int write = padWrite_.load(std::memory_order_relaxed);
-  const int next = (write + 1) % kPadCap;
-  if (next == padRead_.load(std::memory_order_acquire)) return;
-  pads_[static_cast<size_t>(write)] = Pad{voice, note, 1.0f};
-  padWrite_.store(next, std::memory_order_release);
+  uiPattern_ = Pattern();
+  const juce::var seq = v["seq"];
+  if (seq.isObject()) {
+    uiPattern_.setName(seq["pattern"].toString().toRawUTF8());
+    if (seq.hasProperty("seed")) uiPattern_.seed = static_cast<std::uint32_t>(static_cast<juce::int64>(seq["seed"]));
+    if (auto* tracks = seq["tracks"].getArray())
+      for (const auto& to : *tracks) {
+        int t = -1;
+        for (int k = 0; k < 16; ++k)
+          if (to["id"].toString() == kVoiceNames[k]) t = k;
+        if (t < 0) continue;
+        Track& tr = uiPattern_.tracks[t];
+        tr.len = juce::jlimit(1, kMaxSteps, static_cast<int>(to.getProperty("len", 16)));
+        const juce::String sc = to["scale"].toString();
+        static const char* const kScale[] = {"1/32", "1/16", "1/8T", "1/8"};
+        tr.scale = -1;
+        for (int k = 0; k < 4; ++k)
+          if (sc == kScale[k]) tr.scale = k;
+        tr.swing = to["swing"].isVoid() ? -1.0 : static_cast<double>(to["swing"]);
+        tr.shift = static_cast<double>(to.getProperty("shift", 0.0));
+        if (auto* steps = to["steps"].getArray())
+          for (const auto& so : *steps) {
+            const int s = static_cast<int>(so["i"]);
+            if (s < 0 || s >= kMaxSteps) continue;
+            Step& st = tr.steps[s];
+            st.on = so.hasProperty("on") ? static_cast<bool>(so["on"]) : true;
+            st.acc = static_cast<std::uint8_t>(juce::jlimit(1, 3, static_cast<int>(so.getProperty("acc", 2))));
+            st.prob = static_cast<float>(static_cast<double>(so.getProperty("prob", 1.0)));
+            st.micro = static_cast<float>(static_cast<double>(so.getProperty("micro", 0.0)));
+            st.flam = static_cast<std::uint8_t>(static_cast<int>(so.getProperty("flam", 0)));
+            st.ratchet = static_cast<std::uint8_t>(static_cast<int>(so.getProperty("ratchet", 1)));
+            st.bend = static_cast<float>(static_cast<double>(so.getProperty("bend", 0.0)));
+            st.note = static_cast<std::int8_t>(static_cast<int>(so.getProperty("note", 48)));
+            st.tie = static_cast<bool>(so.getProperty("tie", false));
+            if (auto* locks = so["locks"].getDynamicObject())
+              for (const auto& kv : locks->getProperties()) {
+                const int id = findParam(kv.name.toString().toRawUTF8());
+                if (id >= 0) st.setLock(id, static_cast<float>(static_cast<double>(kv.value)));
+              }
+          }
+      }
+  }
+  commitEdits();
 }
 
 void ShogunAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
-  juce::XmlElement root("SHOGUN");
-  if (auto params = apvts.copyState().createXml()) root.addChildElement(params.release());
-  auto* steps = root.createNewChildElement("Steps");
-  juce::String masks;
-  for (int i = 0; i < kVoices; ++i) {
-    if (i > 0) masks << ",";
-    masks << static_cast<int>(stepOn_[static_cast<size_t>(i)].load(std::memory_order_relaxed));
-  }
-  steps->setAttribute("masks", masks);
-  copyXmlToBinary(root, destData);
+  juce::XmlElement xml("SHOGUN");
+  xml.setAttribute("version", 2);
+  xml.setAttribute("running", engine_->running() ? 1 : 0);
+  xml.setAttribute("program", currentProgram_);
+  xml.addTextElement(juce::JSON::toString(patchToJson(), true));
+  copyXmlToBinary(xml, destData);
 }
 
 void ShogunAudioProcessor::setStateInformation(const void* data, int sizeInBytes) {
-  std::unique_ptr<juce::XmlElement> root(getXmlFromBinary(data, sizeInBytes));
-  if (root == nullptr || !root->hasTagName("SHOGUN")) return;
-  if (auto* params = root->getChildByName(apvts.state.getType()))
-    apvts.replaceState(juce::ValueTree::fromXml(*params));
-  if (auto* steps = root->getChildByName("Steps")) {
-    const auto parts = juce::StringArray::fromTokens(steps->getStringAttribute("masks"), ",", "");
-    for (int i = 0; i < kVoices && i < parts.size(); ++i)
-      stepOn_[static_cast<size_t>(i)].store(static_cast<std::uint32_t>(parts[i].getIntValue()),
-                                             std::memory_order_relaxed);
-    patternEpoch_.fetch_add(1, std::memory_order_release);
-  }
+  std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
+  if (xml == nullptr || !xml->hasTagName("SHOGUN")) return;
+  if (xml->getIntAttribute("version", 1) < 2) return;  // v1 plugin states (old AudioParameterInt ids) are not migrated
+  const juce::var doc = juce::JSON::parse(xml->getAllSubText());
+  patchFromJson(doc);
+  const juce::String unit = doc["unit"].toString();  // the unit serial travels with the plugin state
+  if (unit.startsWithIgnoreCase("0x")) requestSerial(static_cast<std::uint32_t>(unit.substring(2).getHexValue64()));
+  currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, xml->getIntAttribute("program", 0));
 }
 
-juce::AudioProcessorEditor* ShogunAudioProcessor::createEditor() {
-  return new ShogunAudioProcessorEditor(*this);
-}
+juce::AudioProcessorEditor* ShogunAudioProcessor::createEditor() { return new ShogunAudioProcessorEditor(*this); }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new ShogunAudioProcessor(); }

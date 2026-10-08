@@ -1,22 +1,46 @@
 #pragma once
-// Freestanding <cmath> for the WebAssembly build. sin, cos, exp, pow and tanh are imported from the
-// page (Math.*). floor and fabs are wasm instructions, fmax is inline. round and llround round half away from zero.
+// Freestanding <cmath> for the WebAssembly build. The transcendental functions are imported from the page (Math.*,
+// exp2 as 2**x); sqrt, floor, ceil, trunc and fabs are wasm instructions. round/lround/llround round half away from 0.
 extern "C" {
 double sin(double);
 double cos(double);
+double tan(double);
 double exp(double);
+double exp2(double);
 double pow(double, double);
 double tanh(double);
+double log(double);
+double log2(double);
+double log10(double);
+double log1p(double);
+double atan2(double, double);
 }
 namespace std {
+using ::atan2;
 using ::cos;
 using ::exp;
+using ::exp2;
+using ::log;
+using ::log10;
+using ::log1p;
+using ::log2;
 using ::pow;
 using ::sin;
+using ::tan;
 using ::tanh;
+inline double sqrt(double x) { return __builtin_sqrt(x); }
+inline float sqrt(float x) { return __builtin_sqrtf(x); }
 inline double floor(double x) { return __builtin_floor(x); }
+inline double ceil(double x) { return __builtin_ceil(x); }
+inline double trunc(double x) { return __builtin_trunc(x); }
 inline double fabs(double x) { return __builtin_fabs(x); }
+inline float fabs(float x) { return __builtin_fabsf(x); }
 inline double fmax(double a, double b) { return a > b ? a : b; }
+inline double fmin(double a, double b) { return a < b ? a : b; }
 inline double round(double x) { return x < 0 ? -__builtin_floor(-x + 0.5) : __builtin_floor(x + 0.5); }
+inline long lround(double x) { return static_cast<long>(round(x)); }
 inline long long llround(double x) { return static_cast<long long>(round(x)); }
+inline bool isfinite(double x) { return x == x && x - x == 0.0; }
+inline bool isnan(double x) { return x != x; }
+inline double nan(const char*) { return __builtin_nan(""); }
 }  // namespace std

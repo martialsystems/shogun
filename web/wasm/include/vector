@@ -1,0 +1,46 @@
+#pragma once
+// Minimal std::vector for the wasm build (what the engine uses: assign, resize, size, [], data, begin/end, push_back).
+#include <cstddef>
+#include <new>
+namespace std {
+template <class T> class vector {
+ public:
+  vector() = default;
+  vector(const vector&) = delete;
+  vector& operator=(const vector&) = delete;
+  ~vector() { delete[] d_; }
+  void assign(unsigned long n, const T& v) {
+    if (n != n_) { delete[] d_; d_ = n ? new T[n] : nullptr; n_ = n; }
+    for (unsigned long i = 0; i < n; ++i) d_[i] = v;
+  }
+  void resize(unsigned long n, const T& v = T()) {
+    T* d = n ? new T[n] : nullptr;
+    for (unsigned long i = 0; i < n; ++i) d[i] = i < n_ ? d_[i] : v;
+    delete[] d_;
+    d_ = d;
+    n_ = n;
+  }
+  void clear() { delete[] d_; d_ = nullptr; n_ = 0; }
+  void push_back(const T& v) {  // copies element-wise (T needs copy assignment); load-time use only
+    T* d = new T[n_ + 1];
+    for (unsigned long i = 0; i < n_; ++i) d[i] = d_[i];
+    d[n_] = v;
+    delete[] d_;
+    d_ = d;
+    ++n_;
+  }
+  unsigned long size() const { return n_; }
+  bool empty() const { return n_ == 0; }
+  T& operator[](unsigned long i) { return d_[i]; }
+  const T& operator[](unsigned long i) const { return d_[i]; }
+  T* data() { return d_; }
+  const T* data() const { return d_; }
+  T* begin() { return d_; }
+  T* end() { return d_ + n_; }
+  const T* begin() const { return d_; }
+  const T* end() const { return d_ + n_; }
+ private:
+  T* d_ = nullptr;
+  unsigned long n_ = 0;
+};
+}  // namespace std

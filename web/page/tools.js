@@ -10,12 +10,13 @@ const snap=()=>({P:{...P},tracks:JSON.parse(JSON.stringify(tracks)),kit:{...curK
 function undoPush(key){const now=performance.now();if(key&&key==undoKey&&now-undoT<1000){undoT=now;return}
   undoKey=key;undoT=now;UNDO.push(snap());if(UNDO.length>200)UNDO.shift();REDO.length=0}
 function undoReset(){UNDO.length=0;REDO.length=0;undoKey=null}
-function restore(s){Object.assign(P,s.P);tracks=s.tracks;curKit=s.kit;dirty=s.dirty;if(edit>=tracks[sel].len)edit=0;loadKnobs();
-  const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"]);send(c);drawAll()}
+function restore(s){const lk=LFOK.filter(k=>P[k]!==s.P[k]);Object.assign(P,s.P);tracks=s.tracks;curKit=s.kit;dirty=s.dirty;if(edit>=tracks[sel].len)edit=0;loadKnobs();
+  const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...lk.map(lfoCall));send(c);drawAll()}
 function undo(redo){const from=redo?REDO:UNDO,to=redo?UNDO:REDO;if(!from.length){info.textContent=redo?"Nothing to redo":"Nothing to undo";return}
   to.push(snap());restore(from.pop());undoKey=null;info.textContent=(redo?"Redo":"Undo")+" · "+UNDO.length+" more to undo, "+REDO.length+" to redo"}
 
-// Kits: the knob settings without the steps. The factory kits are the ones the factory patterns load; saved kits stay in this browser.
+// Kits: the knob settings without the steps. The factory kits are the ones the factory patterns load (INIT, then the
+// factory bank); saved kits stay in this browser.
 let USERK=[],curKit={n:"INIT",dirty:false};
 const FKITS=Object.keys(STYLE).map(n=>({n,f:n})),kitList=()=>FKITS.concat(USERK);
 const kitKnobs=k=>k.knobs||patKnobs({n:k.f});
@@ -23,16 +24,21 @@ const panelKnobs=()=>{const k={};for(const id in MAP)if(!MAP[id].master)k[id]=P[
 function loadKit(i){const k=kitList()[i];if(!k)return;undoPush();const kn=kitKnobs(k);
   for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}
   for(const f in LINKED)syncLinked(LINKED[f][LINKED[f].length-1]);
-  curKit={n:k.n,dirty:false};dirty=true;const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);drawAll();info.textContent=`Kit ${k.n} · the steps are unchanged`}
+  // fx: the factory kit whose whole sound the engine now has (a saved kit sets the knobs only, so it keeps the last one)
+  curKit={n:k.n,dirty:false,fx:k.fx!=null?k.fx:curKit.fx};dirty=true;
+  // a factory kit loads its document's sound (every parameter and mod row), then the page's tracks, master, solo and cables
+  const c=k.fx!=null?[["sg_factory_kit",k.fx],["sg_set_mode",P["CLOCK:SOURCE"]>.5?1:0],...knobCalls("OUT:MASTER"),["sg_set_solo",soloV?VI.indexOf(soloV):-1],...cableCalls()]:[];
+  if(k.fx!=null)VOICES.forEach(v=>c.push(...trackCalls(v.k)));else Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));
+  c.push(["sg_commit"]);send(c);drawAll();info.textContent=`Kit ${k.n} · the steps are unchanged`}
 function saveKit(name){const rec={n:name,knobs:panelKnobs()},j=USERK.findIndex(k=>k.n==name);if(j>=0)USERK[j]=rec;else USERK.push(rec);
-  store.set("shogun.kits",USERK);curKit={n:name,dirty:false};drawAll();info.textContent=`Saved kit ${name} in this browser`}
+  store.set("shogun.kits",USERK);curKit={n:name,dirty:false,fx:curKit.fx};drawAll();info.textContent=`Saved kit ${name} in this browser`}
 
 // RANDOM rolls the selected voice's knobs (not its LEVEL), each inside the range below (controller values; full range if not listed).
 const RND={bd1Decay:[25,110],bd1Pitch:[10,110],bd1Tune:[10,80],bd1Noise:[0,70],bd1Filter:[30,127],bd2Tune:[10,90],bd2Decay:[25,115],bd2Tone:[10,127],
   sdTune:[20,110],sdDTune:[30,127],sdPitch:[0,90],sdTone:[10,120],sdToneDecay:[10,90],sdSnappy:[40,127],sdSnDecay:[15,90],rsTune:[20,110],
   cpAttack:[40,127],cpDecay:[10,80],cpFilter:[30,110],clTune:[20,120],clDecay:[10,70],cyTune:[20,110],cyTone:[20,110],cyDecay:[30,110],ohDecay:[15,90],
   hhTune:[30,120],hhDecay:[10,70],ltcTune:[15,100],ltcDecay:[15,90],mtcTune:[15,100],mtcDecay:[15,90],htcTune:[15,100],htcDecay:[15,90],
-  cbTune:[20,100],cbDecay:[15,90],maDecay:[5,60],leadTone:[20,120],bassTone:[15,110]};
+  cbTune:[20,100],cbDecay:[15,90],maDecay:[5,60],leadTone:[20,120],bassTone:[15,110],bd1Wave:[0,90],bd2Wave:[0,90],ltcWave:[0,90],mtcWave:[0,90],htcWave:[0,90]};
 function randomVoice(){const v=VK[sel],done=[];undoPush();
   v.knobs.forEach(([lb,p,n])=>{if(!p||n=="tog")return;const id=v.k+":"+lb,[lo,hi]=RND[p]||[0,127];P[id]=vOf(id,lo+Math.floor(Math.random()*(hi-lo+1)),STEPS[id]);syncLinked(id);sendParam(id);done.push(lb)});
   curKit.dirty=true;dirty=true;drawAll();info.textContent=`${v.t} · rolled ${done.join(", ")} · UNDO puts it back`;if(!running)audition(sel)}

@@ -11,16 +11,40 @@ FetchContent_Declare(JUCE
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 
+# Compiler options by compiler front end (GCC/Clang vs MSVC/clang-cl).
+#  - Floating-point contraction (FMA fusion) is off for the engine, the plugin and the probe, so every platform and
+#    instruction set renders the same samples (TESTPLAN "Floating-point contraction"). MSVC: /fp:precise (no
+#    contraction by default since VS 2022); clang-cl also needs -ffp-contract=off, since its /fp:precise allows it.
+#  - Warnings: our sources build with -Wall -Wextra -Werror on GCC/Clang. MSVC gets /W4 as warnings only (no /WX):
+#    the engine and the JUCE headers it is compiled with have not been built warning-free under MSVC here.
+if(MSVC)
+  set(SHOGUN_FP_OPTIONS /fp:precise)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    list(APPEND SHOGUN_FP_OPTIONS /clang:-ffp-contract=off)
+  endif()
+  set(SHOGUN_WARN_OPTIONS /W4)
+else()
+  set(SHOGUN_FP_OPTIONS -ffp-contract=off)
+  set(SHOGUN_WARN_OPTIONS -Wall -Wextra -Werror)
+endif()
+
 set(ENGINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../engine)
+# Shared Jidai headers (JCS + jidai::dsp), vendored: third_party/jidai-common/VENDORED.md.
+set(JIDAI_COMMON_INC ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/jidai-common/include)
 
 add_library(shogun_engine STATIC ${ENGINE_DIR}/shogun.cpp)
-target_include_directories(shogun_engine PUBLIC ${ENGINE_DIR})
-target_compile_options(shogun_engine PRIVATE -Wall -Wextra -Werror)
+target_include_directories(shogun_engine PUBLIC ${ENGINE_DIR} ${JIDAI_COMMON_INC})
+target_compile_options(shogun_engine PRIVATE ${SHOGUN_WARN_OPTIONS} PUBLIC ${SHOGUN_FP_OPTIONS})
+if(MSVC)
+  target_compile_definitions(shogun_engine PRIVATE _CRT_SECURE_NO_WARNINGS)  # std::sscanf / strcpy in engine/
+endif()
 set_target_properties(shogun_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 set(SHOGUN_PLUGIN_SOURCES
   Source/PluginProcessor.cpp
   Source/PluginEditor.cpp)
+# Our sources build warning-clean (-Werror on GCC/Clang); JUCE's own modules keep JUCE's flags.
+set_source_files_properties(${SHOGUN_PLUGIN_SOURCES} Source/Probe.cpp PROPERTIES COMPILE_OPTIONS "${SHOGUN_WARN_OPTIONS}")
 
 juce_add_plugin(Shogun
   COMPANY_NAME "Martial Systems"
@@ -48,8 +72,11 @@ target_link_libraries(Shogun
     shogun_engine
     juce::juce_audio_utils
   PUBLIC
-    juce::juce_recommended_config_flags
-    juce::juce_recommended_warning_flags)
+    juce::juce_recommended_config_flags)
+# PUBLIC: also reaches the format wrapper targets (Shogun_VST3) that link Shogun.
+target_compile_options(Shogun PUBLIC ${SHOGUN_FP_OPTIONS})
+# Warning policy is the project's -Wall -Wextra -Werror (set on our sources above), not JUCE's extended set
+# (-Wsign-conversion, -Wfloat-equal …), which the engine does not target.
 
 juce_add_console_app(ShogunProbe PRODUCT_NAME "ShogunProbe")
 target_sources(ShogunProbe PRIVATE Source/Probe.cpp ${SHOGUN_PLUGIN_SOURCES})
@@ -62,5 +89,5 @@ target_link_libraries(ShogunProbe
   PRIVATE
     shogun_engine
     juce::juce_audio_utils
-    juce::juce_recommended_config_flags
-    juce::juce_recommended_warning_flags)
+    juce::juce_recommended_config_flags)
+target_compile_options(ShogunProbe PRIVATE ${SHOGUN_FP_OPTIONS})

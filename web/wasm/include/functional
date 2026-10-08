@@ -1,0 +1,8 @@
+#pragma once
+// Freestanding shim: only what jidai-common's dsp headers use (std::equal_to for intentional exact compares).
+namespace std {
+template <class T = void>
+struct equal_to {
+  constexpr bool operator()(const T& a, const T& b) const { return a == b; }
+};
+}  // namespace std

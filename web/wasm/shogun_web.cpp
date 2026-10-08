@@ -1,13 +1,17 @@
-// C entry points for the SHOGUN web page. One engine, driven from an AudioWorklet.
-// The page keeps the pattern and knobs; this file turns them into engine calls and
-// patches the panel's own CLK OUT gate into the TRIG, RST IN, RUN IN and CLK IN jacks.
+// C entry points for the SHOGUN web page (spec v2.2 §15.3): the same engine as the plugin, compiled to wasm and run
+// at the AudioContext rate (no resampler). Two layers:
+//   * the v2 API (sg_param_*, sg_port_*, sg_cable, sg_step, sg_hit, sg_note_*): SECTION:LABEL ids, u ∈ [0, 1];
+//   * the old page API (sg_set_knob, sg_set_drum, sg_patch, …), kept so web/page keeps working while its panel is
+//     redesigned: old CC values map to u = cc/127, shuffle s to swing 0.5 + s/90, old jacks through the alias table.
 
+#include "factory.h"
 #include "shogun.h"
+#include "shogun_web.h"
 
 #ifdef __wasm__
 #define EXPORT(name) extern "C" __attribute__((export_name(#name)))
 
-// Freestanding: no libc in the wasm build.
+// ---------------------------------------------------------------- freestanding runtime (no libc in the wasm build)
 extern "C" void* memcpy(void* d, const void* s, unsigned long n) {
   auto* a = static_cast<unsigned char*>(d);
   const auto* b = static_cast<const unsigned char*>(s);
@@ -31,190 +35,659 @@ extern "C" void* memset(void* d, int c, unsigned long n) {
   while (n--) *a++ = static_cast<unsigned char>(c);
   return d;
 }
-inline void* operator new(unsigned long, void* p) noexcept { return p; }
+extern "C" int strcmp(const char* a, const char* b) {
+  while (*a && *a == *b) {
+    ++a;
+    ++b;
+  }
+  return static_cast<unsigned char>(*a) - static_cast<unsigned char>(*b);
+}
+extern "C" const char* strchr(const char* s, int c) {
+  for (;; ++s) {
+    if (*s == static_cast<char>(c)) return s;
+    if (!*s) return nullptr;
+  }
+}
+extern "C" unsigned long strlen(const char* s) {
+  unsigned long n = 0;
+  while (s[n]) ++n;
+  return n;
+}
+extern "C" char* strcpy(char* d, const char* s) {
+  char* r = d;
+  while ((*d++ = *s++) != 0) {
+  }
+  return r;
+}
+extern "C" int strncmp(const char* a, const char* b, unsigned long n) {
+  for (; n; --n, ++a, ++b) {
+    if (*a != *b) return static_cast<unsigned char>(*a) - static_cast<unsigned char>(*b);
+    if (!*a) return 0;
+  }
+  return 0;
+}
+extern "C" char* strncpy(char* d, const char* s, unsigned long n) {
+  unsigned long i = 0;
+  for (; i < n && s[i]; ++i) d[i] = s[i];
+  for (; i < n; ++i) d[i] = 0;
+  return d;
+}
+// snprintf: %s, %d, %c and %.*s (all the engine needs once formatParam is compiled out).
+extern "C" int snprintf(char* out, unsigned long n, const char* f, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, f);
+  unsigned long k = 0;
+  auto put = [&](char c) {
+    if (k + 1 < n) out[k] = c;
+    ++k;
+  };
+  for (; *f; ++f) {
+    if (*f != '%') {
+      put(*f);
+      continue;
+    }
+    ++f;
+    int prec = -1;
+    if (f[0] == '.' && f[1] == '*') {
+      prec = __builtin_va_arg(ap, int);
+      f += 2;
+    }
+    if (*f == 's') {
+      const char* s = __builtin_va_arg(ap, const char*);
+      for (int i = 0; s[i] && (prec < 0 || i < prec); ++i) put(s[i]);
+    } else if (*f == 'd') {
+      int v = __builtin_va_arg(ap, int);
+      char buf[12];
+      int m = 0;
+      unsigned u = v < 0 ? 0u - static_cast<unsigned>(v) : static_cast<unsigned>(v);
+      do {
+        buf[m++] = static_cast<char>('0' + u % 10);
+        u /= 10;
+      } while (u);
+      if (v < 0) put('-');
+      while (m) put(buf[--m]);
+    } else if (*f == 'c') {
+      put(static_cast<char>(__builtin_va_arg(ap, int)));
+    } else if (*f == '%') {
+      put('%');
+    }
+  }
+  if (n) out[k < n ? k : n - 1] = 0;
+  __builtin_va_end(ap);
+  return static_cast<int>(k);
+}
+
+// Heap: wasm memory.grow, with exact-size free lists (prepare() frees and re-allocates the same sizes).
+namespace {
+struct FreeBlock {
+  FreeBlock* next;
+  unsigned long size;
+};
+FreeBlock* gFree = nullptr;
+unsigned long gTop = 0, gEnd = 0;
+void* alloc(unsigned long n) {
+  n = (n + 15) & ~15ul;
+  for (FreeBlock** p = &gFree; *p; p = &(*p)->next)
+    if ((*p)->size == n) {
+      FreeBlock* b = *p;
+      *p = b->next;
+      return reinterpret_cast<unsigned char*>(b) + 16;
+    }
+  const unsigned long need = n + 16;
+  if (gTop + need > gEnd) {
+    const unsigned long pages = (need + 65535) / 65536 + 16;
+    const long old = __builtin_wasm_memory_grow(0, pages);
+    if (old < 0) __builtin_trap();
+    if (gEnd != static_cast<unsigned long>(old) * 65536ul || gTop == 0) gTop = static_cast<unsigned long>(old) * 65536ul;
+    gEnd = (static_cast<unsigned long>(old) + pages) * 65536ul;
+  }
+  auto* h = reinterpret_cast<unsigned long*>(gTop);
+  h[0] = n;
+  gTop += need;
+  return reinterpret_cast<unsigned char*>(h) + 16;
+}
+void release(void* p) {
+  if (!p) return;
+  auto* b = reinterpret_cast<FreeBlock*>(static_cast<unsigned char*>(p) - 16);
+  b->size = *reinterpret_cast<unsigned long*>(b);
+  b->next = gFree;
+  gFree = b;
+}
+}  // namespace
+void* operator new(unsigned long n) { return alloc(n); }
+void* operator new[](unsigned long n) { return alloc(n); }
+void operator delete(void* p) noexcept { release(p); }
+void operator delete[](void* p) noexcept { release(p); }
+void operator delete(void* p, unsigned long) noexcept { release(p); }
+void operator delete[](void* p, unsigned long) noexcept { release(p); }
+extern "C" void __cxa_pure_virtual() { __builtin_trap(); }
+extern "C" int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
+void* __dso_handle = nullptr;
 #else
 // Native build, for tests/web_parity.cpp.
-#include <new>
 #define EXPORT(name) extern "C"
 #endif
 
+using namespace shogun;
+
 namespace {
-
-using shogun::Knobs;
-
-struct KnobField {
-  const char* name;
-  int Knobs::*field;
-};
-
-#define K(f) {#f, &Knobs::f}
-const KnobField kKnobs[] = {
-    K(bd1Attack), K(bd1Decay), K(bd1Pitch), K(bd1Tune), K(bd1Noise), K(bd1Filter), K(bd1Dist), K(bd1Trigger),
-    K(bd2Decay),  K(bd2Tune),  K(bd2Tone),  K(sdTune),  K(sdDTune),  K(sdSnappy),  K(sdSnDecay), K(sdTone),
-    K(sdToneDecay), K(sdPitch), K(rsTune),  K(cyDecay), K(cyTone),   K(cyTune),    K(ohDecay),  K(hhTune),
-    K(hhDecay),   K(clTune),   K(clDecay),  K(cpDecay), K(cpFilter), K(cpAttack),  K(cpTrigger), K(cpData),
-    K(htcTune),   K(htcDecay), K(htcNoise), K(htcMode), K(mtcTune),  K(mtcDecay),  K(mtcNoise), K(mtcMode),
-    K(ltcTune),   K(ltcDecay), K(ltcNoise), K(ltcMode), K(tomNoise), K(cbTune),    K(cbDecay),  K(maDecay),
-    K(leadTone),  K(bassTone)};
-#undef K
-constexpr int kKnobCount = sizeof(kKnobs) / sizeof(kKnobs[0]);
 
 constexpr int kBlock = 1024;
-constexpr int kInputs = 19;  // 0..15 voice TRIG, 16 RST IN, 17 RUN IN, 18 CLK IN
-constexpr int kRst = 16, kRun = 17, kClk = 18;
-constexpr int kClkPulse = 240;  // CLK OUT gate, 5 ms at 48 kHz
-
-alignas(16) unsigned char gStore[sizeof(shogun::Engine)];
-shogun::Engine* gE = nullptr;
-shogun::Knobs gKnobs;
-shogun::Pattern gPattern;
+Engine* gE = nullptr;
+Pattern gPattern;
 float gL[kBlock];
 float gR[kBlock];
-int gPatch[kInputs];
-bool gLast[kInputs];
-int gClkLeft = 0;
-int gAccLeft = 0;  // ACC OUT gate, opened with CLK OUT on an accented step
-bool gKick = true;
-std::int64_t gLastCounter = -1;
-
-}  // namespace
-
-namespace {
-bool high(int mask, bool clk, bool acc) { return ((mask & 1) && clk) || ((mask & 2) && acc); }
-// True when an unmuted drum track has a loud step (accent 2) at counter c. A track plays slot c % length.
-bool accented(std::int64_t c) {
-  if (c < 0) return false;
-  const shogun::Pattern& p = gE->pattern();
-  for (int v = 0; v < static_cast<int>(shogun::Voice::Lead); ++v) {
-    const shogun::Track& t = p.track[v];
-    if (t.mute || t.length < 1) continue;
-    const shogun::DrumStep& d = t.drum[c % t.length];
-    if (d.on && d.accent >= 2) return true;
-  }
-  return false;
+char gText[128];  // string exchange with the page (ids in and out)
+// Before the first processed sample, parameter changes apply at once (like the plugin's prepareToPlay); afterwards they
+// take the engine's 5 ms smoothing.
+bool gFresh = true;
+void applyU(int p, double u) {
+  u = u < 0 ? 0 : (u > 1 ? 1 : u);
+  if (gFresh) gE->setParamNow(p, u);
+  else gE->setParam(p, u);
 }
+
+// Old page voice order (sim) → v2 voice ids.
+constexpr int kOldVoice[16] = {BD1, BD2, SD, RS, CY, OH, CH, CL, CP, LTC, MTC, HTC, CB, MA, LEAD, BASS};
+int voiceOf(int old) { return old >= 0 && old < 16 ? kOldVoice[old] : -1; }
+
+void setU(const char* id, double u) {
+  const int p = findParam(id);
+  if (p >= 0) applyU(p, u);
+}
+void setVoiceU(int v, const char* label, double u) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%s:%s", kVoiceNames[v], label);
+  setU(buf, u);
+}
+
+// Old knob names (CC 0..127) → v2 parameter ids.
+struct OldKnob {
+  const char* name;
+  const char* id;
+};
+const OldKnob kKnobs[] = {
+    {"bd1Attack", "BD1:ATTACK"}, {"bd1Decay", "BD1:DECAY"}, {"bd1Pitch", "BD1:PITCH"}, {"bd1Tune", "BD1:TUNE"},
+    {"bd1Noise", "BD1:NOISE"}, {"bd1Filter", "BD1:FILTER"}, {"bd1Dist", "BD1:DRIVE"}, {"bd1Trigger", "BD1:SOUND"},
+    {"bd2Decay", "BD2:DECAY"}, {"bd2Tune", "BD2:TUNE"}, {"bd2Tone", "BD2:TONE"}, {"sdTune", "SD:TUNE"},
+    {"sdDTune", "SD:DETUNE"}, {"sdSnappy", "SD:SNAPPY"}, {"sdSnDecay", "SD:SN.DEC"}, {"sdTone", "SD:TONE"},
+    {"sdToneDecay", "SD:T.DECAY"}, {"sdPitch", "SD:PITCH"}, {"rsTune", "RS:TUNE"}, {"cyDecay", "CY:DECAY"},
+    {"cyTone", "CY:TONE"}, {"cyTune", "CY:TUNE"}, {"ohDecay", "OH:DECAY"}, {"hhTune", "CH:TUNE"},
+    {"hhDecay", "CH:DECAY"}, {"clTune", "CL:TUNE"}, {"clDecay", "CL:DECAY"}, {"cpDecay", "CP:DECAY"},
+    {"cpFilter", "CP:FILTER"}, {"cpAttack", "CP:ATTACK"}, {"cpTrigger", "CP:COUNT"}, {"cpData", "CP:SOUND"},
+    {"htcTune", "HTC:TUNE"}, {"htcDecay", "HTC:DECAY"}, {"htcNoise", "HTC:NZ"}, {"htcMode", "HTC:CONGA"},
+    {"mtcTune", "MTC:TUNE"}, {"mtcDecay", "MTC:DECAY"}, {"mtcNoise", "MTC:NZ"}, {"mtcMode", "MTC:CONGA"},
+    {"ltcTune", "LTC:TUNE"}, {"ltcDecay", "LTC:DECAY"}, {"ltcNoise", "LTC:NZ"}, {"ltcMode", "LTC:CONGA"},
+    {"tomNoise", "TOM:NOISE"}, {"cbTune", "CB:TUNE"}, {"cbDecay", "CB:DECAY"}, {"maDecay", "MA:DECAY"},
+    {"leadTone", "LEAD:CUTOFF"}, {"bassTone", "BASS:CUTOFF"}, {"bd1Wave", "BD1:WAVE"}, {"bd2Wave", "BD2:WAVE"},
+    {"ltcWave", "LTC:WAVE"}, {"mtcWave", "MTC:WAVE"}, {"htcWave", "HTC:WAVE"}};
+constexpr int kKnobCount = static_cast<int>(sizeof kKnobs / sizeof kKnobs[0]);
+
+// Old page jacks: 0..15 voice TRIG (old order), 16 RST IN, 17 RUN IN, 18 CLK IN, 19 BD1 PITCH, 20 BD2 PITCH,
+// 21 SD PITCH, 22 TOM PITCH, 23 HAT DECAY, 24 SD SNAPPY. Sources: 1 CLK OUT, 2 ACC OUT, 4 LFO OUT (= MOD:LFO 1).
+constexpr int kOldInputs = 25;
+int gPatch[kOldInputs];
+int targets(int input, int out[3], double* amt) {
+  *amt = 1.0;
+  if (input < 16) {
+    const int v = voiceOf(input);
+    out[0] = isDrum(v) ? drumPort(v, DJ_TRIG) : synthPort(v - LEAD, SJ_GATE);
+    return 1;
+  }
+  int law = 0;
+  static const char* const ids[] = {"CLOCK:RST IN", "CLOCK:RUN IN", "CLOCK:CLK IN", "BD1:PITCH", "BD2:PITCH",
+                                    "SD:PITCH", "TOM:PITCH", "HAT:DECAY", "SD:SNAPPY"};
+  if (input >= kOldInputs) return 0;
+  const int n = resolvePort(ids[input - 16], out, &law);
+  // The sim's drum PITCH was 1 V/semitone: migrated cables keep that with CV AMT = 1/12 (§12.3).
+  if (input >= 19 && input <= 22) *amt = 1.0 / 12.0;
+  return n;
+}
+
 }  // namespace
 
-EXPORT(sg_init) void sg_init() {
-  gE = new (gStore) shogun::Engine();
-  gE->reset();  // the page sends its own kit, levels and steps; start it from the cleared state
-  gKnobs = shogun::Knobs{};
-  gPattern = shogun::Pattern{};
-  for (int i = 0; i < kInputs; ++i) {
-    gPatch[i] = 0;
-    gLast[i] = false;
-  }
-  gClkLeft = gAccLeft = 0;
+// ================================================================ v2 API
+
+EXPORT(sg_init) void sg_init(double fs) {
+  if (!(fs > 0)) fs = 48000.0;
+  if (!gE) gE = new Engine();
+  gE->prepare(fs, 2);  // coefficients at the AudioContext rate (§3.1), 2× OS, latency 23 samples
+  gE->loadInit();
   gE->setRunning(false);
+  gPattern = gE->pattern();
+  for (int i = 0; i < kOldInputs; ++i) gPatch[i] = 0;
+  gFresh = true;
 }
+EXPORT(sg_sample_rate) double sg_sample_rate() { return gE->sampleRate(); }
+EXPORT(sg_latency) int sg_latency() { return gE->latencySamples(); }
+EXPORT(sg_set_os) void sg_set_os(int os) { gE->prepare(gE->sampleRate(), os == 1 || os == 4 ? os : 2); }
+EXPORT(sg_text) char* sg_text() { return gText; }
+
+EXPORT(sg_param_count) int sg_param_count() { return kParamCount; }
+EXPORT(sg_param_id) const char* sg_param_id(int i) { return i >= 0 && i < kParamCount ? kParams[i].id : ""; }
+EXPORT(sg_param_default) double sg_param_default(int i) { return i >= 0 && i < kParamCount ? static_cast<double>(kParams[i].def) : 0.0; }
+EXPORT(sg_param_find) int sg_param_find() { return findParam(gText); }  // id written to sg_text()
+EXPORT(sg_set_param) void sg_set_param(int i, double u) {
+  if (i >= 0 && i < kParamCount) applyU(i, u);
+}
+EXPORT(sg_param) double sg_param(int i) { return i >= 0 && i < kParamCount ? gE->param(i) : 0.0; }
+
+EXPORT(sg_port_count) int sg_port_count() { return kPorts; }
+EXPORT(sg_port_id) const char* sg_port_id(int i) { return i >= 0 && i < kPorts ? kPortTable[i].id : ""; }
+EXPORT(sg_port_role) int sg_port_role(int i) { return i >= 0 && i < kPorts ? static_cast<int>(kPortTable[i].role) : -1; }
+EXPORT(sg_port_find) int sg_port_find() { return portFromId(gText); }  // any R6 form, shared parseJackId
+EXPORT(sg_port_volts) double sg_port_volts(int i) { return i >= 0 && i < kPorts ? static_cast<double>(gE->portValues()[i]) : 0.0; }
+EXPORT(sg_cable) int sg_cable(int from, int to, int on) {
+  if (on) return gE->addCable(from, to) ? 1 : 0;
+  gE->removeCable(from, to);
+  return 1;
+}
+EXPORT(sg_cable_clear) void sg_cable_clear() { gE->clearCables(); }
+EXPORT(sg_set_cv_amt) void sg_set_cv_amt(int port, double amt) { gE->setCvAmt(port, amt); }
+
+EXPORT(sg_track) void sg_track(int t, int len, int scale, double swing, double shift) {
+  if (t < 0 || t >= 16) return;
+  Track& tr = gPattern.tracks[t];
+  tr.len = len < 1 ? 1 : (len > kMaxSteps ? kMaxSteps : len);
+  tr.scale = scale < -1 ? -1 : (scale > 3 ? 3 : scale);
+  tr.swing = swing;
+  tr.shift = shift;
+}
+EXPORT(sg_step) void sg_step(int t, int s, int on, int acc, double prob, double micro, int flam, int ratchet, double bend,
+                             int note, int tie) {
+  if (t < 0 || t >= 16 || s < 0 || s >= kMaxSteps) return;
+  Step& st = gPattern.tracks[t].steps[s];
+  st.on = on != 0;
+  st.acc = static_cast<std::uint8_t>(acc < 1 ? 1 : (acc > 3 ? 3 : acc));
+  st.prob = static_cast<float>(prob);
+  st.micro = static_cast<float>(micro);
+  st.flam = static_cast<std::uint8_t>(flam < 0 ? 0 : (flam > 16 ? 16 : flam));
+  st.ratchet = static_cast<std::uint8_t>(ratchet < 1 ? 1 : ratchet);
+  st.bend = static_cast<float>(bend);
+  st.note = static_cast<std::int8_t>(note);
+  st.tie = tie != 0;
+}
+EXPORT(sg_step_lock) int sg_step_lock(int t, int s, int param, double u) {
+  if (t < 0 || t >= 16 || s < 0 || s >= kMaxSteps) return 0;
+  return gPattern.tracks[t].steps[s].setLock(param, static_cast<float>(u)) ? 1 : 0;
+}
+EXPORT(sg_pattern_clear) void sg_pattern_clear() { gPattern = Pattern(); }
+EXPORT(sg_commit) void sg_commit() { gE->setPattern(gPattern); }
+
+EXPORT(sg_hit) void sg_hit(int v, double velVolts, double bend, int acc) { gE->trigger(v, velVolts, bend, acc); }
+EXPORT(sg_note_on) void sg_note_on(int v, double note, double velVolts, int tie) { gE->noteOn(v, note, velVolts, tie != 0); }
+EXPORT(sg_note_off) void sg_note_off(int v) { gE->noteOff(v); }
+EXPORT(sg_set_running) void sg_set_running(int on) { gE->setRunning(on != 0); }
+EXPORT(sg_restart) void sg_restart() { gE->restart(); }
+EXPORT(sg_running) int sg_running() { return gE->running() ? 1 : 0; }
+EXPORT(sg_counter) double sg_counter() { return static_cast<double>(gE->counter()); }
+EXPORT(sg_display_step) int sg_display_step() { return gE->displayStep(); }
+EXPORT(sg_out_l) float* sg_out_l() { return gL; }
+EXPORT(sg_out_r) float* sg_out_r() { return gR; }
+EXPORT(sg_process) void sg_process(int n) {
+  if (n > kBlock) n = kBlock;
+  if (n > 0) gFresh = false;
+  for (int i = 0; i < n; ++i) {
+    gE->processSample();
+    gL[i] = static_cast<float>(gE->mainL());
+    gR[i] = static_cast<float>(gE->mainR());
+  }
+}
+
+// ================================================================ old page API (compat)
 
 EXPORT(sg_knob_count) int sg_knob_count() { return kKnobCount; }
 EXPORT(sg_knob_name) const char* sg_knob_name(int i) { return i >= 0 && i < kKnobCount ? kKnobs[i].name : ""; }
+// The page re-sends whole panels (a kit, a track, the clock): a value equal to what the panel reads back leaves the
+// engine's own, finer value alone, so hidden precision survives (the setters below do the same).
 EXPORT(sg_set_knob) void sg_set_knob(int i, int cc) {
   if (i < 0 || i >= kKnobCount) return;
-  gKnobs.*(kKnobs[i].field) = cc;
-  gE->setKnobs(gKnobs);
+  const int p = findParam(kKnobs[i].id);
+  if (p >= 0 && static_cast<int>(std::floor(gE->param(p) * 127.0 + 0.5)) == cc) return;
+  setU(kKnobs[i].id, cc / 127.0);  // §14: u = cc/127
 }
+// level x: linear gain → LEVEL u (gLevel = 1.4125 u²); master x → MASTER:VOLUME u (2 u²).
+EXPORT(sg_set_level) void sg_set_level(int v, double x) {
+  const int nv = voiceOf(v);
+  if (nv < 0) return;
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%s:LEVEL", kVoiceNames[nv]);
+  const double u = gE->param(findParam(buf));
+  if (dsp::exactEq(1.4125 * u * u, x)) return;  // sg_get_level's own value
+  setVoiceU(nv, "LEVEL", x > 0 ? std::sqrt(x / 1.4125) : 0.0);
+}
+EXPORT(sg_set_master) void sg_set_master(double x) { setU("MASTER:VOLUME", x > 0 ? std::sqrt(x / 2.0) : 0.0); }
+EXPORT(sg_set_solo) void sg_set_solo(int v) {
+  for (int k = 0; k < 16; ++k) setVoiceU(voiceOf(k), "SOLO", k == v ? 1.0 : 0.0);
+}
+namespace {
+void setStep(int p, int idx, int n) {  // a stepped parameter, untouched when it already reads as idx
+  if (stepIndex(gE->param(p), n) != idx) applyU(p, stepU(idx, n));
+}
+}  // namespace
+EXPORT(sg_set_mode) void sg_set_mode(int ext) {
+  setStep(P_CLOCK_SOURCE, SRC_INT, 3);
+  setStep(findParam("CLOCK:MODE"), ext ? 1 : 0, 2);
+}
+// A tempo the panel shows (0.1 BPM) for the engine's own tempo keeps that tempo.
+EXPORT(sg_set_tempo) void sg_set_tempo(double bpm) {
+  setStep(P_CLOCK_SOURCE, SRC_INT, 3);
+  const double cur = 40.0 + 160.0 * gE->param(P_CLOCK_TEMPO);
+  if (std::fabs(std::floor(cur * 10.0 + 0.5) / 10.0 - bpm) < 1e-6) return;
+  setU("CLOCK:TEMPO", (bpm - 40.0) / 160.0);
+}
+EXPORT(sg_set_scale) void sg_set_scale(int stepsPerQuarter) {
+  const int idx = stepsPerQuarter >= 8 ? 0 : (stepsPerQuarter == 4 ? 1 : (stepsPerQuarter == 3 ? 2 : 3));
+  setStep(P_CLOCK_SCALE, idx, 4);
+}
+EXPORT(sg_set_bar) void sg_set_bar(int len) { setStep(P_CLOCK_BAR, (len < 1 ? 1 : (len > 32 ? 32 : len)) - 1, 32); }
+// The page LFO is LFO 1: tempo-synced, unipolar, DEPTH = amount, phase 0 at transport start. Its jack is MOD:LFO 1.
+EXPORT(sg_set_lfo) void sg_set_lfo(double cyclesPerBeat, double phase, int shape, double amount) {
+  int div = 0;
+  double best = 1e9;
+  const double beats = cyclesPerBeat > 0 ? 1.0 / cyclesPerBeat : 32.0;
+  for (int i = 0; i < kLfoDivCount; ++i) {
+    const double d = std::fabs(std::log2(kLfoDivBeats[i] / beats));
+    if (d < best) {
+      best = d;
+      div = i;
+    }
+  }
+  static const int kShape[5] = {mod::L_SIN, mod::L_TRI, mod::L_RAMP, mod::L_SQR, mod::L_SH};
+  setU("LFO 1:SYNC", 1.0);
+  setU("LFO 1:DIV", stepU(div, kLfoDivCount));
+  setU("LFO 1:PHASE", phase);
+  setU("LFO 1:SHAPE", stepU(kShape[shape < 0 || shape > 4 ? 0 : shape], 6));
+  setU("LFO 1:POL", 0.0);
+  setU("LFO 1:MODE", stepU(mod::M_FREE_RUN, 3));
+  setU("LFO 1:DEPTH", amount);
+}
+// One page LFO control at a time, so the rest of a kit's LFO 1 (POL, MODE, SLEW, ...) stays as loaded:
+// 0 division (cycles per beat, nearest of the 30, turns SYNC on), 1 shape (page order SINE TRI SAW SQUARE S+H),
+// 2 phase (of a cycle), 3 amount (DEPTH).
+EXPORT(sg_set_lfo_field) void sg_set_lfo_field(int field, double v) {
+  if (field == 0) {
+    int div = 0;
+    double best = 1e9;
+    const double beats = v > 0 ? 1.0 / v : 32.0;
+    for (int i = 0; i < kLfoDivCount; ++i) {
+      const double d = std::fabs(std::log2(kLfoDivBeats[i] / beats));
+      if (d < best) {
+        best = d;
+        div = i;
+      }
+    }
+    setU("LFO 1:SYNC", 1.0);
+    setU("LFO 1:DIV", stepU(div, kLfoDivCount));
+  } else if (field == 1) {
+    static const int kShape[5] = {mod::L_SIN, mod::L_TRI, mod::L_RAMP, mod::L_SQR, mod::L_SH};
+    const int sh = static_cast<int>(v);
+    setU("LFO 1:SHAPE", stepU(kShape[sh < 0 || sh > 4 ? 0 : sh], 6));
+  } else if (field == 2) {
+    setU("LFO 1:PHASE", v);
+  } else if (field == 3) {
+    setU("LFO 1:DEPTH", v);
+  }
+}
+EXPORT(sg_lfo_volts) double sg_lfo_volts() { return static_cast<double>(gE->portValues()[findPort("MOD:LFO 1")]); }
+EXPORT(sg_lfo_phase) double sg_lfo_phase() { return gE->modulation().lfo[0].instanceFor(-1).ph; }
 
-EXPORT(sg_set_level) void sg_set_level(int v, double x) { gE->setLevel(static_cast<shogun::Voice>(v), x); }
-EXPORT(sg_set_master) void sg_set_master(double x) { gE->setMaster(x); }
-EXPORT(sg_set_solo) void sg_set_solo(int v) { gE->setSolo(v); }
-EXPORT(sg_set_mode) void sg_set_mode(int ext) { gE->setMode(ext ? shogun::ClockMode::Ext : shogun::ClockMode::Int); }
-EXPORT(sg_set_tempo) void sg_set_tempo(double bpm) { gE->setTempo(bpm); }
-EXPORT(sg_set_scale) void sg_set_scale(int stepsPerQuarter) { gE->setScaleSteps(stepsPerQuarter); }
-EXPORT(sg_set_running) void sg_set_running(int on) {
-  if (on && !gE->running()) gKick = true;
-  gE->setRunning(on != 0);
-}
-EXPORT(sg_restart) void sg_restart() {
-  gE->restart();
-  gKick = true;
-}
-
-EXPORT(sg_set_bar) void sg_set_bar(int len) { gPattern.length = len; }
 EXPORT(sg_set_track) void sg_set_track(int v, int len, int shuffle, int shiftCc, int mute) {
-  if (v < 0 || v >= shogun::kVoiceCount) return;
-  shogun::Track& t = gPattern.track[v];
-  t.length = len;
-  t.shuffle = shuffle;
-  t.shiftCc = shiftCc;
-  t.mute = mute != 0;
+  const int t = voiceOf(v);
+  if (t < 0) return;
+  Track& tr = gPattern.tracks[t];
+  tr.len = len < 1 ? 1 : (len > kMaxSteps ? kMaxSteps : len);
+  if (shuffle != sg_get_track(v, 1)) tr.swing = swingFromShuffle(shuffle < 0 ? 0 : (shuffle > 15 ? 15 : shuffle));  // §10.2
+  if (shiftCc != sg_get_track(v, 2)) tr.shift = shiftCc / 127.0;
+  if ((mute != 0) != (sg_get_track(v, 3) != 0)) setVoiceU(t, "MUTE", mute ? 1.0 : 0.0);
 }
-// flam: -1 none, else the flam table index 0..15. bend: -1 none, else the bend CC.
+// accent 0..2 → 1..3; flam −1 none / index 0..15; bend −1 none / CC → 12·(2u − 1) semitones.
 EXPORT(sg_set_drum) void sg_set_drum(int v, int s, int on, int accent, int flam, int bend) {
-  if (v < 0 || v >= shogun::kVoiceCount || s < 0 || s >= shogun::kMaxSteps) return;
-  shogun::DrumStep& d = gPattern.track[v].drum[s];
-  d.on = on != 0;
-  d.accent = accent;
-  d.flam = flam >= 0;
-  d.flamIndex = flam >= 0 ? flam : 0;
-  d.bendCc = bend;
+  const int t = voiceOf(v);
+  if (t < 0 || s < 0 || s >= kMaxSteps) return;
+  Step& st = gPattern.tracks[t].steps[s];
+  st.on = on != 0;
+  st.acc = static_cast<std::uint8_t>(accent < 0 ? 1 : (accent > 2 ? 3 : accent + 1));
+  st.flam = static_cast<std::uint8_t>(flam >= 0 ? flam + 1 : 0);
+  if (bend != sg_get_step(v, s, 3)) st.bend = bend >= 0 ? static_cast<float>(12.0 * (2.0 * bend / 127.0 - 1.0)) : 0.0f;
 }
-// note: -1 rest.
 EXPORT(sg_set_note) void sg_set_note(int v, int s, int note, int accent, int tie) {
-  if (v < 0 || v >= shogun::kVoiceCount || s < 0 || s >= shogun::kMaxSteps) return;
-  shogun::NoteStep& n = gPattern.track[v].note[s];
-  n.note = note;
-  n.accent = accent;
-  n.tie = tie != 0;
+  const int t = voiceOf(v);
+  if (t < 0 || s < 0 || s >= kMaxSteps) return;
+  Step& st = gPattern.tracks[t].steps[s];
+  st.on = note >= 0;
+  if (note >= 0) st.note = static_cast<std::int8_t>(note);
+  st.acc = static_cast<std::uint8_t>(accent < 0 ? 1 : (accent > 2 ? 3 : accent + 1));
+  st.tie = tie != 0;
 }
-EXPORT(sg_commit) void sg_commit() { gE->setPattern(gPattern); }
-
+// gain: the old g_vel → VEL volts (g_vel = 0.15 + 0.85·V/5).
 EXPORT(sg_trigger) void sg_trigger(int v, double gain, double bend) {
-  gE->trigger(static_cast<shogun::Voice>(v), gain, bend);
+  const int nv = voiceOf(v);
+  double volts = 5.0 * (gain - 0.15) / 0.85;
+  volts = volts < 0 ? 0 : (volts > 5 ? 5 : volts);
+  if (nv >= 0 && isDrum(nv)) gE->trigger(nv, volts, bend, 3);
+  else if (nv >= 0) gE->noteOn(nv, 48, volts);
 }
 EXPORT(sg_trigger_note) void sg_trigger_note(int v, int note, double gain) {
-  gE->triggerNote(static_cast<shogun::Voice>(v), note, gain);
+  const int nv = voiceOf(v);
+  double volts = 5.0 * (gain - 0.15) / 0.85;
+  volts = volts < 0 ? 0 : (volts > 5 ? 5 : volts);
+  if (nv >= 0) gE->noteOn(nv, note, volts);
 }
-EXPORT(sg_release) void sg_release(int v) { gE->release(static_cast<shogun::Voice>(v)); }
-
-// source: a mask of the panel's gate outputs patched into the input: 1 CLK OUT, 2 ACC OUT. A stacked input is high
-// while any of its sources is high.
+EXPORT(sg_release) void sg_release(int v) {
+  const int nv = voiceOf(v);
+  if (nv >= 0) gE->noteOff(nv);
+}
+// source mask into an old jack: cables from CLK OUT / ACC OUT / MOD:LFO 1 into the v2 port(s) the old jack aliases.
 EXPORT(sg_patch) void sg_patch(int input, int source) {
-  if (input < 0 || input >= kInputs) return;
+  if (input < 0 || input >= kOldInputs) return;
+  static const char* const src[3] = {"CLOCK:CLK OUT", "CLOCK:ACC OUT", "MOD:LFO 1"};
+  int to[3];
+  double amt = 1.0;
+  const int n = targets(input, to, &amt);
+  for (int k = 0; k < n; ++k) {
+    for (int b = 0; b < 3; ++b) gE->removeCable(findPort(src[b]), to[k]);
+    for (int b = 0; b < 3; ++b)
+      if (source & (1 << b)) gE->addCable(findPort(src[b]), to[k]);
+    gE->setCvAmt(to[k], amt);
+  }
   gPatch[input] = source;
-  if (input == kClk) gE->setExternalClock(source != 0);
 }
 
-EXPORT(sg_out_l) float* sg_out_l() { return gL; }
-EXPORT(sg_out_r) float* sg_out_r() { return gR; }
-EXPORT(sg_counter) double sg_counter() { return static_cast<double>(gE->counter()); }
-EXPORT(sg_running) int sg_running() { return gE->running() ? 1 : 0; }
+// ================================================================ factory bank (engine/factory.h, the same table as
+// the engine tests and the plugin's program list; read here by the freestanding patch reader)
 
-EXPORT(sg_process) void sg_process(int n) {
-  if (n > kBlock) n = kBlock;
-  shogun::Frame f;
-  for (int i = 0; i < n; ++i) {
-    const bool clk = gClkLeft > 0, acc = gAccLeft > 0;
-    shogun::TrigIn in;
-    for (int v = 0; v < shogun::kVoiceCount; ++v) {
-      if (gPatch[v] != 0) {
-        in.volts[v] = high(gPatch[v], clk, acc) ? 5.0 : 0.0;
-        in.velocity[v] = 127;
-      }
+namespace {
+Patch gLoad;  // static: a patch is too large for the wasm stack
+std::uint32_t fnv(std::uint32_t h, const void* p, unsigned long n) {
+  const auto* b = static_cast<const unsigned char*>(p);
+  while (n--) h = (h ^ *b++) * 16777619u;
+  return h;
+}
+}  // namespace
+
+EXPORT(sg_factory_count) int sg_factory_count() { return factory::kPrograms; }
+EXPORT(sg_factory_name) const char* sg_factory_name(int i) { return factory::programName(i); }
+// Loads program i (0 = INIT) as the plugin does: INIT, then the kit's parameters (set at once), mod rows and pattern.
+// The transport keeps running; the page's own cables are cleared (the bank has none).
+EXPORT(sg_factory_load) int sg_factory_load(int i) {
+  if (!factory::loadProgram(i, gLoad)) return 0;
+  applyPatch(gLoad, *gE);
+  gPattern = gLoad.pattern;
+  for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
+  return 1;
+}
+// The kit of program i without its pattern (the page's KIT list): its parameters and mod rows; the page's steps and
+// its CLOCK settings stay.
+EXPORT(sg_factory_kit) int sg_factory_kit(int i) {
+  if (!factory::loadProgram(i, gLoad)) return 0;
+  for (int p = 0; p < kParamCount; ++p)
+    if (std::strncmp(kParams[p].id, "CLOCK:", 6) == 0) gLoad.u[p] = gE->param(p);
+  gLoad.pattern = gPattern;
+  applyPatch(gLoad, *gE);
+  for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
+  return 1;
+}
+// ---- full documents (engine/patch.h, the plugin's state format): the page saves and loads patterns through these
+namespace {
+char* gDoc = nullptr;  // the last document written
+unsigned long gDocCap = 0, gDocLen = 0;
+char* gIn = nullptr;  // a document from the page
+unsigned long gInCap = 0;
+}  // namespace
+// The engine's whole state as patch JSON (full = every parameter), what the plugin saves; pointer to the text.
+EXPORT(sg_state_json) const char* sg_state_json(int full) {
+  capturePatch(*gE, gLoad);
+  for (;;) {
+    if (!gDoc) {
+      gDocCap = gDocCap ? gDocCap : 65536;
+      gDoc = new char[gDocCap];
     }
-    for (int j = kRst; j <= kClk; ++j) {
-      const bool high = ::high(gPatch[j], clk, acc);
-      if (high && !gLast[j]) {
-        if (j == kRst) gE->restart();
-        if (j == kRun) gE->setRunning(!gE->running());
-        if (j == kClk) gE->clockPulse();
-        if (j != kClk) gKick = true;
-      }
-      gLast[j] = high;
+    patchjson::BufOut o(gDoc, gDocCap);
+    writePatchJson(o, gLoad, full != 0);
+    if (o.ok) {
+      gDocLen = o.n;
+      return gDoc;
     }
-    gE->process(in, f);
-    gL[i] = static_cast<float>(f.mainL);
-    gR[i] = static_cast<float>(f.mainR);
-    if (gClkLeft > 0) --gClkLeft;
-    if (gAccLeft > 0) --gAccLeft;
-    // CLK OUT opens on each new step while the clock runs; ACC OUT opens with it when that step is accented.
-    const std::int64_t c = gE->counter();
-    if (gE->running() && (c != gLastCounter || gKick)) {
-      gClkLeft = kClkPulse;
-      gAccLeft = accented(c) ? kClkPulse : 0;
-    }
-    gKick = false;
-    gLastCounter = c;
+    delete[] gDoc;
+    gDoc = nullptr;
+    gDocCap *= 2;
   }
+}
+EXPORT(sg_state_json_len) int sg_state_json_len() { return static_cast<int>(gDocLen); }
+// A buffer for n bytes of document text from the page (then sg_patch_load(n)).
+EXPORT(sg_doc_buf) char* sg_doc_buf(int n) {
+  const unsigned long need = static_cast<unsigned long>(n < 0 ? 0 : n) + 1;
+  if (need > gInCap) {
+    delete[] gIn;
+    gInCap = need < 65536 ? 65536 : need;
+    gIn = new char[gInCap];
+  }
+  return gIn;
+}
+// Load report of the last sg_patch_load, kept in plain ints: read from a later export, gLoad (a class object) is back
+// at INIT in the wasm build (no cables, no drops), consistent with wasm-ld calling the global constructors at the start
+// of every export of this --no-entry module. Plain zero-initialised ints are not touched by that.
+namespace {
+int gDropped = 0, gDroppedRemoved = 0;
+}  // namespace
+// Loads the document in sg_doc_buf like a factory program: parameters, mod rows, cables and pattern (1 = read).
+EXPORT(sg_patch_load) int sg_patch_load(int n) {
+  if (!gIn || n < 0 || static_cast<unsigned long>(n) >= gInCap) return 0;
+  gIn[n] = 0;
+  if (!parsePatch(gIn, gLoad)) return 0;
+  gDropped = gLoad.droppedCables;
+  gDroppedRemoved = gLoad.droppedRemoved;
+  applyPatch(gLoad, *gE);
+  gPattern = gLoad.pattern;
+  for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
+  return 1;
+}
+// Load report of the last sg_patch_load: saved cables dropped (an end on a removed port such as CLOCK:FILL IN or
+// MOD:LANE A, or an unknown id), and of those, the ones on a removed port.
+EXPORT(sg_patch_dropped) int sg_patch_dropped() { return gDropped; }
+EXPORT(sg_patch_dropped_removed) int sg_patch_dropped_removed() { return gDroppedRemoved; }
+EXPORT(sg_param_steps) int sg_param_steps(int i) { return i >= 0 && i < kParamCount ? kParams[i].steps : 0; }
+EXPORT(sg_param_choices) const char* sg_param_choices(int i) { return i >= 0 && i < kParamCount ? kParams[i].choices : ""; }
+
+// A chained pattern starts on counter rot: every track's steps rotate so its step 0 plays on that counter.
+EXPORT(sg_rotate) void sg_rotate(double rot) {
+  for (auto& tr : gPattern.tracks) {
+    const long len = tr.len, r = static_cast<long>(rot);
+    const long ph = ((-r) % len + len) % len, o = ph ? len - ph : 0;
+    if (!o) continue;
+    Step tmp[kMaxSteps];
+    for (long j = 0; j < len; ++j) tmp[(j + o) % len] = tr.steps[j];
+    for (long j = 0; j < len; ++j) tr.steps[j] = tmp[j];
+  }
+}
+// Read-back for the page panel, old voice order: track 0 len, 1 shuffle 0..15 (nearest to the swing that plays),
+// 2 shift CC, 3 mute; step 0 on, 1 accent 0..2, 2 flam -1..15, 3 bend CC (-1 none), 4 note, 5 tie, 6 hidden detail
+// (probability, micro-timing, ratchet or p-locks the panel does not show).
+EXPORT(sg_get_track) int sg_get_track(int v, int field) {
+  const int t = voiceOf(v);
+  if (t < 0) return 0;
+  const Track& tr = gPattern.tracks[t];
+  switch (field) {
+    case 0: return tr.len;
+    case 1: {
+      const double sw = tr.swing < 0.0 ? 0.5 + 0.25 * gE->param(P_CLOCK_SWING) : tr.swing;
+      const int s = static_cast<int>(std::floor((sw - 0.5) * 90.0 + 0.5));
+      return s < 0 ? 0 : (s > 15 ? 15 : s);
+    }
+    case 2: return static_cast<int>(std::floor(tr.shift * 127.0 + 0.5));
+    case 3: {
+      char buf[48];
+      std::snprintf(buf, sizeof buf, "%s:MUTE", kVoiceNames[t]);
+      return gE->param(findParam(buf)) > 0.5 ? 1 : 0;
+    }
+    default: return 0;
+  }
+}
+EXPORT(sg_get_step) int sg_get_step(int v, int s, int field) {
+  const int t = voiceOf(v);
+  if (t < 0 || s < 0 || s >= kMaxSteps) return 0;
+  const Step& st = gPattern.tracks[t].steps[s];
+  switch (field) {
+    case 0: return st.on ? 1 : 0;
+    case 1: return st.acc - 1;
+    case 2: return st.flam - 1;
+    case 3: return dsp::exactEq(st.bend, 0.0f) ? -1 : static_cast<int>(std::floor((st.bend / 12.0f + 1.0f) * 63.5f + 0.5f));
+    case 4: return st.note;
+    case 5: return st.tie ? 1 : 0;
+    case 6: return (st.prob < 1.0f || !dsp::exactEq(st.micro, 0.0f) || st.ratchet > 1 || st.nLocks > 0) ? 1 : 0;
+    default: return 0;
+  }
+}
+EXPORT(sg_knob_cc) int sg_knob_cc(int i) {
+  if (i < 0 || i >= kKnobCount) return 0;
+  const int p = findParam(kKnobs[i].id);
+  return p < 0 ? 0 : static_cast<int>(std::floor(gE->param(p) * 127.0 + 0.5));
+}
+EXPORT(sg_get_level) double sg_get_level(int v) {  // linear gain, the inverse of sg_set_level
+  const int t = voiceOf(v);
+  if (t < 0) return 0.0;
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%s:LEVEL", kVoiceNames[t]);
+  const double u = gE->param(findParam(buf));
+  return 1.4125 * u * u;
+}
+EXPORT(sg_get_tempo) double sg_get_tempo() { return 40.0 + 160.0 * gE->param(P_CLOCK_TEMPO); }
+EXPORT(sg_get_scale) int sg_get_scale() { return stepIndex(gE->param(P_CLOCK_SCALE), 4); }  // 1/32, 1/16, 1/8T, 1/8
+EXPORT(sg_get_spq) double sg_get_spq() { return stepsPerQuarter(sg_get_scale()); }
+EXPORT(sg_get_bar) int sg_get_bar() { return 1 + stepIndex(gE->param(P_CLOCK_BAR), 32); }
+// FNV-1a over everything a program sets (parameters as host floats, mod rows, pattern): the parity test compares the
+// wasm reader against the native one with it.
+EXPORT(sg_state_hash) double sg_state_hash() {
+  std::uint32_t h = 2166136261u;
+  for (int i = 0; i < kParamCount; ++i) {
+    const float f = static_cast<float>(gE->param(i));
+    h = fnv(h, &f, sizeof f);
+  }
+  for (const auto& r : gE->modulation().rows) {
+    const int w[7] = {r.src, r.srcVoice, r.dst, r.via, r.viaVoice, r.curve, r.on ? 1 : 0};
+    h = fnv(h, w, sizeof w);
+    h = fnv(h, &r.depth, sizeof r.depth);
+  }
+  const Pattern& pt = gE->pattern();
+  h = fnv(h, pt.name, std::strlen(pt.name));
+  h = fnv(h, &pt.seed, sizeof pt.seed);
+  for (const auto& tr : pt.tracks) {
+    const int w[2] = {tr.len, tr.scale};
+    h = fnv(h, w, sizeof w);
+    h = fnv(h, &tr.swing, sizeof tr.swing);
+    h = fnv(h, &tr.shift, sizeof tr.shift);
+    for (int s = 0; s < tr.len; ++s) {
+      const Step& st = tr.steps[s];
+      const int b[8] = {st.on ? 1 : 0, st.acc, st.flam, st.ratchet, st.note, st.tie ? 1 : 0, st.nLocks, 0};
+      h = fnv(h, b, sizeof b);
+      const float f[3] = {st.prob, st.micro, st.bend};
+      h = fnv(h, f, sizeof f);
+      for (int k = 0; k < st.nLocks; ++k) {
+        h = fnv(h, &st.locks[k].param, sizeof st.locks[k].param);
+        h = fnv(h, &st.locks[k].u, sizeof st.locks[k].u);
+      }
+    }
+  }
+  return static_cast<double>(h);
 }

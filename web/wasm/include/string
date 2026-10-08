@@ -1,0 +1,69 @@
+#pragma once
+// Freestanding shim: a small heap std::string (what jidai/jcs/JackId.h uses: build from string_view, +, ==,
+// to_string, c_str). Load-time only in SHOGUN (jack-id parsing), never on the audio path.
+#include <cstddef>
+#include <new>
+#include <string_view>
+#include <utility>
+namespace std {
+class string {
+ public:
+  string() { set("", 0); }
+  string(const char* s) { const string_view v(s); set(v.data(), v.size()); }
+  explicit string(string_view v) { set(v.data(), v.size()); }
+  string(const char* s, size_t n) { set(s, n); }
+  string(const string& o) { set(o.d_, o.n_); }
+  string(string&& o) noexcept : d_(o.d_), n_(o.n_) { o.d_ = nullptr; o.n_ = 0; }
+  ~string() { delete[] d_; }
+  string& operator=(const string& o) {
+    if (this != &o) { delete[] d_; set(o.d_, o.n_); }
+    return *this;
+  }
+  string& operator=(string&& o) noexcept {
+    if (this != &o) { delete[] d_; d_ = o.d_; n_ = o.n_; o.d_ = nullptr; o.n_ = 0; }
+    return *this;
+  }
+  operator string_view() const { return string_view(d_ ? d_ : "", n_); }
+  const char* c_str() const { return d_ ? d_ : ""; }
+  const char* data() const { return c_str(); }
+  size_t size() const { return n_; }
+  bool empty() const { return n_ == 0; }
+  char operator[](size_t i) const { return d_[i]; }
+  friend string operator+(const string& a, const string& b) {
+    string r;
+    delete[] r.d_;
+    r.n_ = a.n_ + b.n_;
+    r.d_ = new char[r.n_ + 1];
+    for (size_t i = 0; i < a.n_; ++i) r.d_[i] = a.d_[i];
+    for (size_t i = 0; i < b.n_; ++i) r.d_[a.n_ + i] = b.d_[i];
+    r.d_[r.n_] = 0;
+    return r;
+  }
+  friend string operator+(const string& a, const char* b) { return a + string(b); }
+  friend string operator+(const char* a, const string& b) { return string(a) + b; }
+  friend bool operator==(const string& a, const string& b) { return string_view(a) == string_view(b); }
+  friend bool operator!=(const string& a, const string& b) { return !(a == b); }
+  friend bool operator==(const string& a, const char* b) { return string_view(a) == string_view(b); }
+  friend bool operator!=(const string& a, const char* b) { return !(a == b); }
+
+ private:
+  void set(const char* s, size_t n) {
+    d_ = new char[n + 1];
+    for (size_t i = 0; i < n; ++i) d_[i] = s[i];
+    d_[n] = 0;
+    n_ = n;
+  }
+  char* d_ = nullptr;
+  size_t n_ = 0;
+};
+inline string to_string(int v) {
+  char b[16];
+  int n = 0;
+  unsigned u = v < 0 ? 0u - static_cast<unsigned>(v) : static_cast<unsigned>(v);
+  do { b[n++] = static_cast<char>('0' + u % 10); u /= 10; } while (u && n < 15);
+  if (v < 0) b[n++] = '-';
+  char r[16];
+  for (int i = 0; i < n; ++i) r[i] = b[n - 1 - i];
+  return string(r, static_cast<size_t>(n));
+}
+}  // namespace std

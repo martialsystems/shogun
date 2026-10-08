@@ -1,0 +1,47 @@
+#pragma once
+// Freestanding shim: the part of std::string_view that jidai/jcs/JackId.h uses (find, substr, compare, iterate).
+#include <cstddef>
+namespace std {
+class string_view {
+ public:
+  static constexpr size_t npos = static_cast<size_t>(-1);
+  constexpr string_view() = default;
+  constexpr string_view(const char* s, size_t n) : d_(s), n_(n) {}
+  string_view(const char* s) : d_(s), n_(len(s)) {}
+  constexpr size_t size() const { return n_; }
+  constexpr size_t length() const { return n_; }
+  constexpr bool empty() const { return n_ == 0; }
+  constexpr const char* data() const { return d_; }
+  constexpr const char* begin() const { return d_; }
+  constexpr const char* end() const { return d_ + n_; }
+  constexpr char operator[](size_t i) const { return d_[i]; }
+  constexpr char front() const { return d_[0]; }
+  constexpr char back() const { return d_[n_ - 1]; }
+  size_t find(char c, size_t pos = 0) const {
+    for (size_t i = pos; i < n_; ++i)
+      if (d_[i] == c) return i;
+    return npos;
+  }
+  string_view substr(size_t pos, size_t n = npos) const {
+    if (pos > n_) pos = n_;
+    if (n > n_ - pos) n = n_ - pos;
+    return string_view(d_ + pos, n);
+  }
+  friend bool operator==(string_view a, string_view b) {
+    if (a.n_ != b.n_) return false;
+    for (size_t i = 0; i < a.n_; ++i)
+      if (a.d_[i] != b.d_[i]) return false;
+    return true;
+  }
+  friend bool operator!=(string_view a, string_view b) { return !(a == b); }
+
+ private:
+  static size_t len(const char* s) {
+    size_t n = 0;
+    while (s && s[n]) ++n;
+    return n;
+  }
+  const char* d_ = nullptr;
+  size_t n_ = 0;
+};
+}  // namespace std

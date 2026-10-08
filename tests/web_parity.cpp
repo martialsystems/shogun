@@ -1,40 +1,26 @@
 // Runs web/parity_scenario.txt through the web entry points natively and prints every output sample.
-// web/test_wasm.mjs runs the same file through the wasm build and compares.
+// web/test_wasm.mjs runs the same file through the wasm build and compares. --docs prints every program's saved document.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-extern "C" {
-void sg_init();
-int sg_knob_count();
-const char* sg_knob_name(int);
-void sg_set_knob(int, int);
-void sg_set_level(int, double);
-void sg_set_master(double);
-void sg_set_mode(int);
-void sg_set_tempo(double);
-void sg_set_scale(int);
-void sg_set_running(int);
-void sg_restart();
-void sg_set_bar(int);
-void sg_set_track(int, int, int, int, int);
-void sg_set_drum(int, int, int, int, int, int);
-void sg_set_note(int, int, int, int, int);
-void sg_commit();
-void sg_trigger(int, double, double);
-void sg_trigger_note(int, int, double);
-void sg_release(int);
-void sg_patch(int, int);
-float* sg_out_l();
-float* sg_out_r();
-void sg_process(int);
-}
+#include "../web/wasm/shogun_web.h"
 
 int main(int argc, char** argv) {
   if (argc < 2) return 2;
+  if (!std::strcmp(argv[1], "--docs")) {  // every program's full document (sg_state_json), each followed by a NUL line
+    sg_init(48000.0);
+    for (int i = 0; i < sg_factory_count(); ++i) {
+      sg_factory_load(i);
+      const char* doc = sg_state_json(1);  // before sg_state_json_len()
+      std::fwrite(doc, 1, static_cast<std::size_t>(sg_state_json_len()), stdout);
+      std::fputc(0, stdout);
+    }
+    return 0;
+  }
   FILE* in = std::fopen(argv[1], "r");
   if (!in) return 2;
-  sg_init();
+  sg_init(48000.0);
   char line[256];
   while (std::fgets(line, sizeof line, in)) {
     char op[32] = {0}, fn[64] = {0};
@@ -66,17 +52,21 @@ int main(int argc, char** argv) {
       else if (!std::strcmp(fn, "sg_trigger_note")) sg_trigger_note(i0, i1, a[2]);
       else if (!std::strcmp(fn, "sg_release")) sg_release(i0);
       else if (!std::strcmp(fn, "sg_patch")) sg_patch(i0, i1);
+      else if (!std::strcmp(fn, "sg_factory_load")) sg_factory_load(i0);
+      else if (!std::strcmp(fn, "sg_rotate")) sg_rotate(a[0]);
       else {
         std::fprintf(stderr, "unknown call %s\n", fn);
         return 2;
       }
+    } else if (!std::strcmp(op, "hash")) {  // loaded state, compared exactly
+      std::printf("H %.0f\n", sg_state_hash());
     } else if (!std::strcmp(op, "process")) {
       int n = 0;
       std::sscanf(line, "%*s %d", &n);
       while (n > 0) {
         const int k = n > 1024 ? 1024 : n;
         sg_process(k);
-        for (int i = 0; i < k; ++i) std::printf("%.9g %.9g\n", sg_out_l()[i], sg_out_r()[i]);
+        for (int i = 0; i < k; ++i) std::printf("%.9g %.9g\n", static_cast<double>(sg_out_l()[i]), static_cast<double>(sg_out_r()[i]));
         n -= k;
       }
     }

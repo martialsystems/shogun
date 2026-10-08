@@ -1,0 +1,26 @@
+#pragma once
+#include <new>
+#include <utility>
+namespace std {
+template <class T> class unique_ptr {
+ public:
+  unique_ptr() = default;
+  explicit unique_ptr(T* p) : p_(p) {}
+  unique_ptr(unique_ptr&& o) noexcept : p_(o.p_) { o.p_ = nullptr; }
+  template <class U> unique_ptr(unique_ptr<U>&& o) noexcept : p_(o.release()) {}
+  unique_ptr& operator=(unique_ptr&& o) noexcept { reset(o.release()); return *this; }
+  template <class U> unique_ptr& operator=(unique_ptr<U>&& o) noexcept { reset(o.release()); return *this; }
+  unique_ptr(const unique_ptr&) = delete;
+  unique_ptr& operator=(const unique_ptr&) = delete;
+  ~unique_ptr() { reset(); }
+  T* get() const { return p_; }
+  T* operator->() const { return p_; }
+  T& operator*() const { return *p_; }
+  explicit operator bool() const { return p_ != nullptr; }
+  T* release() { T* p = p_; p_ = nullptr; return p; }
+  void reset(T* p = nullptr) { T* old = p_; p_ = p; delete old; }
+ private:
+  T* p_ = nullptr;
+};
+template <class T, class... A> unique_ptr<T> make_unique(A&&... a) { return unique_ptr<T>(new T(std::forward<A>(a)...)); }
+}  // namespace std

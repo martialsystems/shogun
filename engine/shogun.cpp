@@ -1,929 +1,1150 @@
 #include "shogun.h"
 
+#include <jidai/jcs/Pitch.h>
+
+#include <algorithm>
+#include <cstring>
+
 namespace shogun {
 
 namespace {
 
-constexpr double kCyA[4] = {1.00, 1.52, 1.87, 2.41};
-constexpr double kCyB[4] = {1.00, 1.34, 1.71, 2.05};
-constexpr double kHat[4] = {1.00, 1.47, 1.80, 2.33};
+// JCS R4 (shared Pitch.h): V/OCT note for a jack's volts, 0 V = C3 = note 48.
+inline double voctNote(double v) { return jidai::jcs::pitch::note(jidai::jcs::pitch::Law::VOct, v); }
 
-double clampBpm(double bpm) {
-  if (bpm < 60.0) return 60.0;
-  if (bpm > 180.0) return 180.0;
-  return bpm;
+// Calibration measured on this engine (tools/measure_calib, §15.5): KEPT target peak / noon peak at g_vel = g_level = 1.
+// Re-measure whenever a voice body changes (TESTPLAN "calibration").
+constexpr double kCalibDefault[kVoices] = {
+#include "calib_table.inc"
+};
+
+// Delay divisions in beats (FX:DELAY TIME choices).
+constexpr double kDelayBeats[12] = {0.25, 0.375, 1.0 / 6.0, 0.5, 0.75, 1.0 / 3.0, 1.0, 1.5, 2.0 / 3.0, 2.0, 3.0, 4.0 / 3.0};
+// PPQN rates for CLK IN / CLK OUT (index 0 = STEP).
+constexpr double kPpqn[6] = {0.0, 1.0, 2.0, 4.0, 24.0, 48.0};
+// Old-pair layout for OUTPUT = PAIR (aux pair, side: 0 L only, 1 R only, 2 stereo).
+constexpr int kPairAux[kVoices] = {0, 0, 1, 1, 3, 5, 6, 5, 2, 2, 2, 4, 4, 4, 7, 7};
+constexpr int kPairSide[kVoices] = {0, 1, 0, 1, 2, 0, 2, 1, 0, 0, 1, 2, 2, 2, 0, 1};
+
+inline std::uint32_t hash32(std::uint32_t x) {
+  x ^= x >> 16;
+  x *= 0x7FEB352Du;
+  x ^= x >> 15;
+  x *= 0x846CA68Bu;
+  x ^= x >> 16;
+  return x;
 }
-
-// Equal-power pan: p = -1 is hard left, p = 0 is kCenterGain on each side, p = 1 is hard right.
-double panL(double p) { return std::cos(0.25 * kPi * (1.0 + p)); }
-double panR(double p) { return std::sin(0.25 * kPi * (1.0 + p)); }
-
-void addHardLeft(double s, double& pair, double& main) {
-  pair += s;
-  main += s;
-}
-
-void addHardRight(double s, double& pair, double& main) {
-  pair += s;
-  main += s;
-}
-
-void addPanned(double s, double p, double& pairL, double& pairR, double& mainL, double& mainR) {
-  const double gL = panL(p);
-  const double gR = panR(p);
-  pairL += s * gL;
-  pairR += s * gR;
-  mainL += s * gL;
-  mainR += s * gR;
-}
-
-// Equal power at the centre, so a main-only voice is not 6 dB under a hard-panned one.
-void addCenter(double s, double& mainL, double& mainR) {
-  mainL += s * kCenterGain;
-  mainR += s * kCenterGain;
-}
-
-// A drum voice ends once the largest of its envelopes is under kQuietEnv. From that sample it outputs 0 until the next trigger.
-template <class State>
-void endIfQuiet(State& st, double env) {
-  if (env >= kQuietEnv) return;
-  st.active = false;
-  st.mono = 0;
-  st.left = 0;
-  st.right = 0;
+// Reproducible uniform for (pattern seed, bar, track, step) (§10.2 PROB).
+inline double seededUniform(std::uint32_t seed, long bar, int track, long step, std::uint32_t salt) {
+  std::uint32_t h = hash32(seed ^ salt);
+  h = hash32(h ^ static_cast<std::uint32_t>(bar) * 0x9E3779B9u);
+  h = hash32(h ^ static_cast<std::uint32_t>(track + 1) * 0x85EBCA6Bu);
+  h = hash32(h ^ static_cast<std::uint32_t>(step) * 0xC2B2AE35u);
+  return static_cast<double>(h) * (1.0 / 4294967296.0);
 }
 
 }  // namespace
 
-// u(cc) = cc / 127. Values below are round(u * 127) from the INIT balance sheet in SCHEMATICS.md.
-Knobs initKit() {
-  Knobs k;
-  k.bd1Tune = 28;     // 0.22
-  k.bd1Pitch = 70;    // Bend 0.55
-  k.bd1Decay = 36;    // 0.28
-  k.bd1Attack = 57;   // 0.45
-  k.bd1Dist = 19;     // 0.15
-  k.bd1Noise = 10;    // 0.08
-  k.bd1Filter = 44;   // 0.35
-  k.sdTune = 61;      // 0.48
-  k.sdDTune = 15;     // Detune 0.12
-  k.sdPitch = 44;     // Bend 0.35
-  k.sdToneDecay = 28; // Decay 0.22
-  k.sdSnDecay = 38;   // Dec 2 0.30
-  k.sdSnappy = 79;    // 0.62
-  k.sdTone = 57;      // 0.45
-  k.rsTune = 79;      // 0.62
-  k.cpData = 48;      // 4 bursts
-  k.cpAttack = 89;    // 0.7
-  k.cpDecay = 32;     // 0.25
-  k.cpFilter = 70;    // 0.55
-  k.hhDecay = 10;     // 0.08
-  k.hhTune = 89;      // 0.7, shared by the open hat
-  k.ohDecay = 43;     // 0.34
-  k.cyDecay = 70;     // 0.55
-  k.ltcTune = 38;     // 0.30
-  k.ltcDecay = 41;    // 0.32
-  k.mtcTune = 53;     // 0.42
-  k.mtcDecay = 36;    // 0.28
-  k.htcTune = 70;     // 0.55
-  k.htcDecay = 30;    // 0.24
-  return k;
-}
-
-// INIT is an empty pattern: one bar of 16 steps on every track, no step on.
-Pattern initPattern() {
-  Pattern p;
-  p.name = "INIT";
-  p.length = 16;
-  for (auto& tr : p.track) tr.length = 16;
-  return p;
-}
-
 Engine::Engine() {
-  reset();
+  bd1_ = std::make_unique<Bd1Voice>();
+  bd2_ = std::make_unique<Bd2Voice>();
+  sd_ = std::make_unique<SdVoice>();
+  rs_ = std::make_unique<RsVoice>();
+  cp_ = std::make_unique<CpVoice>();
+  cl_ = std::make_unique<ClVoice>();
+  ma_ = std::make_unique<MaVoice>();
+  cb_ = std::make_unique<CbVoice>();
+  ch_ = std::make_unique<HatVoice>(CH);
+  oh_ = std::make_unique<HatVoice>(OH);
+  cy_ = std::make_unique<CyVoice>();
+  ltc_ = std::make_unique<TomVoice>(LTC);
+  mtc_ = std::make_unique<TomVoice>(MTC);
+  htc_ = std::make_unique<TomVoice>(HTC);
+  lead_ = std::make_unique<SynthVoice>(LEAD);
+  bass_ = std::make_unique<SynthVoice>(BASS);
+  Voice* v[kVoices] = {bd1_.get(), bd2_.get(), sd_.get(),  rs_.get(),  cp_.get(),  cl_.get(),  ma_.get(),  cb_.get(),
+                       ch_.get(),  oh_.get(),  cy_.get(),  ltc_.get(), mtc_.get(), htc_.get(), lead_.get(), bass_.get()};
+  for (int i = 0; i < kVoices; ++i) voices_[i] = v[i];
+  buildTables();
   loadInit();
+  prepare(48000.0, 2);
+}
+
+Engine::~Engine() = default;
+
+void Engine::buildTables() {
+  for (int v = 0; v < kVoices; ++v) {
+    decayParams_[v][0] = decayParams_[v][1] = -1;
+    toneParam_[v] = -1;
+    vparams_[v] = voiceParams(v);
+    voiceParamCount_[v] = 0;
+  }
+  for (int p = 0; p < kParamCount; ++p) {
+    const int v = kParams[p].voice;
+    if (v >= 0 && voiceParamCount_[v] < 96) voiceParamList_[v][voiceParamCount_[v]++] = p;
+  }
+  static constexpr int kWave[5] = {BD1, BD2, LTC, MTC, HTC};
+  for (int i = 0; i < 5; ++i) waveIds_[i] = waveParams(kWave[i]);
+  auto D = [&](int v, int a, int b = -1) {
+    decayParams_[v][0] = a;
+    decayParams_[v][1] = b;
+  };
+  // §5 table: DECAY → / TONE → per voice.
+  D(BD1, P_BD1_DECAY);
+  toneParam_[BD1] = P_BD1_DRIVE;
+  D(BD2, P_BD2_DECAY);
+  toneParam_[BD2] = P_BD2_TONE;
+  D(SD, P_SD_TDECAY, P_SD_SNDEC);
+  toneParam_[SD] = P_SD_SNAPPY;
+  toneParam_[RS] = P_RS_LEVEL;  // RS DECAY uses the τ·2^{V/2.5} law (VoiceCtx::decayV)
+  D(CP, P_CP_DECAY);
+  toneParam_[CP] = P_CP_FILTER;
+  D(CL, P_CL_DECAY);
+  toneParam_[CL] = P_CL_LEVEL;
+  D(MA, P_MA_DECAY);
+  toneParam_[MA] = P_MA_LEVEL;
+  D(CB, P_CB_DECAY);  // CB TONE: BP centre ±2 oct (VoiceCtx::toneV)
+  D(CH, P_CH_DECAY);  // hats TONE: HP/BP ±2 oct (toneV)
+  D(OH, P_OH_DECAY);
+  D(CY, P_CY_DECAY);
+  toneParam_[CY] = P_CY_TONE;
+  D(LTC, P_LTC_DECAY);
+  toneParam_[LTC] = P_LTC_WAVE;
+  D(MTC, P_MTC_DECAY);
+  toneParam_[MTC] = P_MTC_WAVE;
+  D(HTC, P_HTC_DECAY);
+  toneParam_[HTC] = P_HTC_WAVE;
+  D(LEAD, P_LEAD_DECAY);
+  D(BASS, P_BASS_DECAY);
 }
 
 void Engine::loadInit() {
-  static constexpr double kInitLevel[kVoiceCount] = {
-      0.85, 0.0, 0.75, 0.4, 0.35, 0.4, 0.45, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0};
-  knobs_ = initKit();
-  pattern_ = initPattern();
-  for (int i = 0; i < kVoiceCount; ++i) level_[i] = kInitLevel[i];
-  master_ = 0.7;
-  mode_ = ClockMode::Int;
-  bpm_ = 120.0;
-  stepsPerQuarter_ = 4;
-  recomputePeriod();
+  for (int p = 0; p < kParamCount; ++p) {
+    target_[p] = smooth_[p] = ue_[p] = static_cast<double>(kParams[p].def);
+    locked_[p] = false;
+    lock_[p] = 0.0;
+    isMoving_[p] = touched_[p] = false;
+  }
+  nMoving_ = nTouched_ = 0;
+  for (int i = 0; i < kPorts; ++i) {
+    cvAmt_[i] = 1.0;
+    inLaw_[i] = 0;
+    inConv_[i] = {};
+  }
+  for (int v = 0; v < kVoices; ++v) {
+    calib_[v] = kCalibDefault[v];
+    velDecayOff_[v] = 0.0;
+  }
+  pattern_ = Pattern{};
+  mod_.clearRows();
+  clearCables();
+}
+
+void Engine::setSerial(std::uint32_t s) {
+  serial_ = s != 0 ? s : 0x5A31C0DEu;
+  drawTolerances();
+}
+
+void Engine::drawTolerances() {
+  XorShift32 r;
+  r.seed(serial_);
+  auto gauss = [&]() {
+    double u1 = r.uniform();
+    if (u1 < 1e-12) u1 = 1e-12;
+    const double u2 = r.uniform();
+    return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * kPi * u2);
+  };
+  for (int v = 0; v < kVoices; ++v) {
+    zPitch_[v] = gauss();
+    zTau_[v] = gauss();
+    zCut_[v] = gauss();
+  }
+  for (auto& bank : zMetal_)
+    for (double& z : bank) z = gauss();
+}
+
+void Engine::prepare(double fs, int os) {
+  fs_ = fs;
+  M_ = (os >= 4) ? 4 : (os == 2 ? 2 : 1);
+  fsE_ = fs_ * M_;
+  aSmooth_ = rcCoef(0.005, fs_);
+  for (int v = 0; v < kVoices; ++v) {
+    voices_[v]->prepare(fs_, fsE_);
+    dcL_[v].set(8.0, fsE_);
+    dcR_[v].set(8.0, fsE_);
+    decOut_[v].prepare(M_);
+    upRet_[v].prepare(M_);
+    drift_[v].prepare(fs_);
+    drift_[v].rng.seed(voiceSeed(v) ^ 0x51ED270Bu);
+  }
+  for (auto& d : decMain_) d.prepare(M_);
+  for (auto& d : decAux_) d.prepare(M_);
+  for (auto& d : decSend_) d.prepare(M_);
+  for (auto& u : upFx_) u.prepare(M_);
+  for (auto& b : bus_) b.prepare(fsE_);
+  width_.prepare(fsE_);
+  delay_.prepare(fs_, 4.6);
+  mod_.prepare(fs_);
+  chokeA_ = rcCoef(0.0015, fsE_);  // 1.5 ms choke discharge (§6.6)
+  drawTolerances();
+  reset();
 }
 
 void Engine::reset() {
-  mode_ = ClockMode::Int;
-  bpm_ = 120.0;
-  hostBpm_ = 120.0;
-  hostPlaying_ = false;
-  stepsPerQuarter_ = 4;
-  pattern_ = Pattern{};
-  knobs_ = Knobs{};
-  master_ = 1.0;
-  globalShuffle_ = -1;
-  for (int i = 0; i < kVoiceCount; ++i) {
-    level_[i] = 1.0;
-    liveNote_[i] = -1;
-    prevGate_[i] = 0.0;
+  for (int v = 0; v < kVoices; ++v) {
+    voices_[v]->reset();
+    active_[v] = false;
+    hitGain_[v] = 1.0;
+    chokeGain_[v] = 1.0;
+    choking_[v] = false;
+    dcL_[v].reset();
+    dcR_[v].reset();
+    decOut_[v].reset();
+    upRet_[v].reset();
+    drift_[v].reset();
+    voiceOut_[v] = coreOut_[v] = 0.0;
+    trigDet_[v].reset();
+    for (double& x : retBuf_[v]) x = 0.0;
   }
-  liveNote_[static_cast<int>(Voice::Lead)] = 60;
-  liveNote_[static_cast<int>(Voice::Bass)] = 36;
-  for (int i = 0; i < static_cast<int>(Pair::Count); ++i) pairPatched_[i] = false;
-  noiseState_ = 1;
-  sampleIndex_ = 0;
+  for (auto& d : decMain_) d.reset();
+  for (auto& d : decAux_) d.reset();
+  for (auto& d : decSend_) d.reset();
+  for (auto& u : upFx_) u.reset();
+  for (auto& c : fxBuf_)
+    for (double& x : c) x = 0.0;
+  for (auto& b : bus_) b.reset();
+  masterDrive_.reset();
+  glue_.reset();
+  width_.reset();
+  clip_.reset();
+  delay_.reset();
+  delayActive_ = false;
+  delayEnergy_ = 0.0;
+  mod_.reset();
+  for (int i = 0; i < 5; ++i) vcPrev_[i] = vcCur_[i] = 0.0;
+  nEvents_ = 0;
+  for (auto& e : events_) e.live = false;
+  sample_ = 0;
+  running_ = wasRunning_ = false;
+  ppq_ = intPpq_ = 0.0;
+  hostOffset_ = 0;
+  for (int t = 0; t < 16; ++t) {
+    lastStep_[t] = -1;
+    started_[t] = false;
+  }
+  gStep_ = -1;
   counter_ = 0;
-  booted_ = false;
-  running_ = true;
-  extClock_ = false;
-  pulse_ = false;
-  nextStep_ = 0;
-  eventCount_ = 0;
-  pendingCount_ = 0;
-  clearVoices();
-  recomputePeriod();
+  displayStep_ = 1;
+  clkDet_.reset();
+  rstDet_.reset();
+  runDet_.reset();
+  synthGateJack_[0] = synthGateJack_[1] = false;
+  lastClkEdge_ = -1;
+  extCount_ = 0;
+  rstPulse_ = runPulse_ = 0;
+  accOut_ = 0.0;
+  outMainL_ = outMainR_ = 0.0;
+  for (double& a : outAux_) a = 0.0;
+  for (float& x : values_) x = 0.0f;
+  for (int i = 0; i < kVoices; ++i) pending_[i] = Pending{};
 }
 
-void Engine::setMode(ClockMode mode) {
-  // INT to EXT: the pattern no longer reaches lead and bass, so a note it opened must not hang.
-  if (mode_ == ClockMode::Int && mode == ClockMode::Ext) {
-    fireRest(static_cast<int>(Voice::Lead));
-    fireRest(static_cast<int>(Voice::Bass));
+void Engine::setParam(int id, double u) {
+  if (id < 0 || id >= kParamCount) return;
+  target_[id] = clampd(u, 0.0, 1.0);
+  if (kParams[id].kind == ParamKind::Stepped || kParams[id].kind == ParamKind::Toggle) {
+    smooth_[id] = target_[id];
+    refreshBase(id);
+  } else if (!isMoving_[id] && !dsp::exactEq(smooth_[id], target_[id])) {
+    isMoving_[id] = true;
+    moving_[nMoving_++] = id;
   }
-  mode_ = mode;
+}
+void Engine::setParamNow(int id, double u) {
+  if (id < 0 || id >= kParamCount) return;
+  target_[id] = smooth_[id] = clampd(u, 0.0, 1.0);
+  refreshBase(id);
 }
 
-void Engine::setRunning(bool running) {
-  if (running == running_) return;
-  running_ = running;
-  if (running) {
+double Engine::tempo() const {
+  const int src = stepIndex(target_[P_CLOCK_SOURCE], 3);
+  if (src == SRC_HOST && host_.valid && host_.bpm > 0.0) return host_.bpm;
+  return tempoBpm(target_[P_CLOCK_TEMPO]);
+}
+double Engine::periodSamples() const {
+  return 60.0 * fs_ / (tempo() * stepsPerQuarter(stepIndex(target_[P_CLOCK_SCALE], 4)));
+}
+
+void Engine::setHostTransport(const HostTransport& t) {
+  host_ = t;
+  hostOffset_ = 0;
+}
+void Engine::setRunning(bool run) {
+  if (run && !running_) {
+    startSample_ = sample_;
+    intPpq_ = 0.0;
+    intAnchorPpq_ = 0.0;
+    intAnchorSample_ = sample_;
+    intAnchorBpm_ = tempo();
+  }
+  running_ = run;
+}
+void Engine::restart() {
+  intPpq_ = 0.0;
+  intAnchorPpq_ = 0.0;
+  intAnchorSample_ = sample_;
+  intAnchorBpm_ = tempo();
+  extCount_ = 0;
+  for (int t = 0; t < 16; ++t) {
+    lastStep_[t] = -1;
+    started_[t] = false;
+  }
+  gStep_ = -1;
+}
+
+// ---------------------------------------------------------------- immediate events
+void Engine::trigger(int voice, double velVolts, double bend, int accLevel) {
+  if (voice < 0 || voice >= kVoices) return;
+  Pending& p = pending_[voice];
+  p.on = true;
+  p.kind = 0;
+  p.velVolts = velVolts;
+  p.acc = accLevel;
+  p.bend = bend;
+  p.track = p.pos = -1;
+  p.fromJack = false;
+}
+void Engine::noteOn(int voice, double note, double velVolts, bool tie) {
+  if (voice != LEAD && voice != BASS) return;
+  Pending& p = pending_[voice];
+  p.on = true;
+  p.kind = 1;
+  p.note = note;
+  p.velVolts = velVolts;
+  p.acc = velVolts >= 4.5 ? 3 : 2;
+  p.tie = tie;
+  p.track = p.pos = -1;
+}
+void Engine::noteOff(int voice) {
+  if (voice == LEAD) lead_->noteOff();
+  if (voice == BASS) bass_->noteOff();
+}
+
+// ---------------------------------------------------------------- internal bay
+bool Engine::addCable(int from, int to) {
+  if (from < 0 || from >= kPorts || to < 0 || to >= kPorts) return false;
+  if (kPortTable[from].dir != PortDir::Out || kPortTable[to].dir != PortDir::In) return false;
+  // RackGraph kAllowed: Audio/CV feed Audio or CV; Gate feeds anything; Audio/CV into a Gate input is refused.
+  if (kPortTable[to].type == PortType::Gate && kPortTable[from].type != PortType::Gate) return false;
+  for (int i = 0; i < nCables_; ++i)
+    if (cableFrom_[i] == from && cableTo_[i] == to) return true;
+  if (nCables_ >= kMaxCables) return false;
+  cableFrom_[nCables_] = from;
+  cableTo_[nCables_] = to;
+  ++nCables_;
+  return true;
+}
+void Engine::removeCable(int from, int to) {
+  for (int i = 0; i < nCables_; ++i)
+    if (cableFrom_[i] == from && cableTo_[i] == to) {
+      cableFrom_[i] = cableFrom_[nCables_ - 1];
+      cableTo_[i] = cableTo_[nCables_ - 1];
+      --nCables_;
+      return;
+    }
+}
+void Engine::clearCables() {
+  nCables_ = 0;
+  for (int i = 0; i < kPorts; ++i) {
+    extValue_[i] = 0.0f;
+    extConnected_[i] = false;
+  }
+}
+
+// ---------------------------------------------------------------- velocity (§4.8)
+double Engine::gVelFor(int v, double velVolts) const {
+  const double g = gVelFromVolts(velVolts);
+  const double A = target_[P_MASTER_ACCENT];
+  const double g1 = 1.0 - A * (1.0 - g);
+  const double k = target_[vparams_[v].velLevel];
+  return 1.0 - k * (1.0 - g1);
+}
+
+// ---------------------------------------------------------------- clock and sequencer (§10)
+void Engine::clockSample(const float* in, const bool* con) {
+  const int src = stepIndex(target_[P_CLOCK_SOURCE], 3);
+  const bool hostMode = src == SRC_HOST && host_.valid;
+  const double bpm = tempo();
+  const int gScale = stepIndex(target_[P_CLOCK_SCALE], 4);
+  const double spqG = stepsPerQuarter(gScale);
+  const int bar = 1 + stepIndex(target_[P_CLOCK_BAR], 32);
+
+  // RUN IN toggles run (edge), RST IN restarts; START/RESET absorb a coincident clock edge (JCS R5).
+  bool absorbClock = false;
+  if (con && con[PORT_RUN_IN] && runDet_.rising(static_cast<float>(in[PORT_RUN_IN]))) {
+    setRunning(!running_);
+    absorbClock = true;
+  }
+  if (con && con[PORT_RST_IN] && rstDet_.rising(static_cast<float>(in[PORT_RST_IN]))) {
+    restart();
+    absorbClock = true;
+  }
+  bool clkEdge = false;
+  if (con && con[PORT_CLK_IN]) clkEdge = clkDet_.rising(static_cast<float>(in[PORT_CLK_IN]));
+  if (clkEdge && (absorbClock || sample_ - startSample_ <= 2) && src == SRC_EXT && extCount_ > 0) clkEdge = false;
+
+  bool run = running_;
+  double ppq = 0.0;
+  if (hostMode) {
+    run = host_.playing;
+    ppq = host_.ppq + hostOffset_ * bpm / (60.0 * fs_);
+    ++hostOffset_;
+  } else if (src == SRC_EXT) {
+    if (run && clkEdge) {
+      if (lastClkEdge_ >= 0) extPeriod_ = static_cast<double>(sample_ - lastClkEdge_);
+      lastClkEdge_ = sample_;
+      ++extCount_;
+    }
+    const int mode = stepIndex(target_[P_CLOCK_CLK_IN], 6);
+    const double perQ = mode == 0 ? spqG : kPpqn[mode];
+    ppq = extCount_ > 0 ? static_cast<double>(extCount_ - 1) / perQ : -1.0;
+  } else {
+    if (!dsp::exactEq(bpm, intAnchorBpm_)) {
+      intAnchorPpq_ = intPpq_;
+      intAnchorSample_ = sample_;
+      intAnchorBpm_ = bpm;
+    }
+    ppq = intAnchorPpq_ + static_cast<double>(sample_ - intAnchorSample_) * bpm / (60.0 * fs_);
+    intPpq_ = ppq;
+  }
+
+  if (run && !wasRunning_) {
+    for (int t = 0; t < 16; ++t) {
+      lastStep_[t] = -1;
+      started_[t] = false;
+    }
+    gStep_ = -1;
     counter_ = 0;
-    booted_ = false;
+    runPulse_ = static_cast<int>(std::lround(0.005 * fs_));
+    for (auto& r : rndHit_) r.seed(pattern_.seed ^ 0x2545F491u);
+  }
+  if (!run) {
+    if (wasRunning_) {
+      stopAll();
+      runPulse_ = static_cast<int>(std::lround(0.005 * fs_));
+    }
+    wasRunning_ = false;
+    running_ = hostMode ? running_ : run;
+    ppq_ = ppq;
     return;
   }
-  for (int i = 0; i < eventCount_; ++i) {
-    if (events_[i].pattern) events_[i].live = false;
+  wasRunning_ = true;
+  ppq_ = ppq;
+  if (ppq < 0.0) return;  // EXT: waiting for the first edge
+
+  // Tracks (polymeter: each has its own scale and length).
+  for (int t = 0; t < 16; ++t) {
+    const Track& tr = pattern_.tracks[t];
+    const double spq = stepsPerQuarter(tr.scale < 0 ? gScale : tr.scale);
+    const double pos = ppq * spq + 1e-9;
+    const long s = static_cast<long>(std::floor(pos));
+    if (s == lastStep_[t]) continue;
+    const double period = src == SRC_EXT ? extPeriod_ * spqG / spq : 60.0 * fs_ / (bpm * spq);
+    bool fire = (s == lastStep_[t] + 1) || lastStep_[t] < 0 || src == SRC_EXT;
+    if (!fire) fire = (pos - static_cast<double>(s)) * period < 1.0;  // host jump/loop: fire only on an exact boundary
+    if (fire) onTrackStep(t, s, period);
+    lastStep_[t] = s;
   }
-  compactEvents();
-  fireRest(static_cast<int>(Voice::Lead));
-  fireRest(static_cast<int>(Voice::Bass));
-}
-
-void Engine::restart() {
-  counter_ = 0;
-  booted_ = false;
-}
-
-void Engine::setExternalClock(bool on) {
-  if (on == extClock_) return;
-  extClock_ = on;
-  pulse_ = false;
-  if (!on) nextStep_ = static_cast<double>(sampleIndex_) + period_;
-}
-
-void Engine::setTempo(double bpm) {
-  bpm_ = clampBpm(bpm);
-  recomputePeriod();
-}
-
-void Engine::setHostTempo(double bpm, bool playing) {
-  hostPlaying_ = playing;
-  if (playing) hostBpm_ = clampBpm(bpm);
-  recomputePeriod();
-}
-
-void Engine::setScaleSteps(int stepsPerQuarter) {
-  if (stepsPerQuarter == 8 || stepsPerQuarter == 6 || stepsPerQuarter == 4 || stepsPerQuarter == 3) {
-    stepsPerQuarter_ = stepsPerQuarter;
-  }
-  recomputePeriod();
-}
-
-void Engine::setPattern(const Pattern& pattern) { pattern_ = pattern; }
-
-void Engine::setKnobs(const Knobs& knobs) { knobs_ = knobs; }
-
-void Engine::setLevel(Voice voice, double level) {
-  const int i = static_cast<int>(voice);
-  if (i < 0 || i >= kVoiceCount) return;
-  level_[i] = level;
-}
-
-void Engine::setMaster(double master) { master_ = master; }
-
-void Engine::setSolo(int voice) { solo_ = (voice >= 0 && voice < kVoiceCount) ? voice : -1; }
-
-void Engine::setPairPatched(Pair pair, bool patched) {
-  const int i = static_cast<int>(pair);
-  if (i < 0 || i >= static_cast<int>(Pair::Count)) return;
-  pairPatched_[i] = patched;
-}
-
-bool Engine::pairPatched(Pair pair) const {
-  const int i = static_cast<int>(pair);
-  if (i < 0 || i >= static_cast<int>(Pair::Count)) return false;
-  return pairPatched_[i];
-}
-
-void Engine::setGlobalShuffle(int s) { globalShuffle_ = s; }
-
-void Engine::setLiveNote(Voice voice, int note) {
-  const int i = static_cast<int>(voice);
-  if (i < 0 || i >= kVoiceCount) return;
-  liveNote_[i] = note;
-}
-
-void Engine::trigger(Voice voice, double gain, double bendSt) {
-  if (pendingCount_ >= 32) return;
-  Pending& p = pending_[pendingCount_++];
-  p.voice = static_cast<int>(voice);
-  p.gain = gain;
-  p.bend = bendSt;
-  p.note = -1;
-  p.isNote = false;
-}
-
-void Engine::triggerNote(Voice voice, int note, double gain) {
-  if (pendingCount_ >= 32) return;
-  Pending& p = pending_[pendingCount_++];
-  p.voice = static_cast<int>(voice);
-  p.gain = gain;
-  p.bend = 0.0;
-  p.note = note;
-  p.isNote = true;
-}
-
-void Engine::release(Voice voice) { fireRest(static_cast<int>(voice)); }
-
-double Engine::cpBurst(int index) const {
-  if (index < 0 || index >= 8) return 0.0;
-  return cpBurst_[index];
-}
-
-int Engine::displayStep() const {
-  const int length = clampLength(pattern_.length);
-  const int slot = static_cast<int>(counter_ % length);
-  return slot + 1;
-}
-
-void Engine::recomputePeriod() {
-  const double bpm = hostPlaying_ ? hostBpm_ : bpm_;
-  const double old = period_;
-  period_ = kFs * 60.0 / (bpm * static_cast<double>(stepsPerQuarter_));
-  // A tempo change keeps the step in progress at the same fraction, so the counter neither races nor stalls.
-  if (booted_ && old > 0.0 && period_ != old) {
-    const double now = static_cast<double>(sampleIndex_);
-    const double left = nextStep_ - now;
-    if (left > 0.0) nextStep_ = now + left * period_ / old;
+  // Global clock grid: counter, display, RST OUT, BAR retrig, RND source.
+  const long sg = static_cast<long>(std::floor(ppq * spqG + 1e-9));
+  if (sg != gStep_) {
+    gStep_ = sg;
+    ++counter_;
+    const long inBar = ((sg % bar) + bar) % bar;
+    displayStep_ = static_cast<int>(inBar) + 1;
+    if (inBar == 0) {
+      rstPulse_ = static_cast<int>(std::lround(0.005 * fs_));
+      for (auto& l : mod_.lfo) l.onBar();
+    }
+    rnd_ = seededUniform(pattern_.seed, sg / bar, 99, sg, 0x52A4D1u);
+    mod_.rnd = rnd_;
+    if (accStep_ != sg) accOut_ = 0.0;
   }
 }
 
-void Engine::clearVoices() {
-  for (int i = 0; i < kVoiceCount; ++i) voice_[i] = VoiceState{};
-  for (int i = 0; i < 8; ++i) cpBurst_[i] = 0.0;
-  cpCount_ = 1;
-  bd1Hz_ = bd1TuneHz_ = bd1TrHz_ = 0;
-  bd2Env_ = bd2Tr_ = 0;
-  sdF1_ = sdF2_ = sdT1_ = sdT2_ = sdHz_ = 0;
-  ohEnv_ = ohSample_ = hhEnv_ = 0;
-  hhTau_ = 0.008;
-  cyA_ = cyB_ = 0;
-  ltcHz_ = ltcEnv_ = 0;
-  leadSaw_ = maSample_ = 0;
+void Engine::onTrackStep(int t, long s, double period) {
+  const Track& tr = pattern_.tracks[t];
+  const int len = std::clamp(tr.len, 1, kMaxSteps);
+  auto offset = [&](long k) {
+    const Step& st = tr.steps[((k % len) + len) % len];
+    const double sw = tr.swing < 0.0 ? 0.5 + 0.25 * target_[P_CLOCK_SWING] : tr.swing;
+    double off = 0.0;
+    if ((k & 1) == 1) off += (2.0 * sw - 1.0) * period;  // odd clock steps (KEPT)
+    off += static_cast<double>(st.micro) * period;
+    off += std::round(tr.shift * 0.030 * fs_);
+    return off;
+  };
+  const double off = offset(s);
+  if (off >= 0.0 || !started_[t]) scheduleHits(t, s, static_cast<int>(((s % len) + len) % len), static_cast<double>(sample_) + std::max(0.0, off), period);
+  const double off2 = offset(s + 1);
+  if (off2 < 0.0) scheduleHits(t, s + 1, static_cast<int>((((s + 1) % len) + len) % len), static_cast<double>(sample_) + period + off2, period);
+  started_[t] = true;
 }
 
-int Engine::clampLength(int length) {
-  if (length < 1) return 1;
-  if (length > kMaxSteps) return kMaxSteps;
-  return length;
-}
-
-void Engine::compactEvents() {
-  int write = 0;
-  for (int i = 0; i < eventCount_; ++i) {
-    if (events_[i].live) events_[write++] = events_[i];
-  }
-  eventCount_ = write;
-}
-
-void Engine::schedule(double when, int voice, double gain, double bend, int note, EventKind kind, bool tie) {
-  if (eventCount_ >= kMaxEvents) compactEvents();
-  if (eventCount_ >= kMaxEvents) return;
-  Event& e = events_[eventCount_++];
-  e.when = static_cast<std::int64_t>(std::floor(when));
-  e.voice = voice;
-  e.gain = gain;
-  e.bend = bend;
-  e.note = note;
-  e.kind = kind;
-  e.tie = tie;
+void Engine::scheduleHits(int t, long s, int pos, double when, double period) {
+  const Step& st = pattern_.tracks[t].steps[pos];
+  Event e;
+  e.voice = t;
+  e.track = t;
+  e.pos = pos;
   e.pattern = true;
-  e.live = true;
+  e.acc = std::clamp<int>(st.acc, 1, 3);
+  e.bend = static_cast<double>(st.bend);
+  e.note = st.note;
+  e.tie = st.tie;
+  if (t == LEAD || t == BASS) {
+    e.kind = st.on ? 1 : 2;
+    e.when = static_cast<std::int64_t>(std::llround(when));
+    schedule(e);
+    return;
+  }
+  if (!st.on) return;
+  const int bar = 1 + stepIndex(target_[P_CLOCK_BAR], 32);
+  if (st.prob < 1.0f) {
+    const double u = seededUniform(pattern_.seed, s / bar, t, s, 0x9B0Bu);
+    if (u >= static_cast<double>(st.prob)) return;
+  }
+  e.kind = 0;
+  if (st.flam > 0 && t != CP) {  // flam is not on clap (KEPT)
+    const int k = (st.flam - 1) & 15;
+    const int hits = 2 + (k % 4);
+    const double gap = std::round(0.00375 * (1 + k / 4) * fs_);
+    for (int h = 0; h < hits; ++h) {
+      e.when = static_cast<std::int64_t>(std::llround(when + h * gap));
+      schedule(e);
+    }
+    return;
+  }
+  int r = st.ratchet;
+  bool ok = false;
+  for (int k : kRatchets) ok = ok || k == r;
+  if (!ok) r = 1;
+  for (int j = 0; j < r; ++j) {
+    e.when = static_cast<std::int64_t>(std::llround(when + j * period / r));
+    schedule(e);
+  }
 }
 
-void Engine::onStep(std::int64_t c, double start) {
-  compactEvents();
-  for (int vi = 0; vi < kVoiceCount; ++vi) {
-    const Track& tr = pattern_.track[vi];
-    const bool noteTrack = vi >= static_cast<int>(Voice::Lead);
-    if (tr.mute && !noteTrack) continue;
-    const int length = clampLength(tr.length);
-    int slot = static_cast<int>(c % length);
-    if (slot < 0) slot += length;
+void Engine::schedule(const Event& e) {
+  for (int i = 0; i < kMaxEvents; ++i) {
+    if (!events_[i].live) {
+      events_[i] = e;
+      events_[i].live = true;
+      if (i >= nEvents_) nEvents_ = i + 1;
+      return;
+    }
+  }
+}
 
-    int shuffle = tr.shuffle;
-    if (globalShuffle_ >= 0) shuffle = globalShuffle_;
-    if (shuffle < 0) shuffle = 0;
-    if (shuffle > 15) shuffle = 15;
-    double delay = 0.0;
-    // Odd clock steps, not odd track steps, so an odd track length keeps the swing on the beat.
-    if ((c % 2) == 1) delay = (static_cast<double>(shuffle) / 15.0) * (period_ / 3.0);
-    const double shift = std::round(u(tr.shiftCc) * 0.030 * kFs);
-    const double base = start + shift + delay;
+void Engine::stopAll() {
+  for (int i = 0; i < nEvents_; ++i)
+    if (events_[i].pattern) events_[i].live = false;
+  lead_->noteOff();
+  bass_->noteOff();
+  accOut_ = 0.0;
+}
 
-    if (noteTrack) {
-      const NoteStep& step = tr.note[slot];
-      const double gain = (vi == static_cast<int>(Voice::Bass)) ? gAccent(step.accent) : 1.0;
-      // A muted note track rests, so a note it was holding releases instead of droning.
-      if (tr.mute || step.note < 0) {
-        schedule(base, vi, gain, 0.0, -1, EventKind::Rest);
-      } else {
-        schedule(base, vi, gain, 0.0, step.note, EventKind::Note, step.tie);
+void Engine::fireDue(const float* in, const bool* con) {
+  const bool ext = stepIndex(target_[P_CLOCK_MODE], 2) == 1;
+  int top = 0;
+  for (int i = 0; i < nEvents_; ++i) {
+    Event& e = events_[i];
+    if (!e.live) continue;
+    if (e.when > sample_) {
+      top = i + 1;
+      continue;
+    }
+    e.live = false;  // <= so an event can never be stranded
+    if (e.pattern && ext) {  // EXT ignores the pattern for the voices (KEPT switch law, forge-pinned) ...
+      if (e.kind == 0 && isDrum(e.voice)) {  // ... but ACC OUT still carries the step's accent volts (§13.2)
+        accOut_ = std::max(accOut_, kAccentVolts[e.acc - 1]);
+        accStep_ = gStep_;
       }
       continue;
     }
-
-    const DrumStep& step = tr.drum[slot];
-    if (!step.on) continue;
-    double bend = 0.0;
-    if (voiceHasBend(vi) && step.bendCc >= 0) {
-      bend = 12.0 * (2.0 * u(step.bendCc) - 1.0);
-    }
-    const double gain = gAccent(step.accent);
-    const bool flam = step.flam && vi != static_cast<int>(Voice::Cp);
-    if (!flam) {
-      schedule(base, vi, gain, bend, -1, EventKind::Drum);
-      continue;
-    }
-    const int hits = flamHits(step.flamIndex);
-    const int gap = flamGap(step.flamIndex);
-    for (int h = 0; h < hits; ++h) {
-      schedule(base + static_cast<double>(h * gap), vi, gain, bend, -1, EventKind::Drum);
-    }
+    fireEvent(e, in, con);
   }
+  nEvents_ = top;
 }
 
-void Engine::fireDrum(int voice, double gain, double bend) {
-  if (voice < 0 || voice >= kVoiceCount) return;
-  if (voice == static_cast<int>(Voice::Hh)) {
-    voice_[static_cast<int>(Voice::Oh)].choked = true;
-  }
-  VoiceState& st = voice_[voice];
-  st.active = true;
-  st.choked = false;
-  st.gate = false;
-  st.releasing = false;
-  st.n = 0;
-  st.phase = 0;
-  st.phase2 = 0;
-  st.lp = 0;
-  st.gain = gain;
-  st.bend = bend;
-  st.env = 1;
-  st.mono = 0;
-  st.left = 0;
-  st.right = 0;
-}
-
-void Engine::fireNote(int voice, int note, double gain, bool tie) {
-  if (voice != static_cast<int>(Voice::Lead) && voice != static_cast<int>(Voice::Bass)) return;
-  if (note < 0) {
-    fireRest(voice);
+void Engine::fireEvent(const Event& e, const float* in, const bool* con) {
+  const int v = e.voice;
+  if (e.kind == 2) {
+    noteOff(v);
     return;
   }
-  VoiceState& st = voice_[voice];
-  // Only a step marked tie holds on; a repeated note without it plays again.
-  const bool tied = tie && st.gate && !st.releasing;
-  st.gain = gain;
-  st.note = note;
-  st.gate = true;
-  st.releasing = false;
-  st.active = true;
-  st.env = 1;
-  if (tied) return;
-  st.n = 0;
-  st.phase = 0;
-  st.phase2 = 0;
-  st.lp = 0;
-}
-
-void Engine::fireRest(int voice) {
-  if (voice < 0 || voice >= kVoiceCount) return;
-  VoiceState& st = voice_[voice];
-  if (!st.gate) return;
-  st.gate = false;
-  st.releasing = true;
-}
-
-void Engine::fireDue() {
-  for (int i = 0; i < eventCount_; ++i) {
-    Event& e = events_[i];
-    // <= so an event can never be stranded live in the queue.
-    if (!e.live || e.when > sampleIndex_) continue;
-    e.live = false;
-    if (e.pattern && mode_ != ClockMode::Int) continue;
-    if (e.kind == EventKind::Drum) fireDrum(e.voice, e.gain, e.bend);
-    else if (e.kind == EventKind::Note) fireNote(e.voice, e.note, e.gain, e.tie);
-    else fireRest(e.voice);
+  Pending& p = pending_[v];
+  p.on = true;
+  p.kind = e.kind;
+  p.acc = e.acc;
+  p.bend = e.bend;
+  p.note = e.note;
+  p.tie = e.tie;
+  p.track = e.track;
+  p.pos = e.pos;
+  p.fromJack = false;
+  // VEL normal: the step accent volts; a patched VEL jack replaces them (one law, §4.8).
+  const int velPort = isDrum(v) ? drumPort(v, DJ_VEL) : synthPort(v - LEAD, SJ_VEL);
+  p.velVolts = (con && con[velPort]) ? static_cast<double>(in[velPort]) : kAccentVolts[e.acc - 1];
+  p.velPatched = con && con[velPort];
+  if (e.pattern && isDrum(v)) {
+    accOut_ = std::max(accOut_, kAccentVolts[e.acc - 1]);
+    accStep_ = gStep_;
   }
 }
 
-void Engine::applyJacks(const TrigIn& in) {
-  for (int v = 0; v < kVoiceCount; ++v) {
-    const double gate = in.volts[v];
-    const bool rise = prevGate_[v] < kTrigThreshold && gate >= kTrigThreshold;
-    const bool fall = prevGate_[v] >= kTrigThreshold && gate < kTrigThreshold;
-    // Always store the last gate, including in INT, so a held jack
-    // does not become a false edge when the switch later moves to EXT.
-    prevGate_[v] = gate;
-    if (mode_ != ClockMode::Ext) continue;
-    if (!rise && !fall) continue;
-    if (fall) {
-      if (v == static_cast<int>(Voice::Lead) || v == static_cast<int>(Voice::Bass)) fireRest(v);
-      continue;
-    }
-    const double gain = gVel(in.velocity[v]);
-    if (v == static_cast<int>(Voice::Lead) || v == static_cast<int>(Voice::Bass)) {
-      fireNote(v, liveNote_[v], gain);
-    } else {
-      fireDrum(v, gain, 0.0);
+void Engine::applyLocks(int v, int track, int pos) {
+  for (int i = 0; i < voiceParamCount_[v]; ++i) {
+    const int p = voiceParamList_[v][i];
+    if (locked_[p]) {
+      locked_[p] = false;
+      refreshBase(p);
     }
   }
+  if (track < 0 || pos < 0) return;
+  const Step& st = pattern_.tracks[track].steps[pos];
+  for (int i = 0; i < st.nLocks; ++i) {
+    const int p = st.locks[i].param;
+    if (p < 0 || p >= kParamCount) continue;
+    locked_[p] = true;
+    lock_[p] = static_cast<double>(st.locks[i].u);
+    refreshBase(p);
+  }
 }
 
-void Engine::applyPending() {
-  // Voice enum order, so a same-sample closed hat runs after the open hat and wins.
-  for (int v = 0; v < kVoiceCount; ++v) {
-    for (int i = 0; i < pendingCount_; ++i) {
-      if (pending_[i].voice != v) continue;
-      if (pending_[i].isNote) fireNote(v, pending_[i].note, pending_[i].gain);
-      else fireDrum(v, pending_[i].gain, pending_[i].bend);
+// ---------------------------------------------------------------- effective parameters (§8.4)
+// u_eff = clamp(base + Σ mod + CV + VEL>DECAY), base = lock or smoothed knob (§8.4). Only parameters that move are
+// touched per sample: smoothing runs on a list of moving parameters, and the additive terms are undone next sample.
+void Engine::refreshBase(int p) {
+  ue_[p] = clampd(locked_[p] ? lock_[p] : smooth_[p], 0.0, 1.0);
+}
+void Engine::addEffective(int p, double d) {
+  if (!touched_[p]) {
+    touched_[p] = true;
+    touchedList_[nTouched_++] = p;
+  }
+  ue_[p] += d;
+}
+void Engine::computeEffective(const float* in, const bool* con) {
+  int w = 0;
+  for (int i = 0; i < nMoving_; ++i) {
+    const int p = moving_[i];
+    smooth_[p] = smooth_[p] + (1.0 - aSmooth_) * (target_[p] - smooth_[p]);
+    if (std::fabs(target_[p] - smooth_[p]) < 1e-12) smooth_[p] = target_[p];
+    if (!dsp::exactEq(smooth_[p], target_[p])) moving_[w++] = p;
+    else isMoving_[p] = false;
+    refreshBase(p);
+  }
+  nMoving_ = w;
+  for (int i = 0; i < nTouched_; ++i) {
+    touched_[touchedList_[i]] = false;
+    refreshBase(touchedList_[i]);
+  }
+  nTouched_ = 0;
+  for (int i = 0; i < mod_.nActive; ++i) addEffective(mod_.active[i], mod_.offset(mod_.active[i]));
+  for (int v = 0; v < kDrumVoices; ++v) {
+    const int dPort = drumPort(v, DJ_DECAY), tPort = drumPort(v, DJ_TONE);
+    const bool dCon = con && con[dPort];
+    if (!dsp::exactEq(velDecayOff_[v], 0.0) || dCon) {
+      const double d = velDecayOff_[v] + (dCon ? cvAmt_[dPort] * static_cast<double>(in[dPort]) / 5.0 : 0.0);
+      for (int k = 0; k < 2; ++k)
+        if (decayParams_[v][k] >= 0) addEffective(decayParams_[v][k], d);
     }
+    if (toneParam_[v] >= 0 && con && con[tPort]) addEffective(toneParam_[v], cvAmt_[tPort] * static_cast<double>(in[tPort]) / 5.0);
   }
-  pendingCount_ = 0;
+  if (con && con[PORT_BD1_WAVE]) addEffective(P_BD1_WAVE, cvAmt_[PORT_BD1_WAVE] * static_cast<double>(in[PORT_BD1_WAVE]) / 5.0);
+  if (con && con[PORT_BD2_WAVE]) addEffective(P_BD2_WAVE, cvAmt_[PORT_BD2_WAVE] * static_cast<double>(in[PORT_BD2_WAVE]) / 5.0);
+  for (int i = 0; i < nTouched_; ++i) ue_[touchedList_[i]] = clampd(ue_[touchedList_[i]], 0.0, 1.0);
 }
 
-void Engine::process(const TrigIn& in, Frame& out) {
-  const double now = static_cast<double>(sampleIndex_);
-  if (running_ && !booted_) {
-    booted_ = true;
-    pulse_ = false;
-    nextStep_ = now + period_;
-    if (mode_ == ClockMode::Int) onStep(counter_, now);
-  } else if (running_ && extClock_ && pulse_) {
-    pulse_ = false;
-    ++counter_;
-    if (mode_ == ClockMode::Int) onStep(counter_, now);
+VoiceCtx Engine::makeCtx(int v, const float* in, const bool* con) const {
+  VoiceCtx c;
+  c.fs = fs_;
+  c.fsE = fsE_;
+  c.ue = ue_;
+  c.moving = isMoving_;
+  c.modulated = touched_;
+  if (isDrum(v) && con) {
+    const int pp = drumPort(v, DJ_PITCH), tp = drumPort(v, DJ_TONE), dp = drumPort(v, DJ_DECAY);
+    if (con[pp]) c.pitchOct = cvAmt_[pp] * static_cast<double>(in[pp]);  // 1 V/oct × AMT (§12.3)
+    if (con[tp]) c.toneV = cvAmt_[tp] * static_cast<double>(in[tp]);
+    if (con[dp]) c.decayV = cvAmt_[dp] * static_cast<double>(in[dp]);
   }
-  fireDue();
-  applyJacks(in);
-  applyPending();
-  hhTau_ = decayTau(u(knobs_.hhDecay));
-  renderAll();
-  mix(out);
-  ++sampleIndex_;
-  if (!running_ || !booted_ || extClock_) return;
-  // The step starts on the sample that contains its fractional boundary. That sample is the next one,
-  // so its events are queued now and fireDue() plays them there.
-  while (std::floor(nextStep_) <= static_cast<double>(sampleIndex_)) {
-    const double start = nextStep_;
-    nextStep_ += period_;
-    ++counter_;
-    if (mode_ == ClockMode::Int) onStep(counter_, start);
-  }
+  const double tol = ue_[P_GLOBAL_TOLERANCE];
+  c.tolPitch = std::exp2((4.0 * tol * zPitch_[v] + driftCents_[v]) / 1200.0);
+  c.tolTau = 1.0 + 0.03 * tol * zTau_[v];
+  c.tolCut = 1.0 + 0.05 * tol * zCut_[v];
+  return c;
 }
 
-void Engine::renderBd1(VoiceState& st) {
-  bd1Hz_ = 0;
-  bd1TuneHz_ = 0;
-  bd1TrHz_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double fTune = 35.0 * std::pow(140.0 / 35.0, u(knobs_.bd1Tune));
-  const double depth = 18.0 * u(knobs_.bd1Pitch);
-  const double tauP = 0.012 + 0.25 * u(knobs_.bd1Pitch);
-  const double tauB = decayTau(u(knobs_.bd1Decay));
-  const int s = soundIndex(knobs_.bd1Trigger);
-  const double fTr = 160.0 * std::pow(1.35, s);
-  const double fc = 200.0 * std::pow(8000.0 / 200.0, u(knobs_.bd1Filter));
-  const double pEnv = expDecay(n, tauP);
-  const double f = fTune * std::pow(2.0, ((depth + st.bend) * pEnv) / 12.0);
-  const double bodyEnv = expDecay(n, tauB);
-  const double trEnv = expDecay(n, 0.004);
-  const double body = std::sin(st.phase) * bodyEnv;
-  const double tr = std::sin(2.0 * kPi * fTr * static_cast<double>(n) / kFs) * trEnv;
-  double noise = 0.0;
-  if (knobs_.bd1Noise > 0) {
-    // The noise rides the body envelope, so it is silent once the body is.
-    noise = u(knobs_.bd1Noise) * onePole(st.lp, noiseDraw(noiseState_), fc) * bodyEnv;
-  }
-  const double pre = body + u(knobs_.bd1Attack) * tr + noise;
-  double y = pre;
-  // Dist CC 0 is a bypass, y = pre. Above 0, drive = 9u, which starts near y = pre, so CC 1 does not jump.
-  if (knobs_.bd1Dist > 0) {
-    const double drive = 9.0 * u(knobs_.bd1Dist);
-    y = std::tanh(drive * pre) / std::tanh(drive);
-  }
-  st.mono = y * st.gain;
-  bd1Hz_ = f;
-  bd1TuneHz_ = fTune;
-  bd1TrHz_ = fTr;
-  st.phase += 2.0 * kPi * f / kFs;
-  st.n = n + 1;
-  endIfQuiet(st, std::fmax(bodyEnv, trEnv));
-}
-
-void Engine::renderBd2(VoiceState& st) {
-  bd2Env_ = 0;
-  bd2Tr_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double fTune = 45.0 * std::pow(100.0 / 45.0, u(knobs_.bd2Tune));
-  const double fTr = 2.0 * fTune;
-  double sustain = 0.0;
-  double tauB = decayTau(u(knobs_.bd2Decay));
-  if (knobs_.bd2Decay >= 127) {
-    sustain = 0.70;
-    tauB = 0.40;
-  }
-  const double env = sustain + (1.0 - sustain) * expDecay(n, tauB);
-  const double pEnv = expDecay(n, 0.08);
-  const double f = fTune * std::pow(2.0, (st.bend * pEnv) / 12.0);
-  const double body = std::sin(st.phase) * env;
-  const double trEnv = expDecay(n, 0.005);
-  const double tr = std::sin(2.0 * kPi * fTr * static_cast<double>(n) / kFs) * trEnv;
-  const double scaled = u(knobs_.bd2Tone) * tr;
-  st.mono = (body + scaled) * st.gain;
-  bd2Env_ = env;
-  bd2Tr_ = scaled;
-  st.phase += 2.0 * kPi * f / kFs;
-  st.n = n + 1;
-  endIfQuiet(st, std::fmax(env, trEnv));
-}
-
-void Engine::renderSd(VoiceState& st) {
-  sdF1_ = sdF2_ = sdT1_ = sdT2_ = sdHz_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double f1 = 120.0 * std::pow(400.0 / 120.0, u(knobs_.sdTune));
-  const double detune = -8.0 + 16.0 * u(knobs_.sdDTune);
-  const double f2 = f1 * std::pow(2.0, detune / 12.0);
-  const double depth = 14.0 * u(knobs_.sdPitch);
-  const double tauP = 0.01 + 0.12 * u(knobs_.sdPitch);
-  const double tauTone = decayTau(u(knobs_.sdToneDecay));
-  const double tauN = decayTau(u(knobs_.sdSnDecay));
-  const double pEnv = expDecay(n, tauP);
-  // Step bend is its own drop to Tune, not a deeper Pitch: its time has an 80 ms floor, so Pitch 0 still swoops.
-  const double tauBend = std::fmax(tauP, kSdBendFloor);
-  const double bEnv = st.bend != 0.0 ? expDecay(n, tauBend) : 0.0;
-  const double st12 = (depth * pEnv + st.bend * bEnv) / 12.0;
-  const double f1n = f1 * std::pow(2.0, st12);
-  const double f2n = f2 * std::pow(2.0, st12);
-  const double t1 = std::sin(st.phase) * expDecay(n, tauTone);
-  const double t2 = std::sin(st.phase2) * expDecay(n, tauTone);
-  double nz = 0.0;
-  if (knobs_.sdSnappy > 0) {
-    nz = u(knobs_.sdSnappy) * noiseDraw(noiseState_) * expDecay(n, tauN);
-  }
-  const double y = (1.0 - u(knobs_.sdTone)) * t1 + u(knobs_.sdTone) * t2 + nz;
-  st.mono = y * st.gain;
-  sdF1_ = f1;
-  sdF2_ = f2;
-  sdHz_ = f1n;
-  sdT1_ = t1;
-  sdT2_ = t2;
-  st.phase += 2.0 * kPi * f1n / kFs;
-  st.phase2 += 2.0 * kPi * f2n / kFs;
-  st.n = n + 1;
-  endIfQuiet(st, std::fmax(expDecay(n, tauTone), expDecay(n, tauN)));
-}
-
-void Engine::renderRs(VoiceState& st) {
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double f = 250.0 * std::pow(2500.0 / 250.0, u(knobs_.rsTune));
-  const double env = expDecay(n, 0.012);
-  const double y = std::sin(2.0 * kPi * f * static_cast<double>(n) / kFs) * env;
-  st.mono = y * st.gain;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderCy(VoiceState& st) {
-  cyA_ = cyB_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double f0 = 180.0 * std::pow(900.0 / 180.0, u(knobs_.cyTune));
-  const double tau = decayTau(u(knobs_.cyDecay));
-  const double a = metalStack(kCyA, f0, n);
-  const double b = metalStack(kCyB, f0, n);
-  // Fixed noise mix, as the block diagram says.
-  const double noise = noiseDraw(noiseState_);
-  const double env = expDecay(n, tau);
-  const double y = env * ((1.0 - u(knobs_.cyTone)) * a + u(knobs_.cyTone) * b + 0.15 * noise);
-  st.mono = y * st.gain;
-  cyA_ = a;
-  cyB_ = b;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderOh(VoiceState& st) {
-  ohSample_ = 0;
-  ohEnv_ = 0;
-  st.mono = 0;
-  if (st.choked) st.active = false;
-  if (!st.active) return;
-  const int n = st.n;
-  const double fc = 250.0 * std::pow(4000.0 / 250.0, u(knobs_.hhTune));
-  const double tau = decayTau(u(knobs_.ohDecay));
-  const double env = expDecay(n, tau);
-  const double stack = metalStack(kHat, fc, n);
-  const double x = noiseDraw(noiseState_);
-  const double y = env * (stack + 0.25 * x);
-  st.mono = y * st.gain;
-  ohEnv_ = env;
-  ohSample_ = y;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderHh(VoiceState& st) {
-  hhEnv_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double fc = 250.0 * std::pow(4000.0 / 250.0, u(knobs_.hhTune));
-  const double tau = decayTau(u(knobs_.hhDecay));
-  const double env = expDecay(n, tau);
-  const double stack = metalStack(kHat, fc, n);
-  const double x = noiseDraw(noiseState_);
-  const double y = env * (stack + 0.25 * x);
-  st.mono = y * st.gain;
-  hhEnv_ = env;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderCl(VoiceState& st) {
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double f = 400.0 * std::pow(3000.0 / 400.0, u(knobs_.clTune));
-  const double tau = decayTau(u(knobs_.clDecay));
-  const double env = expDecay(n, tau);
-  const double y = std::sin(2.0 * kPi * f * static_cast<double>(n) / kFs) * env;
-  st.mono = y * st.gain;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderCp(VoiceState& st) {
-  for (int i = 0; i < 8; ++i) cpBurst_[i] = 0.0;
-  cpCount_ = clapCount(knobs_.cpData);
-  st.left = 0;
-  st.right = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const int count = cpCount_;
-  const double fTr = 700.0 * std::pow(1.28, soundIndex(knobs_.cpTrigger));
-  const double fc = 400.0 * std::pow(6000.0 / 400.0, u(knobs_.cpFilter));
-  const double tau = decayTau(u(knobs_.cpDecay));
-  const int gap = static_cast<int>(std::llround(0.011 * kFs));
-  double yL = 0.0;
-  double yR = 0.0;
-  for (int i = 0; i < count; ++i) {
-    const int nb = n - i * gap;
-    double burst = 0.0;
-    if (nb >= 0) {
-      burst = std::sin(2.0 * kPi * fTr * static_cast<double>(nb) / kFs) * expDecay(nb, 0.003);
-    }
-    cpBurst_[i] = burst;
-    const double p = (count > 1) ? (-1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(count - 1)) : 0.0;
-    yL += burst * panL(p);
-    yR += burst * panR(p);
-  }
-  const double attack = u(knobs_.cpAttack);
-  yL *= attack;
-  yR *= attack;
-  const double tail = onePole(st.lp, noiseDraw(noiseState_), fc) * expDecay(n, tau);
-  yL += tail * kCenterGain;
-  yR += tail * kCenterGain;
-  st.left = yL * st.gain;
-  st.right = yR * st.gain;
-  st.n = n + 1;
-  // Quiet only after the last burst has started.
-  const int lastStart = (count - 1) * gap;
-  const double lastBurst = n >= lastStart ? expDecay(n - lastStart, 0.003) : 1.0;
-  endIfQuiet(st, std::fmax(lastBurst, expDecay(n, tau)));
-}
-
-void Engine::renderTom(VoiceState& st, int which) {
-  st.mono = 0;
-  int tuneCc = knobs_.ltcTune;
-  int decayCc = knobs_.ltcDecay;
-  int noiseCc = knobs_.ltcNoise;
-  int modeCc = knobs_.ltcMode;
-  double fLo = 70.0;
-  double fHi = 180.0;
-  if (which == 1) {
-    tuneCc = knobs_.mtcTune;
-    decayCc = knobs_.mtcDecay;
-    noiseCc = knobs_.mtcNoise;
-    modeCc = knobs_.mtcMode;
-    fLo = 100.0;
-    fHi = 280.0;
-  } else if (which == 2) {
-    tuneCc = knobs_.htcTune;
-    decayCc = knobs_.htcDecay;
-    noiseCc = knobs_.htcNoise;
-    modeCc = knobs_.htcMode;
-    fLo = 140.0;
-    fHi = 400.0;
-  }
-  if (which == 0) {
-    ltcHz_ = 0;
-    ltcEnv_ = 0;
-  }
-  if (!st.active) return;
-  const int n = st.n;
-  const double fTune = fLo * std::pow(fHi / fLo, u(tuneCc));
-  double sustain = 0.0;
-  double tauB = decayTau(u(decayCc));
-  if (decayCc >= 127) {
-    sustain = 0.55;
-    tauB = 0.35;
-  }
-  // Decay 127 is a long ring, not a hold: after kTomRingSamples it releases and the voice ends. Only BD2 drones.
-  const double ring = sustain + (1.0 - sustain) * expDecay(n < kTomRingSamples ? n : kTomRingSamples, tauB);
-  const double env = n <= kTomRingSamples ? ring : ring * expDecay(n - kTomRingSamples, kTomRelease);
-  const double pEnv = expDecay(n, 0.08);
-  const double f = fTune * std::pow(2.0, (st.bend * pEnv) / 12.0);
-  double y = std::sin(st.phase) * env;
-  // The conga partial rides the body envelope; without it the partial rang forever.
-  if (modeCc >= 64) y += 0.35 * std::sin(st.phase2) * env;
-  if (noiseCc >= 64) {
-    y += u(knobs_.tomNoise) * noiseDraw(noiseState_) * expDecay(n, 0.12);
-  }
-  st.mono = y * st.gain;
-  if (which == 0) {
-    ltcHz_ = f;
-    ltcEnv_ = env;
-  }
-  st.phase += 2.0 * kPi * f / kFs;
-  st.phase2 += 2.0 * kPi * (2.30 * f) / kFs;
-  st.n = n + 1;
-  endIfQuiet(st, std::fmax(env, noiseCc >= 64 ? expDecay(n, 0.12) : 0.0));
-}
-
-void Engine::renderCb(VoiceState& st) {
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double f = 300.0 * std::pow(1200.0 / 300.0, u(knobs_.cbTune));
-  const double tau = decayTau(u(knobs_.cbDecay));
-  const double env = expDecay(n, tau);
-  const double y = 0.5 * (squareWave(f, n) + squareWave(1.015 * f, n)) * env;
-  st.mono = y * st.gain;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderMa(VoiceState& st) {
-  maSample_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double tau = decayTau(u(knobs_.maDecay));
-  const double env = expDecay(n, tau);
-  const double y = onePole(st.lp, noiseDraw(noiseState_), 1500.0) * env;
-  st.mono = y * st.gain;
-  maSample_ = y;
-  st.n = n + 1;
-  endIfQuiet(st, env);
-}
-
-void Engine::renderLeadBass(VoiceState& st, bool bass) {
-  if (!bass) leadSaw_ = 0;
-  st.mono = 0;
-  if (!st.active) return;
-  const int n = st.n;
-  const double hz = midiHz(st.note);
-  const double saw = sawSample(st.phase, hz);
-  if (!bass) leadSaw_ = saw;
-  const double fc = bass ? 80.0 * std::pow(4000.0 / 80.0, u(knobs_.bassTone))
-                         : 200.0 * std::pow(8000.0 / 200.0, u(knobs_.leadTone));
-  const double filtered = onePole(st.lp, saw, fc);
-  double env = st.env;
-  if (st.releasing) {
-    env *= std::exp(-1.0 / (kFs * 0.03));
-    st.env = env;
-    if (env < 1e-12) {
-      st.active = false;
-      st.env = 0;
-      st.releasing = false;
-    }
-  } else if (st.gate) {
-    env = 1.0;
-    st.env = 1.0;
+// ---------------------------------------------------------------- per sample
+void Engine::processSample(float* extValues, const bool* extCon) {
+  // Inputs: the caller's graph values, or the internal bay (external inputs + Shogun→Shogun cables, 1-sample delay).
+  const float* in;
+  const bool* con;
+  if (extValues) {
+    in = extValues;
+    con = extCon;
   } else {
-    env = 0.0;
+    for (int i = 0; i < kPorts; ++i) {
+      if (kPortTable[i].dir != PortDir::In) continue;
+      inBuf_[i] = extConnected_[i] ? extValue_[i] : kPortTable[i].rest;
+      connected_[i] = extConnected_[i];
+    }
+    for (int c = 0; c < nCables_; ++c) {
+      inBuf_[cableTo_[c]] += values_[cableFrom_[c]];
+      connected_[cableTo_[c]] = true;
+    }
+    in = inBuf_;
+    con = connected_;
   }
-  st.mono = filtered * env * st.gain;
-  st.phase += 2.0 * kPi * hz / kFs;
-  st.n = n + 1;
+
+  clockSample(in, con);
+  fireDue(in, con);
+
+  // TRIG jacks: EXT plays only from jacks; INT ignores them unless TRIG MERGE (forge-pinned law, §12.2).
+  const bool ext = stepIndex(target_[P_CLOCK_MODE], 2) == 1;
+  for (int v = 0; v < kDrumVoices; ++v) {
+    const int tp = drumPort(v, DJ_TRIG);
+    if (!(con && con[tp])) continue;
+    const bool edge = trigDet_[v].rising(static_cast<float>(in[tp]));
+    if (!edge) continue;
+    if (!ext && stepIndex(target_[vparams_[v].trigMerge], 2) == 0) continue;
+    Pending& p = pending_[v];
+    p.on = true;
+    p.kind = 0;
+    p.acc = 3;
+    p.bend = 0.0;
+    p.track = p.pos = -1;
+    p.fromJack = true;
+    p.trigVolts = static_cast<double>(in[tp]);
+    const int vp = drumPort(v, DJ_VEL);
+    p.velPatched = con[vp];
+    p.velVolts = con[vp] ? static_cast<double>(in[vp]) : 5.0;
+  }
+  for (int s = 0; s < 2; ++s) {
+    const int v = LEAD + s;
+    SynthVoice& sv = synth(v);
+    const int gp = synthPort(s, SJ_GATE), np = synthPort(s, SJ_NOTE), vo = synthPort(s, SJ_VOCT), cp = synthPort(s, SJ_CUTOFF);
+    auto pitchIn = [&](int port) {
+      const double x = static_cast<double>(in[port]);
+      return inConv_[port].identity() ? x : inConv_[port].convert(x);  // old HZ/V cable: shared Lin55ToVoct (§12.3)
+    };
+    // The voice's CV AMT (the ROUTE knob for LEAD/BASS, stored on the NOTE port) scales the depth of the pitch CV into
+    // that voice: NOTE, an old HZ/V cable on NOTE (after Lin55ToVoct) and V/OCT. 1.0 = exact 1 V/oct tracking (the
+    // default), 0.5 = half, -1 = inverted around 0 V = C3. V/OCT keeps its own per-jack AMT as a second factor, so a
+    // patch that set only V/OCT's AMT plays as before.
+    const double pitchAmt = cvAmt_[np];
+    sv.vOct = (con && con[vo]) ? pitchAmt * cvAmt_[vo] * pitchIn(vo) : 0.0;
+    sv.cutoffOct = (con && con[cp]) ? cvAmt_[cp] * static_cast<double>(in[cp]) : 0.0;
+    sv.a4 = a4Hz(target_[P_GLOBAL_A4]);
+    const bool noteJack = con && con[np];
+    // A patched NOTE jack is a continuous pitch: it moves the held note at once (slew is the patch's job; GLIDE is for
+    // tied steps and legato notes).
+    if (noteJack && sv.gate) sv.noteTarget = sv.noteGlided = voctNote(pitchAmt * pitchIn(np)) + 12.0 * sv.oct;
+    if (con && con[gp]) {
+      const bool wasHigh = gateDet_[s].high;
+      const bool edge = gateDet_[s].rising(static_cast<float>(in[gp]));
+      const bool use = ext || stepIndex(target_[vparams_[v].trigMerge], 2) == 1;
+      if (use && edge) {
+        Pending& p = pending_[v];
+        p.on = true;
+        p.kind = 1;
+        p.note = noteJack ? voctNote(pitchAmt * pitchIn(np)) : synthSeqNote_[s];
+        const int vp = synthPort(s, SJ_VEL);
+        p.velVolts = con[vp] ? static_cast<double>(in[vp]) : 5.0;
+        p.velPatched = con[vp];
+        p.acc = p.velVolts >= 4.5 ? 3 : 2;
+        p.tie = false;
+        p.track = p.pos = -1;
+      } else if (use && wasHigh && !gateDet_[s].high) {
+        sv.noteOff();
+      }
+    }
+  }
+
+  // Hit bookkeeping that must precede u_eff: p-locks and VEL>DECAY.
+  for (int v = 0; v < kVoices; ++v) {
+    Pending& p = pending_[v];
+    if (!p.on) continue;
+    if (p.kind == 1 && (p.track >= 0)) synthSeqNote_[v - LEAD] = p.note;
+    if (p.tie && p.kind == 1 && synth(v).gate) continue;  // tied: no new locks
+    applyLocks(v, p.track, p.pos);
+    // g_vel and the VEL source.
+    double g;
+    if (p.fromJack && !p.velPatched) {
+      const int mode = stepIndex(target_[P_GLOBAL_TRIG_DYN], 4);
+      const double V = p.trigVolts;
+      if (mode == 0) g = 1.0;
+      else if (mode == 1) g = V >= 4.5 ? 1.0 : 0.78;
+      else if (mode == 2) g = 0.55 + 0.45 * clampd((V - 2.5) / 2.5, 0.0, 1.0);
+      else g = 0.15 + 0.85 * clampd((V - 1.0) / 4.0, 0.0, 1.0);
+      p.velVolts = 5.0 * (g - 0.15) / 0.85;
+    }
+    g = gVelFromVolts(p.velVolts);
+    p.velNorm = (g - 0.15) / 0.85;
+    p.accNorm = p.velPatched || p.fromJack ? clampd((p.velVolts - kAccentVolts[0]) / (5.0 - kAccentVolts[0]), 0.0, 1.0)
+                                           : 0.5 * (p.acc - 1);
+    velDecayOff_[v] = 0.3 * bip(target_[vparams_[v].velDecay]) * (p.velNorm - 1.0);
+  }
+
+  // Drift (§3.5) and modulation sources.
+  const double sigma = 4.0 * target_[P_GLOBAL_DRIFT];
+  for (int v = 0; v < kVoices; ++v) {
+    drift_[v].setSigma(sigma);
+    driftCents_[v] = sigma > 0.0 ? drift_[v].tick() : 0.0;
+  }
+  computeEffective(in, con);
+  for (auto& l : mod_.lfo) l.read(ue_);  // before this sample's triggers (OWN VOICE restart needs MODE/RETRIG)
+
+  // Triggers.
+  for (int v = 0; v < kVoices; ++v) {
+    Pending& p = pending_[v];
+    if (!p.on) continue;
+    p.on = false;
+    VoiceCtx c = makeCtx(v, in, con);
+    HitInfo h;
+    h.gVel = gVelFor(v, p.velVolts);
+    h.velNorm = p.velNorm;
+    h.acc = p.accNorm;
+    h.bend = p.bend;
+    h.note = p.note;
+    h.tie = p.tie;
+    if (v == LEAD || v == BASS) {
+      SynthVoice& sv = synth(v);
+      const int np = synthPort(v - LEAD, SJ_NOTE);
+      if (con && con[np]) {  // NOTE jack overrides the sequencer note; the voice's CV AMT scales its depth
+        const double x = static_cast<double>(in[np]);
+        h.note = voctNote(cvAmt_[np] * (inConv_[np].identity() ? x : inConv_[np].convert(x)));
+      }
+      const bool legato = h.tie && sv.gate;
+      sv.noteOn(c, h.note, h.acc * ue_[sv.pAcc] > 0.0 ? h.acc : 0.0, h.tie);
+      if (!legato) hitGain_[v] = h.gVel;
+      mod_.vs[v].note = (h.note - 60.0) / 24.0;
+    } else {
+      voices_[v]->trigger(c, h);
+      hitGain_[v] = h.gVel;
+      // Choke: CH discharges OH (1.5 ms); CHOKE groups 1–4 discharge the other members of the group.
+      if (v == CH) oh_->choke(0.0015);
+      const int grp = stepIndex(target_[vparams_[v].choke], 5);
+      if (grp > 0)
+        for (int w = 0; w < kVoices; ++w)
+          if (w != v && active_[w] && stepIndex(target_[vparams_[w].choke], 5) == grp) choking_[w] = true;
+    }
+    choking_[v] = false;
+    chokeGain_[v] = 1.0;
+    if (!active_[v]) {
+      dcL_[v].reset();
+      dcR_[v].reset();
+    }
+    active_[v] = true;
+    mod_.vs[v].vel = p.velNorm;
+    mod_.vs[v].acc = p.accNorm;
+    mod_.vs[v].rndHit = rndHit_[v].bipolar();
+    for (auto& l : mod_.lfo) l.onTrigger(v);
+  }
+
+  // Modulation clock (LFOs at base rate; m every 16 samples, §8.4).
+  {
+    const bool locked = running_ || (host_.valid && host_.playing);
+    for (auto& l : mod_.lfo) l.tick(tempo(), ppq_, locked);
+    for (int v = 0; v < kVoices; ++v) {
+      mod_.vs[v].env = active_[v] ? (v >= LEAD ? synth(v).filterEnv() : voices_[v]->env()) : 0.0;
+      mod_.vs[v].penv = active_[v] ? voices_[v]->pitchEnv() : 0.0;
+    }
+    if (mod_.tickClock()) mod_.update();
+  }
+
+  renderSubSamples(in, con);
+
+  // Voice end (§3.7) and choke end.
+  for (int v = 0; v < kVoices; ++v) {
+    if (!active_[v]) continue;
+    if (voices_[v]->quiet() || (choking_[v] && chokeGain_[v] < kQuiet)) {
+      active_[v] = false;
+      choking_[v] = false;
+      chokeGain_[v] = 1.0;
+      voices_[v]->reset();
+      voiceOut_[v] = 0.0;
+    }
+  }
+
+  float* out = extValues ? extValues : values_;
+  writeControlOutputs(out);
+  if (!extValues) {
+    // Mirror inputs too, so the bay can show every jack's voltage.
+    for (int i = 0; i < kPorts; ++i)
+      if (kPortTable[i].dir == PortDir::In) values_[i] = inBuf_[i];
+  }
+  ++sample_;
 }
 
-void Engine::renderAll() {
-  renderBd1(voice_[static_cast<int>(Voice::Bd1)]);
-  renderBd2(voice_[static_cast<int>(Voice::Bd2)]);
-  renderSd(voice_[static_cast<int>(Voice::Sd)]);
-  renderRs(voice_[static_cast<int>(Voice::Rs)]);
-  renderCy(voice_[static_cast<int>(Voice::Cy)]);
-  renderOh(voice_[static_cast<int>(Voice::Oh)]);
-  renderHh(voice_[static_cast<int>(Voice::Hh)]);
-  renderCl(voice_[static_cast<int>(Voice::Cl)]);
-  renderCp(voice_[static_cast<int>(Voice::Cp)]);
-  renderTom(voice_[static_cast<int>(Voice::Ltc)], 0);
-  renderTom(voice_[static_cast<int>(Voice::Mtc)], 1);
-  renderTom(voice_[static_cast<int>(Voice::Htc)], 2);
-  renderCb(voice_[static_cast<int>(Voice::Cb)]);
-  renderMa(voice_[static_cast<int>(Voice::Ma)]);
-  renderLeadBass(voice_[static_cast<int>(Voice::Lead)], false);
-  renderLeadBass(voice_[static_cast<int>(Voice::Bass)], true);
+void Engine::renderSubSamples(const float* in, const bool* con) {
+  // Base-rate control per active voice; metal tolerances.
+  const double tol = ue_[P_GLOBAL_TOLERANCE];
+  for (int k = 0; k < 6; ++k) {
+    ch_->bank.tol[k] = oh_->bank.tol[k] = 1.0 + 0.015 * tol * zMetal_[0][k];
+    cy_->bank.tol[k] = 1.0 + 0.015 * tol * zMetal_[1][k];
+  }
+  cb_->tol2 = (1.0 + 0.015 * tol * zMetal_[2][1]) / (1.0 + 0.015 * tol * zMetal_[2][0]);
+  for (int v = 0; v < kVoices; ++v) {
+    if (!active_[v]) continue;
+    ctx_[v] = makeCtx(v, in, con);
+    voices_[v]->control(ctx_[v]);
+  }
+  // RET upsamplers (+L on the insert loop only).
+  bool retOn[kVoices];
+  for (int v = 0; v < kVoices; ++v) {
+    const int rp = isDrum(v) ? drumPort(v, DJ_RET) : synthPort(v - LEAD, SJ_RET);
+    retOn[v] = con && con[rp];
+    if (retOn[v]) upRet_[v].push(static_cast<double>(in[rp]) / 5.0, retBuf_[v]);
+  }
+  // FOLD VC (§4.6): jack (linear interpolation across sub-samples) or the internal source.
+  static constexpr int kFoldPort[5] = {PORT_FOLD_VC_BD1, PORT_FOLD_VC_BD2, PORT_FOLD_VC_LTC, PORT_FOLD_VC_MTC,
+                                       PORT_FOLD_VC_HTC};
+  bool vcJack[5];
+  int vcSrc[5];
+  double vcLevel[5];
+  for (int i = 0; i < 5; ++i) {
+    const WaveParams& w = waveIds_[i];
+    vcJack[i] = con && con[kFoldPort[i]];
+    vcSrc[i] = stepIndex(ue_[w.vcSrc], 6 + kVoices);
+    vcLevel[i] = ue_[w.vcLevel];
+    vcPrev_[i] = vcCur_[i];
+    vcCur_[i] = vcJack[i] ? cvAmt_[kFoldPort[i]] * static_cast<double>(in[kFoldPort[i]]) / 5.0 : 0.0;
+  }
+
+  // Bus / send / solo bookkeeping.
+  bool anySolo = false;
+  for (int v = 0; v < kVoices; ++v) anySolo = anySolo || stepIndex(target_[vparams_[v].solo], 2) == 1;
+  int route[kVoices];
+  double panLg[kVoices], panRg[kVoices], send[kVoices], level[kVoices];
+  bool audible[kVoices];
+  bool busUsed[4] = {false, false, false, false};
+  bool sendUsed = false;
+  bool auxUsedNow[8] = {};
+  for (int v = 0; v < kVoices; ++v) {
+    const VoiceParams& vp = vparams_[v];
+    route[v] = stepIndex(target_[vp.output], 14);
+    const double p = bip(ue_[vp.pan]);
+    panLg[v] = panL(p);
+    panRg[v] = panR(p);
+    send[v] = ue_[vp.send];
+    level[v] = gLevel(ue_[vp.level]) * calib_[v];
+    const bool muted = stepIndex(target_[vp.mute], 2) == 1;
+    const bool solo = stepIndex(target_[vp.solo], 2) == 1;
+    audible[v] = !muted && (!anySolo || solo);
+    if (route[v] >= 1 && route[v] <= 4) busUsed[route[v] - 1] = true;
+    if (route[v] >= 5 && route[v] <= 12) auxUsedNow[route[v] - 5] = true;
+    if (route[v] == 13) auxUsedNow[kPairAux[v]] = true;
+    if (send[v] > 0.0 && (active_[v] || retOn[v])) sendUsed = true;
+  }
+  for (int a = 0; a < 8; ++a) auxUsed_[a] = auxUsedNow[a];
+  for (int b = 0; b < 4; ++b) {
+    mix::Bus& bus = bus_[b];
+    const int base = P_BUS_A_DRIVE + b * (P_BUS_B_DRIVE - P_BUS_A_DRIVE);
+    bus.drive.set(ue_[base + 0]);
+    bus.tilt.set(ue_[base + 1]);
+    bus.level = masterVolume(ue_[base + 2]);
+    bus.comp.set(-40.0 + 40.0 * ue_[base + 3], 1.0 + 19.0 * ue_[base + 4], 0.0001 * std::pow(1000.0, ue_[base + 5]),
+                 0.010 * std::pow(100.0, ue_[base + 6]), 24.0 * ue_[base + 7], fsE_);
+    bus.mix = ue_[base + 8];
+    bus.compOn = stepIndex(target_[base + 9], 2) == 1;
+    busSc_[b] = stepIndex(target_[base + 10], 17) - 1;
+  }
+  masterDrive_.set(ue_[P_MASTER_DRIVE]);
+  glueOn_ = ue_[P_MASTER_GLUE] > 0.0;
+  glue_.set(-20.0 * ue_[P_MASTER_GLUE], 2.0, 0.010, 0.100, 0.0, fsE_);
+  width_.w = 2.0 * ue_[P_MASTER_WIDTH];
+  if (std::fabs(width_.w - 1.0) < 1e-9) width_.w = 1.0;
+  volume_ = masterVolume(ue_[P_MASTER_VOLUME]);
+  clip_.on = stepIndex(target_[P_MASTER_CLIP], 2) == 1;
+  clip_.C = std::pow(10.0, (-6.0 + 6.0 * ue_[P_MASTER_CEILING]) / 20.0);
+  const bool delayWas = delayActive_;
+  delayActive_ = sendUsed || delayEnergy_ > 1e-14;
+  if (delayActive_ && !delayWas) {
+    for (auto& d : decSend_) d.reset();
+  }
+
+  double sendDec[2] = {0.0, 0.0};
+  for (int sub = 0; sub < M_; ++sub) {
+    double mL = 0.0, mR = 0.0, sL = 0.0, sR = 0.0;
+    double bL[4] = {0, 0, 0, 0}, bR[4] = {0, 0, 0, 0};
+    double aL[8] = {}, aR[8] = {};
+    double scPeak[kVoices];
+    for (int v = 0; v < kVoices; ++v) {
+      double L = 0.0, R = 0.0;
+      bool stereo = false, has = false;
+      if (active_[v]) {
+        VoiceCtx& c = ctx_[v];
+        c.sub = sub;
+        double vc = 0.0;
+        const int wi = v == BD1 ? 0 : (v == BD2 ? 1 : (v == LTC ? 2 : (v == MTC ? 3 : (v == HTC ? 4 : -1))));
+        if (wi >= 0) {
+          if (vcJack[wi]) {
+            vc = (vcPrev_[wi] + (vcCur_[wi] - vcPrev_[wi]) * (sub + 1) / M_) * vcLevel[wi];
+          } else {
+            const int s = vcSrc[wi];
+            double x = 0.0;
+            if (s == 0) x = voices_[v]->core();
+            else if (s == 1) x = voices_[v]->noiseSample();
+            else if (s <= 5) x = mod_.lfo[s - 2].value(v);
+            else x = coreOut_[s - 6];
+            vc = x * vcLevel[wi];
+          }
+        }
+        stereo = voices_[v]->tick(c, vc, L, R);
+        L = dcL_[v].hp(L);
+        R = stereo ? dcR_[v].hp(R) : L;
+        const double g = hitGain_[v] * level[v];  // VCA: g_vel · g_level · calib (§4.8)
+        L *= g;
+        R *= g;
+        has = true;
+      }
+      const double mono = stereo ? (L + R) * 0.7071067811865476 : L;
+      voiceOut_[v] = mono;
+      coreOut_[v] = active_[v] ? voices_[v]->core() : 0.0;
+      scPeak[v] = std::fabs(mono);
+      // OUT jack tap (post-VCA, pre-pan), one decimator per connected tap.
+      const int op = isDrum(v) ? drumPort(v, DJ_OUT) : synthPort(v - LEAD, SJ_OUT);
+      if (con && con[op]) {
+        double o;
+        if (decOut_[v].push(mono, o)) outTap_[v] = o;
+      }
+      if (retOn[v]) {
+        L = R = retBuf_[v][sub];
+        stereo = false;
+        has = true;
+      }
+      if (!has || !audible[v]) continue;
+      if (choking_[v]) {
+        L *= chokeGain_[v];
+        R *= chokeGain_[v];
+        chokeGain_[v] *= chokeA_;
+      }
+      double pl, pr;
+      if (stereo) {
+        pl = L * panLg[v] * 1.4142135623730951;
+        pr = R * panRg[v] * 1.4142135623730951;
+      } else {
+        pl = L * panLg[v];
+        pr = L * panRg[v];
+      }
+      const int r = route[v];
+      if (r == 0) {
+        mL += pl;
+        mR += pr;
+      } else if (r <= 4) {
+        bL[r - 1] += pl;
+        bR[r - 1] += pr;
+      } else if (r <= 12) {
+        aL[r - 5] += pl;
+        aR[r - 5] += pr;
+      } else {
+        const int a = kPairAux[v];
+        const int side = kPairSide[v];
+        if (side == 0) aL[a] += stereo ? 0.5 * (L + R) : L;
+        else if (side == 1) aR[a] += stereo ? 0.5 * (L + R) : L;
+        else {
+          aL[a] += pl;
+          aR[a] += pr;
+        }
+      }
+      sL += pl * send[v];
+      sR += pr * send[v];
+    }
+    for (int b = 0; b < 4; ++b) {
+      if (!busUsed[b] && !bus_[b].compOn) continue;
+      const double sc = busSc_[b] >= 0 ? scPeak[busSc_[b]] : -1.0;
+      bus_[b].process(bL[b], bR[b], sc);
+      mL += bL[b];
+      mR += bR[b];
+    }
+    masterDrive_.process(mL, mR);
+    if (glueOn_) {
+      const double g = glue_.gain(std::fmax(std::fabs(mL), std::fabs(mR)));
+      mL *= g;
+      mR *= g;
+    }
+    width_.process(mL, mR);
+    mL += fxBuf_[0][sub];
+    mR += fxBuf_[1][sub];
+    mL *= volume_;
+    mR *= volume_;
+    clip_.process(mL, mR);
+    double o;
+    if (decMain_[0].push(mL, o)) outMainL_ = o;
+    if (decMain_[1].push(mR, o)) outMainR_ = o;
+    for (int a = 0; a < 8; ++a) {
+      if (!auxUsed_[a]) continue;
+      if (decAux_[2 * a].push(aL[a], o)) outAux_[2 * a] = o;
+      if (decAux_[2 * a + 1].push(aR[a], o)) outAux_[2 * a + 1] = o;
+    }
+    if (delayActive_) {
+      if (decSend_[0].push(sL, o)) sendDec[0] = o;
+      if (decSend_[1].push(sR, o)) sendDec[1] = o;
+    }
+  }
+  for (int a = 0; a < 8; ++a)
+    if (!auxUsed_[a]) outAux_[2 * a] = outAux_[2 * a + 1] = 0.0;
+
+  // Delay at the base rate; its return re-enters the domain through upsamplers on the next base sample.
+  if (delayActive_) {
+    const int div = stepIndex(target_[P_FX_DELAY_TIME], 12);
+    const double comp = 2.0 * latencySamples() + 1.0;
+    delay_.set(kDelayBeats[div] * 60.0 / tempo() * fs_ - comp, 0.9 * ue_[P_FX_DELAY_FB],
+               2000.0 * std::pow(6.0, ue_[P_FX_DELAY_LP]), fs_);
+    double dl, dr;
+    delay_.process(sendDec[0], sendDec[1], dl, dr);
+    delayEnergy_ = 0.999 * delayEnergy_ + dl * dl + dr * dr;
+    const double ret = 2.0 * ue_[P_MASTER_FX_SEND];
+    upFx_[0].push(dl * ret, fxBuf_[0]);
+    upFx_[1].push(dr * ret, fxBuf_[1]);
+  } else {
+    for (auto& c : fxBuf_)
+      for (double& x : c) x = 0.0;
+  }
 }
 
-void Engine::mix(Frame& out) const {
-  out = Frame{};
-  // Solo: only the soloed voice reaches the pairs and the main, and only if its track is not muted. Every voice
-  // still renders, so the others keep advancing and come back where they are when solo is off.
-  double lv[kVoiceCount];
-  for (int v = 0; v < kVoiceCount; ++v) {
-    const bool heard = solo_ < 0 || (v == solo_ && !pattern_.track[v].mute);
-    lv[v] = heard ? level_[v] : 0.0;
+void Engine::writeControlOutputs(float* out) {
+  // Audio taps (decimated) and MIX.
+  for (int v = 0; v < kVoices; ++v) {
+    const int op = isDrum(v) ? drumPort(v, DJ_OUT) : synthPort(v - LEAD, SJ_OUT);
+    out[op] = static_cast<float>(5.0 * outTap_[v]);
   }
-  const double bd1 = voice_[static_cast<int>(Voice::Bd1)].mono * lv[static_cast<int>(Voice::Bd1)];
-  const double bd2 = voice_[static_cast<int>(Voice::Bd2)].mono * lv[static_cast<int>(Voice::Bd2)];
-  const double sd = voice_[static_cast<int>(Voice::Sd)].mono * lv[static_cast<int>(Voice::Sd)];
-  const double rs = voice_[static_cast<int>(Voice::Rs)].mono * lv[static_cast<int>(Voice::Rs)];
-  const double cy = voice_[static_cast<int>(Voice::Cy)].mono * lv[static_cast<int>(Voice::Cy)];
-  const double oh = voice_[static_cast<int>(Voice::Oh)].mono * lv[static_cast<int>(Voice::Oh)];
-  const double hh = voice_[static_cast<int>(Voice::Hh)].mono * lv[static_cast<int>(Voice::Hh)];
-  const double cl = voice_[static_cast<int>(Voice::Cl)].mono * lv[static_cast<int>(Voice::Cl)];
-  const double cpL = voice_[static_cast<int>(Voice::Cp)].left * lv[static_cast<int>(Voice::Cp)];
-  const double cpR = voice_[static_cast<int>(Voice::Cp)].right * lv[static_cast<int>(Voice::Cp)];
-  const double ltc = voice_[static_cast<int>(Voice::Ltc)].mono * lv[static_cast<int>(Voice::Ltc)];
-  const double mtc = voice_[static_cast<int>(Voice::Mtc)].mono * lv[static_cast<int>(Voice::Mtc)];
-  const double htc = voice_[static_cast<int>(Voice::Htc)].mono * lv[static_cast<int>(Voice::Htc)];
-  const double cb = voice_[static_cast<int>(Voice::Cb)].mono * lv[static_cast<int>(Voice::Cb)];
-  const double ma = voice_[static_cast<int>(Voice::Ma)].mono * lv[static_cast<int>(Voice::Ma)];
-  const double lead = voice_[static_cast<int>(Voice::Lead)].mono * lv[static_cast<int>(Voice::Lead)];
-  const double bass = voice_[static_cast<int>(Voice::Bass)].mono * lv[static_cast<int>(Voice::Bass)];
-
-  addHardLeft(bd1, out.bdL, out.mainL);
-  addHardRight(bd2, out.bdR, out.mainR);
-  addHardLeft(sd, out.sdL, out.mainL);
-  addHardRight(rs, out.rsR, out.mainR);
-  addHardLeft(oh + hh, out.hhL, out.mainL);
-  addHardRight(cy, out.cyR, out.mainR);
-  out.cpL += cpL;
-  out.cpR += cpR;
-  out.mainL += cpL;
-  out.mainR += cpR;
-  addPanned(ltc, -0.7, out.toL, out.toR, out.mainL, out.mainR);
-  addPanned(mtc, 0.0, out.toL, out.toR, out.mainL, out.mainR);
-  addPanned(htc, 0.7, out.toL, out.toR, out.mainL, out.mainR);
-  addHardLeft(cl, out.clL, out.mainL);
-  addHardRight(cb, out.cbR, out.mainR);
-  addCenter(ma, out.mainL, out.mainR);
-  addCenter(lead, out.mainL, out.mainR);
-  addCenter(bass, out.mainL, out.mainR);
-
-  // Pair flags stay out of this sum. A patched jack is a tap.
-  out.mainL *= master_;
-  out.mainR *= master_;
-  out.cv3 = 5.0 * u(knobs_.bassTone);
+  out[PORT_MIX_L] = static_cast<float>(5.0 * outMainL_);
+  out[PORT_MIX_R] = static_cast<float>(5.0 * outMainR_);
+  // Control outputs: base rate, written at the trigger sample (zero latency, §13.10).
+  for (int v = 0; v < kDrumVoices; ++v)
+    out[drumPort(v, DJ_ENV)] = active_[v] ? static_cast<float>(5.0 * voices_[v]->env() * hitGain_[v]) : 0.0f;
+  out[synthPort(0, SJ_NOTE_OUT)] = static_cast<float>(lead_->noteOut());
+  out[synthPort(1, SJ_NOTE_OUT)] = static_cast<float>(bass_->noteOut());
+  out[PORT_LD_GATE] = lead_->gate ? 5.0f : 0.0f;
+  out[PORT_BS_GATE] = bass_->gate ? 5.0f : 0.0f;
+  const bool run = wasRunning_;
+  const int gScale = stepIndex(target_[P_CLOCK_SCALE], 4);
+  const int clkMode = stepIndex(target_[P_CLOCK_CLK_OUT], 6);
+  const double rate = clkMode == 0 ? stepsPerQuarter(gScale) : kPpqn[clkMode];
+  const double ph = ppq_ * rate;
+  out[PORT_CLK_OUT] = (run && ppq_ >= 0.0 && ph - std::floor(ph + 1e-9) < 0.5 - 1e-9) ? 5.0f : 0.0f;
+  out[PORT_RST_OUT] = (run && rstPulse_ > 0) ? 5.0f : 0.0f;
+  if (rstPulse_ > 0) --rstPulse_;
+  const bool pulseMode = stepIndex(target_[P_CLOCK_RUN_OUT], 2) == 1;
+  out[PORT_RUN_OUT] = pulseMode ? (runPulse_ > 0 ? 5.0f : 0.0f) : (run ? 5.0f : 0.0f);
+  if (runPulse_ > 0) --runPulse_;
+  out[PORT_ACC_OUT] = run ? static_cast<float>(accOut_) : 0.0f;
+  for (int i = 0; i < 4; ++i) out[PORT_LFO1 + i] = static_cast<float>(mod_.lfo[i].jackVolts());
+  out[PORT_RND] = static_cast<float>(5.0 * rnd_);
 }
 
 }  // namespace shogun
