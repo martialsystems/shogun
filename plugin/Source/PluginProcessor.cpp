@@ -479,17 +479,8 @@ void ShogunAudioProcessor::patchFromJson(const juce::var& v) {
     uiLaw_[static_cast<size_t>(i)] = 0;
   }
   // Saved jack ids resolve through the alias table (§12.3): HZ/V → NOTE (lin55), TOM:PITCH → 3 toms (AMT 1/12).
-  // Global (SHOGUN#N/…) and first-instance (SHOGUN/…) forms parse with the shared JCS R6 parser; legacy ids that
-  // are not valid R6 ids (MIX L, LFO OUT) keep their raw text and resolve through the alias table.
-  auto resolve = [](const juce::String& full, int out[3], int* law) {
-    std::string id = full.toStdString();
-    if (const auto j = jidai::jcs::parseJackId(id)) {
-      if (j->prefix.empty() || j->prefix == "SHOGUN") id = j->local();
-    } else if (full.startsWith("SHOGUN")) {
-      id = full.fromFirstOccurrenceOf("/", false, false).toStdString();
-    }
-    return resolvePort(id.c_str(), out, law);
-  };
+  // resolvePort parses every form (SHOGUN#N/…, SHOGUN/…, bare) with the shared JCS R6 parseJackId (engine/ports.h).
+  auto resolve = [](const juce::String& full, int out[3], int* law) { return resolvePort(full.toRawUTF8(), out, law); };
   uiCableCount_ = 0;
   if (auto* cables = v["cables"].getArray())
     for (const auto& c : *cables) {
@@ -508,13 +499,13 @@ void ShogunAudioProcessor::patchFromJson(const juce::var& v) {
   if (auto* cv = v["cvAmt"].getDynamicObject())
     for (const auto& kv : cv->getProperties()) {
       int p[3], law = 0;
-      const int np = resolvePort(kv.name.toString().toRawUTF8(), p, &law);
+      const int np = resolve(kv.name.toString(), p, &law);
       for (int k = 0; k < np; ++k)
         if (p[k] >= 0) uiCvAmt_[static_cast<size_t>(p[k])] = static_cast<double>(kv.value) * (law == 2 ? 1.0 / 12.0 : 1.0);
     }
   if (auto* laws = v["inLaw"].getDynamicObject())
     for (const auto& kv : laws->getProperties()) {
-      const int p = findPort(kv.name.toString().toRawUTF8());
+      const int p = portFromId(kv.name.toString().toRawUTF8());
       if (p >= 0) uiLaw_[static_cast<size_t>(p)] = static_cast<std::uint8_t>(static_cast<int>(kv.value));
     }
 

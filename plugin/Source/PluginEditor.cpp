@@ -317,7 +317,7 @@ void ShogunPanel::buildBindings() {
         break;
       }
       case B_JACK:
-        b.a = findPort(rest.toRawUTF8());
+        b.a = portFromId(rest.toRawUTF8());  // shared R6 parser (labels keep '/', spaces, digits)
         if (b.a >= 0) jackOp_[b.a] = i;
         break;
       case B_TITLE: b.a = rest == "sel" ? 0 : (rest == "step" ? 1 : 2); break;
@@ -867,13 +867,14 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, const juce:
     for (int k = 0; k < kParamCount; ++k) {
       if (!kParams[k].mod) continue;
       const juce::String id = u8(kParams[k].id);
-      const juce::String sname = id.upToFirstOccurrenceOf(":", false, false);
+      const auto pj = jidai::jcs::parseJackId(kParams[k].id);  // shared R6 SECTION:LABEL split
+      const juce::String sname = pj ? u8(pj->section.c_str()) : id;
       if (sname != cur) {
         if (cur.isNotEmpty()) menu.addSubMenu(cur, sec);
         sec = juce::PopupMenu();
         cur = sname;
       }
-      sec.addItem(k + 1, id.fromFirstOccurrenceOf(":", false, false), true, r.dst == k);
+      sec.addItem(k + 1, pj ? u8(pj->label.c_str()) : id, true, r.dst == k);
     }
     if (cur.isNotEmpty()) menu.addSubMenu(cur, sec);
     menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
