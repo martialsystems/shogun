@@ -10,7 +10,8 @@ This tree contains:
 
 | Path | Role |
 | --- | --- |
-| README.md | Front page and revision list |
+| README.md | Product page: features, install, and build |
+| CHANGELOG.md | Revision list |
 | METHODOLOGY.md | Sources and the quoted choices |
 | SCHEMATICS.md | Equations and 48 kHz rows |
 | BUILD_GUIDE.md | PDF build, and the engine layout |
