@@ -17,6 +17,8 @@ SHOGUN is a drum computer and two note voices, an original Martial Systems desig
 - 2026-10-07: track solo. The soloed voice alone reaches its pair and the main; the others keep running at 0. Mute wins.
 - 2026-10-07: a new engine loads the init kit and pattern. STAND-IN knob values set by ear. reset() still clears.
 - 2026-10-07: factory patterns and kits cleared for now. The engine, plugin and web page start on INIT, an empty bar, with the INIT kit. New factory content will be written later.
+- 2026-10-07: density pass. Shaped bodies (tanh(k sin)) on BD1, BD2, SD, and the toms, BD2 and tom slow FM, a 1 ms BD1 click, SD noise through a ducked 4-pole, six-square metal stacks with a band-pass on the hats and cymbal, and clap bursts fixed at 3 ms with a delayed filtered tail. STAND-IN values set by ear.
+- 2026-10-07: Wave on BD1, BD2, and the three toms: a six-cell wave folder on the body oscillator, CC 0 bypass, default CC 32, g 0.5 to 4. Dist stays after Wave. Hats, clap, cymbal, and maracas have no Wave.
 
 ## What this is
 

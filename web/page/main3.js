@@ -1,7 +1,7 @@
 
 // ================= controls =================
 let kdrag=null,pressed=null;
-function ctrlAt(x,y){for(const c of CTRL){if(c.zone=="bay"&&!bay)continue;if(c.rect?Math.abs(x-c.x)<=(c.rw||c.r)&&Math.abs(y-c.y)<=(c.rh||c.r):Math.hypot(x-c.x,y-c.y)<=c.r)return c}return null}
+function ctrlAt(x,y){for(const c of CTRL){if(!zoneOn(c.zone))continue;if(c.rect?Math.abs(x-c.x)<=(c.rw||c.r)&&Math.abs(y-c.y)<=(c.rh||c.r):Math.hypot(x-c.x,y-c.y)<=c.r)return c}return null}
 const NOFLAM={CP:1,LEAD:1,BASS:1};
 function describe(c){const t=tracks[sel];
   if(c.kind=="knob"){const v=P[c.id];let s=c.name+" · "+(c.fmt?c.fmt(v):MAP[c.id]&&MAP[c.id].f?"CC "+ccOf(c.id,v):Math.round(v*100)+"%");
@@ -32,6 +32,7 @@ function describe(c){const t=tracks[sel];
 function setP(id,v){v=clamp(v);if(STEPS[id]){const n=STEPS[id]-1;v=Math.round(v*n)/n}P[id]=v;syncLinked(id);const t=tracks[sel],st=t.steps[edit];
   if(MAP[id]){sendParam(id);if(!MAP[id].master){dirty=true;curKit.dirty=true}}
   else if(id.startsWith("CLOCK:")){sendClock();dirty=true}
+  else if(id.startsWith("LFO:"))sendLfo();
   else if(id=="SEQ:LENGTH"){t.len=1+Math.round(v*31);if(edit>=t.len)edit=t.len-1;dirty=true;sendTrack(sel)}
   else if(id=="SEQ:SHUFFLE"){t.shuffle=Math.round(v*15);dirty=true;sendTrack(sel)}
   else if(id=="SEQ:SHIFT"){t.shift=Math.round(v*127);dirty=true;sendTrack(sel)}
@@ -102,9 +103,10 @@ addEventListener("keydown",e=>{if(ddKey(e))return;
   if((e.ctrlKey||e.metaKey)&&!/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)){const k=e.key.toLowerCase();if(k=="z"||k=="y"){e.preventDefault();undo(k=="y"||e.shiftKey);return}}if(e.key=="Escape"){hideMenu();cancel()}
   if(e.code=="Space"&&!/^(BUTTON|INPUT)$/.test(document.activeElement.tagName)){e.preventDefault();setRun(!running)}});
 $("go").onclick=()=>setRun(!running);
+$("tabs").onclick=e=>{const b=e.target.closest(".tab");if(b&&b.dataset.v!=view)setView(b.dataset.v)};
 
 // ================= start =================
 function loop(){if(grab&&cables[grab.i]&&cables[grab.i].el)pins(cables[grab.i]);step();paint();drawAll();requestAnimationFrame(loop)}
-cab.style.display="none";loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
+loadLfo();showZones();loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
 try{navigator.permissions.query({name:"midi"}).then(r=>{if(r.state=="granted")midiInit(false)},()=>{})}catch(e){}drawAll();build();requestAnimationFrame(loop);
-window.SHOGUN={P,get tracks(){return tracks},get cables(){return cables},JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel},get bay(){return bay},setBay};
+window.SHOGUN={P,get tracks(){return tracks},get cables(){return cables},JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel},get bay(){return bay},setBay,get view(){return view},setView,get lfoV(){return lfoV}};

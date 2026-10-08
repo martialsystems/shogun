@@ -28,7 +28,7 @@ function push(c,p){const g=grab&&cables[grab.i]===c;for(let i=1;i<N-1;i++){const
 function paint(){for(const c of cables){if(!c.el)continue;const d=dstr(c.p);c.el.forEach(e=>e.setAttribute("d",d))}}
 function pt(e){const r=sv.getBoundingClientRect();mx=(e.clientX-r.left)/r.width*W;my=(e.clientY-r.top)/r.height*VH}
 // the jack under the pointer: its socket or its name. Jacks are only there while BAY is on.
-function near(){if(!bay)return null;let b=null,bd=17;for(const g in JACKS){const j=JACKS[g],d=Math.hypot(j.x-mx,j.y-my);if(d<bd){bd=d;b=g}}
+function near(){if(!bay||view!="rack")return null;let b=null,bd=17;for(const g in JACKS){const j=JACKS[g],d=Math.hypot(j.x-mx,j.y-my);if(d<bd){bd=d;b=g}}
   if(!b&&!grab)for(const g in JACKS){const j=JACKS[g];if(Math.abs(mx-j.lx)<=j.lw&&Math.abs(my-j.ly)<=7)return g}return b}
 const jname=g=>JACKS[g].name;
 function setHov(h){hov=h;ring.innerHTML=h?`<circle cx="${JACKS[h].x}" cy="${JACKS[h].y}" r="16" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.5"/>`:"";if(grab)info.textContent="Drop on a jack to plug in · empty space to unplug · Esc to cancel";else if(h)info.textContent=jname(h)+(JACKS[h].dir=="in"?" (input)":" (output)")+" · "+JACKS[h].type}
@@ -36,7 +36,8 @@ function plugsAt(j){const o=[];cables.forEach((c,i)=>{if(c.a==j)o.push({i,e:"a"}
 function startGrab(i,e,carry){grab={i,e,from:cables[i][e],carry};cables[i][e]=null;build();setHov(hov)}
 function newCable(j,carry){cables.push({a:j,b:null,c:cur});grab={i:cables.length-1,e:"b",from:null,carry,isNew:true};build();setHov(hov)}
 function legal(a,b){const pa=JACKS[a],pb=JACKS[b];if(pa.dir==pb.dir)return pa.dir=="out"?"Two outputs can't be patched together":"Two inputs can't be patched together";
-  const[s,d]=pa.dir=="out"?[pa,pb]:[pb,pa];if(s.type=="Audio"&&d.type=="Gate")return `${d.name} takes a trigger, not audio`;if(s.type=="Gate"&&d.type=="Audio")return `${d.name} takes audio; patch a voice's OUT there`;return null}
+  const[s,d]=pa.dir=="out"?[pa,pb]:[pb,pa];if(s.type=="Audio"&&d.type=="Gate")return `${d.name} takes a trigger, not audio`;if(s.type=="Gate"&&d.type=="Audio")return `${d.name} takes audio; patch a voice's OUT there`;
+  if(s.type=="CV"&&d.type=="Gate")return `${d.name} takes a trigger, not CV`;if(s.type=="Audio"&&d.type=="CV")return `${d.name} takes CV, not audio`;return null}
 function drop(){const t=near(),c=cables[grab.i],other=c[grab.e=="a"?"b":"a"],why=t&&other&&t!=other?legal(t,other):null;
   if(why){if(grab.isNew)cables.splice(grab.i,1);else c[grab.e]=grab.from;grab=null;build();setHov(null);info.textContent=why;return}
   if(t&&t!=other){c[grab.e]=t;cables.splice(grab.i,1);cables.push(c)}else if(t&&!grab.isNew)c[grab.e]=grab.from;else cables.splice(grab.i,1);
@@ -50,8 +51,16 @@ menu.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)retur
 $("clr").onclick=()=>{cables=[];build();info.textContent="Cables cleared"};
 // BAY adds the bay and its hang below the sequencer and the panel grows; closing it shrinks the panel back. It hides or
 // shows the jacks and cables and never adds or removes a cable; a patched cable keeps working while the bay is closed.
-let bay=false;
-function setBay(on){if(grab)cancel();hideMenu();setHov(null);down=null;bay=!!on;
-  $("bayArt").style.display=cab.style.display=bay?"":"none";VH=bay?H:H_SEQ;drawShell();
+// The tabs (RACK, LFO) swap the page under the top bar the same way: the engine keeps running and no cable moves.
+let bay=false,view="rack";
+const ZON={top:()=>1,face:()=>view=="rack",seq:()=>view=="rack",baykey:()=>view=="rack",bay:()=>view=="rack"&&bay,lfo:()=>view=="lfo"};
+const zoneOn=z=>ZON[z]();
+function showZones(){for(const z in ART){const d=zoneOn(z)?"":"none";$("az_"+z).style.display=d;$("lz_"+z).style.display=d}
+  cab.style.display=view=="rack"&&bay?"":"none";VH=view=="lfo"?H_LFO:bay?H:H_SEQ;drawShell()}
+function setView(v){if(grab)cancel();hideMenu();setHov(null);down=null;kdrag=null;if(DD.open)ddClose();view=v;showZones();
+  document.querySelectorAll(".tab").forEach(b=>{b.classList.toggle("on",b.dataset.v==v);b.setAttribute("aria-selected",b.dataset.v==v)});drawAll();
+  info.textContent=v=="lfo"?"LFO · one tempo-synced LFO for the rack · patch LFO OUT in the bay to use it":
+    "RACK · "+cables.length+" cable"+(cables.length==1?"":"s")+" patched"}
+function setBay(on){if(grab)cancel();hideMenu();setHov(null);down=null;bay=!!on;showZones();
   if(DD.open)ddClose();drawAll();info.textContent=bay?"BAY · "+cables.length+" cable"+(cables.length==1?"":"s")+" · drag from a jack to a jack, drop on empty space to unplug":"BAY closed · "+cables.length+" cable"+(cables.length==1?"":"s")+" still patched"}
 

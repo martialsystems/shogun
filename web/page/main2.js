@@ -44,7 +44,7 @@ function loadKnobs(){const t=tracks[sel],st=t.steps[edit];P["SEQ:LENGTH"]=(t.len
 let ctx=null,node=null,host=null,mon=null,running=false,counter=-1;let outbox=[];
 const SPQ=[8,6,4,3];
 function send(calls){if(node)node.port.postMessage(calls);else if(host)host.run(calls);else outbox.push(...calls)}
-function onEngine(m){counter=m.running?m.counter:-1;chainTick();if(m.running!=running){running=m.running;$("go").textContent=running?"Stop":"Start"}}
+function onEngine(m){if(m.lfo!=null){lfoV=m.lfo;lfoP=m.lfoP;lfoT=performance.now()}counter=m.running?m.counter:-1;chainTick();if(m.running!=running){running=m.running;$("go").textContent=running?"Stop":"Start"}}
 const wasmBytes=()=>Uint8Array.from(atob($("wasm").textContent.trim()),c=>c.charCodeAt(0)).buffer;
 function audio(){if(ctx){if(ctx.state=="suspended")ctx.resume();return}
   // The engine runs at 48 kHz (dsp.h kFs). Ask for that rate; the host resamples if the browser will not.
@@ -72,14 +72,20 @@ const sendTrack=k=>send(trackCalls(k).concat([["sg_commit"]]));
 const sendSteps=k=>send(stepCalls(k).concat([["sg_commit"]]));
 // Inside this page the gate sources are CLK OUT and ACC OUT; either can drive every Trig jack and RST IN, RUN IN and CLK IN.
 // An input can stack: the engine sees it high while any of its sources is high. A Trig cable never moves the INT/EXT switch.
-const INPUT={"CLOCK:RST IN":16,"CLOCK:RUN IN":17,"CLOCK:CLK IN":18},GATESRC={"SHOGUN/CLOCK:CLK OUT":1,"SHOGUN/CLOCK:ACC OUT":2};
-function cableCalls(){const src=new Array(19).fill(0);
+// LFO OUT is the one CV source; the CV inputs (19 to 24) sum what is patched into them (a gate counts as 0 or 5 V).
+const INPUT={"CLOCK:RST IN":16,"CLOCK:RUN IN":17,"CLOCK:CLK IN":18,"CV:BD1 PITCH":19,"CV:BD2 PITCH":20,"CV:SD PITCH":21,"CV:TOM PITCH":22,"CV:HAT DECAY":23,"CV:SD SNAPPY":24},
+  GATESRC={"SHOGUN/CLOCK:CLK OUT":1,"SHOGUN/CLOCK:ACC OUT":2,"SHOGUN/LFO:LFO OUT":4};
+function cableCalls(){const src=new Array(25).fill(0);
   cables.forEach(c=>{if(!c.a||!c.b)return;const[o,i]=JACKS[c.a].dir=="out"?[c.a,c.b]:[c.b,c.a];if(!GATESRC[o])return;
     const id=i.slice(7),n=id.endsWith(":TRIG")?VI.indexOf(id.slice(0,-5)):INPUT[id];if(n!=null&&n>=0)src[n]|=GATESRC[o]});
   return src.map((s,n)=>["sg_patch",n,s])}
 const sendCables=()=>send(cableCalls());
+const lfoCalls=()=>[["sg_set_lfo",lfoDiv()[1],P["LFO:PHASE"],lfoShapeI(),P["LFO:AMOUNT"]]];
+const LFOK=["LFO:DIV","LFO:SHAPE","LFO:PHASE","LFO:AMOUNT"];
+function sendLfo(){send(lfoCalls());store.set("shogun.lfo",Object.fromEntries(LFOK.map(k=>[k,P[k]])))}
+function loadLfo(){const o=store.get("shogun.lfo")||{};LFOK.forEach(k=>{if(typeof o[k]=="number")P[k]=clamp(o[k])})}
 function syncAll(){const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());
-  VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...cableCalls(),["sg_set_solo",soloV?VI.indexOf(soloV):-1],["sg_set_running",running?1:0]);send(c)}
+  VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...cableCalls(),...lfoCalls(),["sg_set_solo",soloV?VI.indexOf(soloV):-1],["sg_set_running",running?1:0]);send(c)}
 function setRun(on){audio();
   // a start counts from 0: the chain starts from its first pattern, else the steps go out unrotated
   if(on&&!running&&!chainStart()&&rot0){rot0=0;const c=[];VOICES.forEach(v=>c.push(...stepCalls(v.k)));c.push(["sg_commit"]);send(c)}
@@ -92,6 +98,7 @@ $("vol").oninput=()=>{if(mon)mon.gain.setTargetAtTime(+$("vol").value,ctx.curren
 function put(id,html){if(drawn[id]===html)return;drawn[id]=html;lv(id).innerHTML=html}
 const lcdPut=(id,text)=>{const L=LCD[id];put("LCD:"+id,dots(L.x,L.y,L.w,L.h,text,L.n))};
 function drawAll(){
+  drawViews();
   for(const id in P){const L=LIVE[id];if(!L)continue;if(L.r)put(id,knobBody(L.x,L.y,L.r,-135+270*P[id]));else{const r=P[id]>.5;put(id,`<line x1="${L.x}" y1="${L.y}" x2="${L.x+(r?12:-12)}" y2="${L.y-2}" stroke="#d8d8d2" stroke-width="3.2" stroke-linecap="round"/><circle cx="${L.x+(r?12:-12)}" cy="${L.y-2}" r="3.6" fill="url(#js)"/>`)}}
   const t=tracks[sel],bar=1+Math.round(P["CLOCK:BAR"]*31);
   lcdPut("BPM",bpmOf(P["CLOCK:TEMPO"]).toFixed(0).padStart(3," "));lcdPut("POS",counter>=0&&counter>=rot0?String(posOf(counter,bar)+1).padStart(2," "):"--");lcdPut("LEN",String(t.len).padStart(2," "));lcdPut("EDIT",String(edit+1).padStart(2," "));
@@ -107,3 +114,17 @@ function drawAll(){
     put("STEP:"+i,`<g opacity="${in_?1:.4}">`+keyBody(L.x,L.y,!st.on,pressed=="STEP:"+i)+`</g>`);
     const a=LIVE["ACC:"+i];put("ACC:"+i,lamp(a.x,a.y,a.r,st.on,["s","g","r"][st.acc]));
     const k=LIVE["LK:"+i];put("LK:"+i,`<text x="${k.x}" y="${k.y}" font-size="9" font-weight="700" text-anchor="middle" fill="${INK}" opacity="${in_?1:.4}">${st.on?lockText(st):""}</text>`);const p=LIVE["PH:"+i];put("PH:"+i,lamp(p.x,p.y,5,ph==n))}}
+
+// the LFO tab: its screens and the scope (drawn only while the tab is up)
+function drawViews(){
+  if(view=="lfo"){const d=lfoDiv(),i=lfoShapeI();lcdPut("LDIV",d[0].padStart(5," "));lcdPut("LSHAPE",LSHAPE[i]);lcdPut("LPHASE",P["LFO:PHASE"].toFixed(2));
+    lcdPut("LAMT",String(Math.round(P["LFO:AMOUNT"]*100)).padStart(3," ")+" ");lcdPut("LRATE",(lfoHz().toFixed(2)+" HZ").padStart(8," "));
+    // two cycles of the shape, each from phase 0 to 1; a reset (saw, square, a new held level) is a vertical line
+    const g=LIVE["LFO:SCOPE"],a=P["LFO:AMOUNT"],yv=v=>(g.y+g.h-v/5*g.h).toFixed(1),xy=(c,p)=>(g.x+g.w*(c+p)/2).toFixed(1)+","+yv(a*2.5*(1+lfoShapeAt(i,p,c)));
+    const E=1e-6,pts=[];for(let c=0;c<2;c++){for(let k=0;k<240;k++){const p=k/240;if(k==120)pts.push(xy(c,.5-E));pts.push(xy(c,p))}pts.push(xy(c,1-E))}
+    // the playhead: where the LFO is in its cycle now, on the trace; it alternates between the two drawn cycles
+    let mk="";
+    if(lfoT>=0){const q=lfoP+lfoHz()*(performance.now()-lfoT)/1000,p=q-Math.floor(q);if(p<lfoLastP-.5)lfoCyc^=1;lfoLastP=p;
+      mk=`<circle cx="${xy(lfoCyc,p).split(",")[0]}" cy="${xy(lfoCyc,p).split(",")[1]}" r="5" fill="#ff4a36" stroke="#2a0805" stroke-width="1"/>`}
+    put("LFO:SCOPE",`<polyline points="${pts.join(" ")}" fill="none" stroke="#3fe06a" stroke-width="2" stroke-linejoin="miter" opacity=".9"/>`+mk+
+      `<text x="${g.x+g.w}" y="${g.y-1}" font-family="'Liberation Sans',Arial,Helvetica,sans-serif" font-size="9" font-weight="700" text-anchor="end" fill="#6f7a66">TWO CYCLES · ${d[0]} · ${LSHAPE[i]}</text>`)}}
