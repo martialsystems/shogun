@@ -1,0 +1,6 @@
+#pragma once
+// Only snprintf with %s / %d / %c / %.*s (the engine's id building); formatParam is compiled out (SHOGUN_NO_FORMAT).
+extern "C" int snprintf(char*, unsigned long, const char*, ...);
+namespace std {
+using ::snprintf;
+}

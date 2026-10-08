@@ -1,13 +1,12 @@
 // Runs build/shogun.wasm for the page. Used inside the AudioWorklet, or on the main thread as the fallback.
-// bytes: the wasm file. rate: the audio context rate; the engine runs at 48 kHz and is resampled linearly
-// otherwise, as the plugin does. post: receives {counter, running} when either changes, and {counter, running, lfo, lfoP}
+// bytes: the wasm file. rate: the audio context rate; the engine runs at that rate (spec v2.2 §15.3, no resampler). post: receives {counter, running} when either changes, and {counter, running, lfo, lfoP}
 // (LFO OUT in volts and the LFO's phase) about every 1024 frames.
 function shogunHost(bytes,rate,post){
-  const x=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env:{sin:Math.sin,cos:Math.cos,exp:Math.exp,pow:Math.pow,tanh:Math.tanh,log:Math.log}}).exports;
-  x.sg_init();
+  const x=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env:{sin:Math.sin,cos:Math.cos,tan:Math.tan,exp:Math.exp,exp2:(v)=>Math.pow(2,v),pow:Math.pow,tanh:Math.tanh,log:Math.log,log2:Math.log2,log10:Math.log10,log1p:Math.log1p,atan2:Math.atan2}}).exports;
+  x.sg_init(rate);
   const K={};for(let i=0;i<x.sg_knob_count();i++){const m=new Uint8Array(x.memory.buffer);let p=x.sg_knob_name(i),s="";while(m[p])s+=String.fromCharCode(m[p++]);K[s]=i}
   const view=(n)=>[new Float32Array(x.memory.buffer,x.sg_out_l(),n),new Float32Array(x.memory.buffer,x.sg_out_r(),n)];
-  const adv=48000/rate;let frac=0,oL=0,oR=0,nL=0,nR=0,pos=0,avail=0,bl=null,br=null,last=-2,lastRun=-1,lfoN=0;
+  const adv=1;let frac=0,oL=0,oR=0,nL=0,nR=0,pos=0,avail=0,bl=null,br=null,last=-2,lastRun=-1,lfoN=0;
   function pull(){if(pos>=avail){x.sg_process(256);[bl,br]=view(256);pos=0;avail=256}nL=bl[pos];nR=br[pos];pos++}
   return{
     run(calls){for(const c of calls){if(c[0]=="knob"){const i=K[c[1]];if(i!=null)x.sg_set_knob(i,c[2])}else if(typeof x[c[0]]=="function")x[c[0]](...c.slice(1))}},

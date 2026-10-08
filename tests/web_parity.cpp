@@ -5,7 +5,7 @@
 #include <cstring>
 
 extern "C" {
-void sg_init();
+void sg_init(double);
 int sg_knob_count();
 const char* sg_knob_name(int);
 void sg_set_knob(int, int);
@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
   if (argc < 2) return 2;
   FILE* in = std::fopen(argv[1], "r");
   if (!in) return 2;
-  sg_init();
+  sg_init(48000.0);
   char line[256];
   while (std::fgets(line, sizeof line, in)) {
     char op[32] = {0}, fn[64] = {0};
