@@ -123,6 +123,21 @@ async function lfoRun(cpb, shape, amount, n, start) {
   for (let n = 0; n < 22050; n += 1024) { y.sg_process(1024); for (const v of new Float32Array(y.memory.buffer, y.sg_out_l(), 1024)) hit = Math.max(hit, Math.abs(v)); }
   law.push(["44.1 kHz: BD1 hit peak " + hit.toFixed(4), hit > 0.05]);
 }
+{
+  // Jack ids in every JCS R6 form go through the shared parseJackId inside the wasm engine (sg_port_find).
+  const y = await fresh();
+  y.sg_init(48000);
+  const find = (t) => { const b = new Uint8Array(y.memory.buffer, y.sg_text(), 256); const e = new TextEncoder().encode(t); b.set(e); b[e.length] = 0; return y.sg_port_find(); };
+  const id = (i) => { const p = y.sg_port_id(i); const b = new Uint8Array(y.memory.buffer, p, 64); return new TextDecoder().decode(b.subarray(0, b.indexOf(0))); };
+  let ok = 0;
+  for (let i = 0; i < y.sg_port_count(); ++i) {
+    const s = id(i);
+    if (find(s) === i && find("SHOGUN/" + s) === i && find("SHOGUN#1/" + s) === i) ++ok;
+  }
+  const legacy = find("MIX L") >= 0 && find("LFO OUT") >= 0, foreign = find("RONIN#1/BD1:TRIG") === -1;
+  law.push(["jack ids: " + ok + "/153 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT " + find("SHOGUN#1/LEAD:V/OCT") + "); legacy names " + (legacy ? "ok" : "MISSING") + "; foreign prefix refused " + foreign,
+    ok === 153 && legacy && foreign]);
+}
 async function bd1With(patch) {
   const y = await fresh();
   y.sg_set_level(0, 1);

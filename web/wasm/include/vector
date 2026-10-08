@@ -1,5 +1,5 @@
 #pragma once
-// Minimal std::vector for the wasm build (what the engine uses: assign, resize, size, [], data, begin/end).
+// Minimal std::vector for the wasm build (what the engine uses: assign, resize, size, [], data, begin/end, push_back).
 #include <cstddef>
 #include <new>
 namespace std {
@@ -21,6 +21,14 @@ template <class T> class vector {
     n_ = n;
   }
   void clear() { delete[] d_; d_ = nullptr; n_ = 0; }
+  void push_back(const T& v) {  // copies element-wise (T needs copy assignment); load-time use only
+    T* d = new T[n_ + 1];
+    for (unsigned long i = 0; i < n_; ++i) d[i] = d_[i];
+    d[n_] = v;
+    delete[] d_;
+    d_ = d;
+    ++n_;
+  }
   unsigned long size() const { return n_; }
   bool empty() const { return n_ == 0; }
   T& operator[](unsigned long i) { return d_[i]; }

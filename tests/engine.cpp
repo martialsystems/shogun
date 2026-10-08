@@ -466,26 +466,78 @@ void testLin55Migration() {
   truth(T, "TOM:PITCH fans out to 3 toms with AMT 1/12 law", n2 == 3 && law2 == 2);
 }
 
-// JCS R6 / R14 through the shared jidai-common header: every SHOGUN id is a valid local id, its global form
-// SHOGUN#1/<id> parses back to it, alias targets are valid ids, and the R14 role colours are the shared table's.
+// JCS R6 / R14 through the shared jidai-common header. Every SHOGUN port id and every alias-table id goes through
+// jidai::jcs::parseJackId whole, in the bare, first-instance (SHOGUN/) and global (SHOGUN#1/) forms. Labels keep
+// '/', spaces and digits. resolvePort maps each form to the same port. R14 role colours are the shared table's.
 void testJackIdsJcsShared() {
   const char* T = "testJackIdsJcsShared";
-  int bad = 0, roundTrip = 0;
+  using jidai::jcs::JackForm;
+  using jidai::jcs::parseJackId;
+  // One id through all three forms: parsed whole (section + label give the id back) and resolved to `want`.
+  auto roundTrip = [](const std::string& id, int want) {
+    const auto b = parseJackId(id);
+    const auto f = parseJackId("SHOGUN/" + id);
+    const auto g = parseJackId("SHOGUN#1/" + id);
+    bool ok = b && b->form == JackForm::Bare && b->local() == id && b->text() == id;
+    ok = ok && f && f->form == JackForm::FirstInstance && f->prefix == "SHOGUN" && f->local() == id &&
+         f->text() == "SHOGUN/" + id;
+    ok = ok && g && g->form == JackForm::Global && g->prefix == "SHOGUN" && g->number == 1 && g->local() == id &&
+         g->global() == "SHOGUN#1/" + id;
+    if (want >= 0) {
+      for (const std::string& t : {id, "SHOGUN/" + id, "SHOGUN#1/" + id, "SHOGUN#12/" + id}) {
+        int out[3];
+        ok = ok && resolvePort(t.c_str(), out, nullptr) >= 1 && out[0] == want;
+      }
+    }
+    return ok;
+  };
+  int portsOk = 0, slash = 0, spaced = 0, digit = 0;
+  std::string failed;
   for (int i = 0; i < kPorts; ++i) {
     const std::string id = kPortTable[i].id;
-    if (!jidai::jcs::isValidLocalId(id)) ++bad;
-    const auto j = jidai::jcs::parseJackId("SHOGUN#1/" + id);
-    if (j && j->form == jidai::jcs::JackForm::Global && j->prefix == "SHOGUN" && j->number == 1 && j->local() == id) ++roundTrip;
+    const std::string lab = id.substr(id.find(':') + 1);
+    slash += lab.find('/') != std::string::npos ? 1 : 0;
+    spaced += lab.find(' ') != std::string::npos ? 1 : 0;
+    digit += id.find_first_of("0123456789") != std::string::npos ? 1 : 0;
+    if (roundTrip(id, i)) ++portsOk;
+    else failed += " [" + id + "]";
   }
-  int badAlias = 0;
-  for (const PortAlias& a : kPortAliases)
-    for (int k = 0; k < 3 && a.to[k]; ++k) badAlias += jidai::jcs::isValidLocalId(a.to[k]) && findPort(a.to[k]) >= 0 ? 0 : 1;
+  int aliasIds = 0, aliasOk = 0, legacyOk = 0;
+  std::string legacy;
+  for (const PortAlias& a : kPortAliases) {
+    int out[3], law = -1;
+    const int want = resolvePort(a.from, out, &law) > 0 ? out[0] : -2;
+    ++aliasIds;
+    if (parseJackId(a.from)) {
+      aliasOk += roundTrip(a.from, want) ? 1 : 0;
+    } else {
+      legacy += " [" + std::string(a.from) + "]";  // v2.0/2.1 names with no SECTION: (not R6 ids): matched whole
+      legacyOk += (want >= 0 && law == a.law) ? 1 : 0;
+    }
+    for (int k = 0; k < 3 && a.to[k]; ++k) {
+      ++aliasIds;
+      aliasOk += roundTrip(a.to[k], findPort(a.to[k])) ? 1 : 0;
+    }
+  }
+  int foreign[3];
+  const bool refused = resolvePort("RONIN#1/BD1:TRIG", foreign, nullptr) == 0;
+  int paramsOk = 0;
+  for (int k = 0; k < kParamCount; ++k) {
+    const auto pj = parseJackId(kParams[k].id);
+    paramsOk += (pj && pj->local() == kParams[k].id) ? 1 : 0;
+  }
   const std::uint32_t vel = jidai::jcs::roleInfo(kPortTable[drumPort(0, DJ_PITCH)].role).rgb;
-  std::printf("%s: %d ids, invalid R6 local ids %d, SHOGUN#1/<id> round trips %d, bad alias targets %d, PITCH colour #%06x\n",
-              T, kPorts, bad, roundTrip, badAlias, static_cast<unsigned>(vel));
-  truth(T, "all ids valid R6 local ids", bad == 0);
-  truth(T, "global form round trips", roundTrip == kPorts);
-  truth(T, "alias targets valid", badAlias == 0);
+  std::printf("%s: ports %d/%d round trip whole in 3 forms (labels with '/' %d, with spaces %d, ids with digits %d)%s\n", T,
+              portsOk, kPorts, slash, spaced, digit, failed.empty() ? "" : (" FAILED:" + failed).c_str());
+  std::printf("%s: alias-table ids %d, R6 ids round trip %d, legacy non-R6 names matched whole %d:%s; foreign prefix "
+              "refused %d; params %d/%d valid R6 ids; PITCH colour #%06x\n",
+              T, aliasIds, aliasOk, legacyOk, legacy.c_str(), refused ? 1 : 0, paramsOk, kParamCount,
+              static_cast<unsigned>(vel));
+  truth(T, "153 port ids round trip whole", portsOk == kPorts);
+  truth(T, "alias R6 ids round trip whole", aliasOk + legacyOk == aliasIds);
+  truth(T, "legacy names are exactly MIX L, MIX R, LFO OUT", legacy == " [MIX L] [MIX R] [LFO OUT]" && legacyOk == 3);
+  truth(T, "foreign prefix refused", refused);
+  truth(T, "param ids are R6 SECTION:LABEL", paramsOk == kParamCount);
   truth(T, "V/OCT role colour #6590f3", vel == 0x6590f3u);
 }
 
@@ -509,7 +561,8 @@ void testJackIdsAndTypes() {
     const PortDesc& d = kPortTable[i];
     same = same && ids[i] == d.id;
     const std::string id = d.id;
-    const std::string lab = id.substr(id.find(':') + 1);
+    const auto pj = jidai::jcs::parseJackId(id);  // shared R6 split
+    const std::string lab = pj ? pj->label : id;
     PortType want;
     if (d.dir == PortDir::In) want = lab == "RET" ? PortType::Audio : PortType::CV;
     else if (lab == "OUT" || id.rfind("MIX:", 0) == 0) want = PortType::Audio;

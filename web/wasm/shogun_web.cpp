@@ -260,7 +260,7 @@ EXPORT(sg_param) double sg_param(int i) { return i >= 0 && i < kParamCount ? gE-
 EXPORT(sg_port_count) int sg_port_count() { return kPorts; }
 EXPORT(sg_port_id) const char* sg_port_id(int i) { return i >= 0 && i < kPorts ? kPortTable[i].id : ""; }
 EXPORT(sg_port_role) int sg_port_role(int i) { return i >= 0 && i < kPorts ? static_cast<int>(kPortTable[i].role) : -1; }
-EXPORT(sg_port_find) int sg_port_find() { return findPort(gText); }
+EXPORT(sg_port_find) int sg_port_find() { return portFromId(gText); }  // any R6 form, shared parseJackId
 EXPORT(sg_port_volts) double sg_port_volts(int i) { return i >= 0 && i < kPorts ? gE->portValues()[i] : 0.0; }
 EXPORT(sg_cable) int sg_cable(int from, int to, int on) {
   if (on) return gE->addCable(from, to) ? 1 : 0;

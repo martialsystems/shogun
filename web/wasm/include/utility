@@ -9,4 +9,8 @@ template <class T> constexpr typename remove_reference<T>::type&& move(T&& t) no
   return static_cast<typename remove_reference<T>::type&&>(t);
 }
 template <class T> void swap(T& a, T& b) { T t = move(a); a = move(b); b = move(t); }
+template <class A, class B> struct pair {
+  A first;
+  B second;
+};
 }  // namespace std

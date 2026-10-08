@@ -3,6 +3,7 @@
 // inputs CV except RET = Audio; OUT/MIX Audio; ENV/NOTE OUT/MOD/ACC OUT CV; CLK/RST/RUN OUT and LD/BS GATE Gate).
 // Global form: SHOGUN#N/<id>.
 
+#include <jidai/jcs/JackId.h>
 #include <jidai/jcs/Roles.h>
 
 #include <cstdint>
@@ -154,8 +155,21 @@ inline int findPort(const char* id) {
 
 // Resolves a saved jack id: a current id, or an alias (§12.3). Returns the number of ports written to out[3]
 // (0 = unknown) and the alias law (0 same volts, 1 lin55, 2 drum PITCH AMT 1/12).
-inline int resolvePort(const char* id, int out[3], int* law) {
+// Every SECTION:LABEL id is parsed with the shared JCS R6 parser (jidai::jcs::parseJackId). It accepts the global
+// form SHOGUN#N/SECTION:LABEL, the first-instance form SHOGUN/SECTION:LABEL and the bare form. The split is at the
+// first '/' before the first ':', so labels keep '/', spaces and digits (LEAD:V/OCT, LEAD:HZ/V OUT, MOD:LD GATE).
+// Another device's prefix is refused. The v2.0/2.1 names that are not R6 ids at all (MIX L, MIX R, LFO OUT have no
+// SECTION:) cannot parse; they are matched whole against the alias table and never split.
+inline int resolvePort(const char* text, int out[3], int* law) {
   if (law) *law = 0;
+  std::string local;
+  if (const auto j = jidai::jcs::parseJackId(text)) {
+    if (!j->prefix.empty() && !(j->prefix == "SHOGUN")) return 0;
+    local = j->local();
+  } else {
+    local = text;
+  }
+  const char* id = local.c_str();
   const int p = findPort(id);
   if (p >= 0) {
     out[0] = p;
@@ -175,6 +189,12 @@ inline int resolvePort(const char* id, int out[3], int* law) {
     return n;
   }
   return 0;
+}
+
+// One port for a jack id in any R6 form (first target of a fan-out alias), or −1.
+inline int portFromId(const char* text) {
+  int out[3];
+  return resolvePort(text, out, nullptr) > 0 ? out[0] : -1;
 }
 
 }  // namespace shogun
