@@ -7,7 +7,7 @@
 // Trig jacks are gates in a 5 V domain. A trigger is a rising edge
 // through 1 V. process() does not allocate.
 
-#include "dsp.h"
+#include "legacy_dsp.h"
 
 #include <cstdint>
 
