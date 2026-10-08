@@ -189,8 +189,15 @@ void ShogunAudioProcessor::requestIdeal() {
   setParamU(P_GLOBAL_DRIFT, 0.0f);
 }
 
+// CLOCK:SOURCE (HOST / INT / EXT) is an instance setting, as on the rack: a factory program, INIT PATCH and an A/B
+// recall keep the current SRC. The instance's own state (host save/restore, undo/redo) still restores it.
+void ShogunAudioProcessor::resetParams(bool keepSource) {
+  for (int i = 0; i < kParamCount; ++i)
+    if (!(keepSource && i == P_CLOCK_SOURCE)) param(i)->setValueNotifyingHost(kParams[i].def);
+}
+
 void ShogunAudioProcessor::initPatch() {
-  for (int i = 0; i < kParamCount; ++i) param(i)->setValueNotifyingHost(kParams[i].def);
+  resetParams(true);  // INIT PATCH / program 0: everything to INIT except SRC
   {
     const juce::SpinLock::ScopedLockType sl(editLock_);
     uiPattern_ = Pattern();
@@ -232,10 +239,10 @@ ShogunAudioProcessor::Snapshot ShogunAudioProcessor::captureState() const {
   return s;
 }
 
-void ShogunAudioProcessor::restoreState(const Snapshot& s) {
+void ShogunAudioProcessor::restoreState(const Snapshot& s, bool keepSource) {
   if (s.empty()) return;
-  for (int i = 0; i < kParamCount; ++i) param(i)->setValueNotifyingHost(kParams[i].def);
-  patchFromJson(juce::JSON::parse(s.json));
+  resetParams(keepSource);
+  patchFromJson(juce::JSON::parse(s.json), !keepSource);
   currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, s.program);
   snapParams_.store(true, std::memory_order_release);  // a recalled state lands at once, like a program change
 }
@@ -290,7 +297,7 @@ void ShogunAudioProcessor::selectAB(int slot) {
   if (ab_[static_cast<size_t>(slot)].empty())
     ab_[static_cast<size_t>(slot)] = ab_[static_cast<size_t>(abSlot_)];  // first visit: B starts as a copy of A
   else
-    restoreState(ab_[static_cast<size_t>(slot)]);
+    restoreState(ab_[static_cast<size_t>(slot)], true);  // A/B compares patches: SRC stays
   abSlot_ = slot;
   settleUndoStep();
 }
@@ -303,7 +310,7 @@ void ShogunAudioProcessor::copyAB(int from, int to) {
   if (src.empty()) return;
   if (to == abSlot_) {
     beginUndoStep();
-    restoreState(src);
+    restoreState(src, true);
     settleUndoStep();
   } else {
     ab_[static_cast<size_t>(to)] = src;
@@ -344,9 +351,10 @@ void ShogunAudioProcessor::loadProgram(int program) {
     snapParams_.store(true, std::memory_order_release);
     return;
   }
-  // The bank documents are sparse: INIT first, then the document exactly as a saved state loads.
-  for (int i = 0; i < kParamCount; ++i) param(i)->setValueNotifyingHost(kParams[i].def);
-  patchFromJson(juce::JSON::parse(juce::String::fromUTF8(factory::programJson(program))));
+  // The bank documents are sparse: INIT first, then the document as a saved state loads, except that SRC (an instance
+  // setting) is neither reset nor taken from the document.
+  resetParams(true);
+  patchFromJson(juce::JSON::parse(juce::String::fromUTF8(factory::programJson(program))), false);
   snapParams_.store(true, std::memory_order_release);  // the kit's values, not a glide from INIT's
 }
 
@@ -599,11 +607,12 @@ juce::var ShogunAudioProcessor::patchToJson() const {
   return juce::var(root);
 }
 
-void ShogunAudioProcessor::patchFromJson(const juce::var& v) {
+void ShogunAudioProcessor::patchFromJson(const juce::var& v, bool applySource) {
   if (!v.isObject()) return;
   if (auto* params = v["params"].getDynamicObject())
     for (const auto& kv : params->getProperties()) {
       const int id = findParam(kv.name.toString().toRawUTF8());
+      if (id == P_CLOCK_SOURCE && !applySource) continue;  // a preset does not apply SRC (instance setting)
       if (id >= 0) param(id)->setValueNotifyingHost(static_cast<float>(static_cast<double>(kv.value)));
     }
   const juce::SpinLock::ScopedLockType sl(editLock_);

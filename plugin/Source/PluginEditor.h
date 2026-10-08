@@ -41,6 +41,14 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   // centre (right button / shift optional), and read the text a bound op draws now.
   bool pressBind(const char* bind, bool right = false, bool shift = false, int nth = 0);
   juce::String boundText(const char* bind);
+  // Click / wheel at a panel point as the mouse would (probe), and a DEPTH drag of dx panel units on a matrix row.
+  bool clickAt(juce::Point<float> p, bool right = false);
+  void wheelAt(juce::Point<float> p, float deltaY);
+  void dragMatrixDepth(juce::Point<float> p, float dx);
+  // MOD tab matrix view: entries in the list (used rows + "+ add"), the first one in view, and scrolling by rows.
+  int matrixEntryCount() const;
+  int matrixTop() const;
+  void scrollMatrix(int rows);
   int armedSource() const { return armedSrc_; }
 
  private:
@@ -86,6 +94,7 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   int cableFrom_ = -1;
   juce::Point<float> cableEnd_;
   int matrixDragRow_ = -1;
+  int matrixTop_ = 0;  // first matrix list entry in view (scroll)
   double matrixDragDepth_ = 0.0;
   float meterL_ = 0, meterR_ = 0;
   float vPeak_[shogun::kVoices] = {};

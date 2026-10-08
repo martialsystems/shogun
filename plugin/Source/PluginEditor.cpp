@@ -779,13 +779,16 @@ void ShogunPanel::paintCables(juce::Graphics& g) {
 
 // Mod matrix (MOD tab), the mockup's row style: # · SOURCE · DESTINATION · DEPTH · VIA · CURVE · ON · ✕. Used rows in
 // slot order, then one "+ add" row. SOURCE/DESTINATION/VIA open menus, DEPTH drags horizontally, CURVE cycles,
-// ON toggles, ✕ clears the slot.
+// ON toggles, ✕ clears the slot. Ten rows show at a time; past ten, the list scrolls (mouse wheel = one row, the ▲ ▼
+// keys at the right edge = one page) so all 32 slots and the "+ add" row are reachable.
 namespace {
 const char* const kSrcLabel[] = {"—", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "ENV", "PENV", "VEL", "ACC", "RND/HIT", "NOTE", "RND", "MOD W", "AT"};
 constexpr int kSrcLabelCount = static_cast<int>(sizeof kSrcLabel / sizeof kSrcLabel[0]);
 const char* const kCurveLabel[] = {"LIN", "EXP", "LOG", "S-CRV"};
 constexpr float kRowY0 = 366.0f, kRowH = 28.0f;
 constexpr int kRowsShown = 10;
+constexpr int kMatrixEntries = mod::kRows + 1;  // every slot used, or the used ones plus "+ add"
+constexpr float kScrollX = 756.0f, kScrollW = 24.0f;
 
 juce::String srcLabel(int src, int voice) {
   juce::String s(kSrcLabel[juce::jlimit(0, kSrcLabelCount - 1, src)]);
@@ -796,30 +799,61 @@ juce::String dstLabel(int dst) {
   if (dst < 0) return u8("\xE2\x80\x94");
   return u8(kParams[dst].id).replace(":", u8(" \xC2\xB7 "));
 }
-// Slots shown in the visible rows: used slots in order, then the first free slot.
-int matrixRows(const mod::Row* rows, int out[kRowsShown]) {
+// The matrix list: used slots in order, then the first free slot ("+ add"). No cap: the view scrolls through it.
+int matrixRows(const mod::Row* rows, int out[kMatrixEntries]) {
   int n = 0, firstFree = -1;
   for (int r = 0; r < mod::kRows; ++r) {
     if (rows[r].src == mod::SRC_NONE) {
       if (firstFree < 0) firstFree = r;
       continue;
     }
-    if (n < kRowsShown) out[n++] = r;
+    out[n++] = r;
   }
-  if (n < kRowsShown && firstFree >= 0) out[n++] = firstFree;
+  if (firstFree >= 0) out[n++] = firstFree;
   return n;
 }
 }  // namespace
 
+int ShogunPanel::matrixEntryCount() const {
+  int slots[kMatrixEntries];
+  return matrixRows(proc_.editRows(), slots);
+}
+
+// The first list entry in view, clamped to the list (rows can vanish under it: ✕, undo, a program load).
+int ShogunPanel::matrixTop() const { return juce::jlimit(0, std::max(0, matrixEntryCount() - kRowsShown), matrixTop_); }
+
+void ShogunPanel::scrollMatrix(int rows) {
+  const int top = juce::jlimit(0, std::max(0, matrixEntryCount() - kRowsShown), matrixTop() + rows);
+  if (top != matrixTop_) {
+    matrixTop_ = top;
+    repaint();
+  }
+}
+
 void ShogunPanel::paintMatrix(juce::Graphics& g, const LayoutOp&) {
-  int slots[kRowsShown];
-  const int n = matrixRows(proc_.editRows(), slots);
+  int slots[kMatrixEntries];
+  const int total = matrixRows(proc_.editRows(), slots);
+  const int top = matrixTop();
+  const int n = std::min(kRowsShown, total - top);
+  if (total > kRowsShown) {  // scroll column: ▲ page up, track + thumb, ▼ page down; header readout "11-20 / 23"
+    text(g, 786, 356, juce::String(top + 1) + "-" + juce::String(top + n) + " / " + juce::String(total), 7.5f, 2,
+         juce::Colour(0xFF9A9A90), false);
+    drawKey(g, kScrollX, kRowY0 + 1, kScrollW, 20, u8("\xE2\x96\xB2"), 0, 7, top > 0 ? 0xFF0A0A0A : 0xFF050505);
+    drawKey(g, kScrollX, kRowY0 + (kRowsShown - 1) * kRowH + 1, kScrollW, 20, u8("\xE2\x96\xBC"), 0, 7,
+            top + n < total ? 0xFF0A0A0A : 0xFF050505);
+    const float t0 = kRowY0 + 26, t1 = kRowY0 + (kRowsShown - 1) * kRowH - 4, th = t1 - t0;
+    rect(g, kScrollX + kScrollW / 2 - 3, t0, 6, th, 3, 0xFF050505, 0xFF262826, 1.0f);
+    const float ty = t0 + th * static_cast<float>(top) / static_cast<float>(total),
+                tl = std::max(10.0f, th * static_cast<float>(n) / static_cast<float>(total));
+    rect(g, kScrollX + kScrollW / 2 - 2, std::min(ty, t1 - tl), 4, tl, 2, GRN.getARGB());
+  }
   for (int i = 0; i < n; ++i) {
-    const mod::Row& row = proc_.editRows()[slots[i]];
+    const int slot = slots[top + i];
+    const mod::Row& row = proc_.editRows()[slot];
     const float y = kRowY0 + static_cast<float>(i) * kRowH;
     const bool empty = row.src == mod::SRC_NONE;
-    if (i % 2 == 0) rect(g, 14, y - 2, 772, 26, 0, 0xFFFFFFFF, 0, 1, .025f);
-    text(g, 26, y + 14, juce::String(slots[i] + 1), 8, 1, DIM, false);
+    if (i % 2 == 0) rect(g, 14, y - 2, total > kRowsShown ? 736 : 772, 26, 0, 0xFFFFFFFF, 0, 1, .025f);
+    text(g, 26, y + 14, juce::String(slot + 1), 8, 1, DIM, false);
     drawLcd(g, 46, y + 2, 110, 18, empty ? juce::String("+ add") : srcLabel(row.src, row.srcVoice), 8.5f, 0,
             empty ? 0xFF4A6A4Au : LCDGRN.getARGB());
     if (empty) continue;
@@ -837,11 +871,18 @@ void ShogunPanel::paintMatrix(juce::Graphics& g, const LayoutOp&) {
 }
 
 void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, juce::ModifierKeys) {
-  int slots[kRowsShown];
-  const int n = matrixRows(proc_.editRows(), slots);
+  int slots[kMatrixEntries];
+  const int total = matrixRows(proc_.editRows(), slots);
+  const int top = matrixTop();
+  const int n = std::min(kRowsShown, total - top);
   const int i = static_cast<int>(std::floor((p.y - (kRowY0 - 2)) / kRowH));
+  if (total > kRowsShown && p.x >= kScrollX && p.x < kScrollX + kScrollW) {  // ▲ / ▼ page keys
+    if (i == 0) scrollMatrix(-kRowsShown);
+    else if (i == kRowsShown - 1) scrollMatrix(kRowsShown);
+    return;
+  }
   if (i < 0 || i >= n) return;
-  const int row = slots[i];
+  const int row = slots[top + i];
   mod::Row& r = proc_.editRows()[row];
   auto commit = [this] { proc_.commitEdits(); repaint(); };
   auto sourceMenu = [](bool perVoice) {
@@ -999,6 +1040,30 @@ bool ShogunPanel::pressBind(const char* bind, bool right, bool shift, int nth) {
     return true;
   }
   return false;
+}
+
+bool ShogunPanel::clickAt(juce::Point<float> p, bool right) {
+  const int bi = findBound(p);
+  if (bi < 0) return false;
+  juce::ModifierKeys m;
+  if (right) m = m.withFlags(juce::ModifierKeys::rightButtonModifier);
+  click(bi, m, p);
+  dragBound_ = -1;
+  matrixDragRow_ = -1;
+  return true;
+}
+
+void ShogunPanel::dragMatrixDepth(juce::Point<float> p, float dx) {
+  const int bi = findBound(p);
+  if (bi < 0 || bounds_[static_cast<size_t>(bi)].kind != B_MATRIX) return;
+  matrixDragRow_ = -1;
+  click(bi, juce::ModifierKeys(), p);
+  if (matrixDragRow_ >= 0) {
+    proc_.editRows()[matrixDragRow_].depth = juce::jlimit(-1.0, 1.0, matrixDragDepth_ + static_cast<double>(dx) / (70.0 * 0.9467));
+    proc_.commitEdits();
+  }
+  matrixDragRow_ = -1;
+  dragBound_ = -1;
 }
 
 juce::String ShogunPanel::boundText(const char* bind) {
@@ -1401,15 +1466,22 @@ void ShogunPanel::mouseDoubleClick(const juce::MouseEvent& e) {
 }
 
 void ShogunPanel::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) {
-  const auto p = e.position.transformedBy(panelTransform().inverted());
+  wheelAt(e.position.transformedBy(panelTransform().inverted()), w.deltaY);
+}
+
+void ShogunPanel::wheelAt(juce::Point<float> p, float deltaY) {
   const int bi = findBound(p);
   if (bi < 0) return;
   const Bound& b = bounds_[static_cast<size_t>(bi)];
   const LayoutOp& o = kOps[b.op];
+  if (b.kind == B_MATRIX) {  // wheel over the matrix scrolls it a row per notch (down = later rows)
+    if (deltaY != 0.0f) scrollMatrix(deltaY < 0.0f ? 1 : -1);
+    return;
+  }
   const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
   if (pid >= 0 && o.kind == KNOB) {
     if (!proc_.undoPending()) proc_.beginUndoStep();  // a wheel burst is one step (settled by the timer)
-    proc_.setParamU(pid, proc_.paramU(pid) + w.deltaY * 0.05f);
+    proc_.setParamU(pid, proc_.paramU(pid) + deltaY * 0.05f);
   }
 }
 

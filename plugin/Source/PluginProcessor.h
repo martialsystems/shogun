@@ -68,7 +68,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   void requestRestart();
   void requestIdeal();
   void initPatch();
-  void loadProgram(int program);  // INIT, then the bank document through patchFromJson (the saved-state path)
+  void loadProgram(int program);  // INIT, then the bank document through patchFromJson; keeps CLOCK:SOURCE
   void stepProgram(int delta);    // header ◀ ▶: the next / previous program, wrapping INIT ↔ the last kit
 
   // Full-state snapshots (message thread): the patch document of patchToJson() plus the program number.
@@ -79,7 +79,9 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
     bool sameAs(const Snapshot& o) const { return program == o.program && json == o.json; }
   };
   Snapshot captureState() const;
-  void restoreState(const Snapshot& s);
+  // keepSource: an A/B recall keeps the current CLOCK:SOURCE; undo/redo (the instance's history) restores it.
+  void restoreState(const Snapshot& s, bool keepSource = false);
+  void resetParams(bool keepSource);  // every param to its default; SRC too unless keepSource
   juce::String stateJson() const { return captureState().json; }
 
   // A/B compare: two full-state slots. selectAB stores the live state in the active slot and loads the other one (a
@@ -137,7 +139,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   void handleMidi(const juce::MidiMessage& msg);
   void pickUpEdits();
   juce::var patchToJson() const;
-  void patchFromJson(const juce::var& v);
+  void patchFromJson(const juce::var& v, bool applySource = true);  // false: CLOCK:SOURCE in the doc is ignored
 
   std::unique_ptr<shogun::Engine> engine_;
   std::vector<juce::RangedAudioParameter*> params_;

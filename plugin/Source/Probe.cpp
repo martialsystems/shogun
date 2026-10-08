@@ -364,6 +364,104 @@ int main(int argc, char** argv) {
   }
 
 
+  // ---- MOD tab matrix past ten rows: all 32 slots in use; the view shows 10 and scrolls (▲ ▼ keys = a page, wheel =
+  // a row). Every slot is reached by scrolling and edited through the panel (CURVE, ON, DEPTH drag), then rows are
+  // removed with ✕ (one only reachable after scrolling) and the "+ add" row is reachable at the end of the list.
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    pn.setTab(3);
+    const int dst = findParam("BD1:DECAY");
+    for (int r = 0; r < mod::kRows; ++r)
+      p->editRows()[r] = {mod::SRC_LFO1 + r % 4, -1, dst, 0.01 * (r + 1), mod::SRC_NONE, -1, mod::LIN, true};
+    p->commitEdits();
+    constexpr float y0 = 366.0f, rh = 28.0f;
+    auto rowY = [&](int i) { return juce::Point<float>(0.0f, y0 + rh * static_cast<float>(i) + 11.0f); };
+    auto at = [&](float x, int i) { return juce::Point<float>(x, rowY(i).y); };
+    const juce::Point<float> pageDown = at(768.0f, 9), pageUp = at(768.0f, 0), over = at(250.0f, 4);
+    bool ok = pn.matrixEntryCount() == 32 && pn.matrixTop() == 0;
+    // ▼ ▼ ▼ then ▲ ▲ ▲: pages 0 → 10 → 20 → 22 (clamped: the last ten rows) and back 12 → 2 → 0.
+    juce::String pages = "0";
+    for (int k = 0; k < 3; ++k) { ok = ok && pn.clickAt(pageDown); pages << " " << pn.matrixTop(); }
+    for (int k = 0; k < 3; ++k) { ok = ok && pn.clickAt(pageUp); pages << " " << pn.matrixTop(); }
+    ok = ok && pages == "0 10 20 22 12 2 0";
+    // Every slot: scroll it into view with the wheel, then CURVE, ON and DEPTH on its row; nothing else changes.
+    int reached = 0, edited = 0, wheelSteps = 0;
+    for (int s = 0; s < mod::kRows; ++s) {
+      while (s >= pn.matrixTop() + 10 && wheelSteps < 100) { pn.wheelAt(over, -1.0f); ++wheelSteps; }
+      const int i = s - pn.matrixTop();
+      if (i < 0 || i >= 10) continue;
+      ++reached;
+      mod::Row before[mod::kRows];
+      std::copy(p->editRows(), p->editRows() + mod::kRows, before);
+      pn.clickAt(at(620.0f, i));       // CURVE: LIN → EXP
+      pn.clickAt(at(680.0f, i));       // ON: off
+      pn.dragMatrixDepth(at(400.0f, i), 33.0f);  // DEPTH: drag right
+      bool rowOk = true;
+      for (int r = 0; r < mod::kRows; ++r) {
+        const mod::Row& a = p->editRows()[r];
+        if (r == s) rowOk = rowOk && a.curve == mod::EXP && !a.on && a.depth > before[r].depth + 0.4;
+        else rowOk = rowOk && a.curve == before[r].curve && a.on == before[r].on && dsp::exactEq(a.depth, before[r].depth);
+      }
+      edited += rowOk ? 1 : 0;
+    }
+    ok = ok && reached == 32 && edited == 32 && pn.matrixTop() == 22 && wheelSteps == 22;
+    pn.wheelAt(over, -1.0f);  // past the end: stays on the last ten rows
+    ok = ok && pn.matrixTop() == 22;
+    // Render the scrolled view (rows 23-32) for the docs/review.
+    {
+      juce::Image img(juce::Image::RGB, 1200, 672, true);
+      {
+        juce::Graphics g(img);
+        pn.paintEntireComponent(g, true);
+      }
+      const juce::File f = outDir.getChildFile("demo_3_mod_32rows.png");
+      f.deleteFile();
+      juce::FileOutputStream os(f);
+      juce::PNGImageFormat png;
+      if (os.openedOk()) png.writeImageToStream(img, os);
+    }
+    // ✕ on slot 32 (last visible row) and slot 21 (row 0 of the 22.. view), then page up and ✕ slot 6.
+    ok = ok && pn.clickAt(at(735.0f, 9)) && p->editRows()[31].src == mod::SRC_NONE;
+    const int t1 = pn.matrixTop();  // 32 entries again (31 used + "+ add"): view stays at 22
+    const int i21 = 20 - t1;
+    ok = ok && t1 == 22 && i21 < 0;  // slot 21 is above the view: scroll one row up to reach it
+    pn.wheelAt(over, 1.0f);
+    pn.wheelAt(over, 1.0f);
+    ok = ok && pn.matrixTop() == 20 && pn.clickAt(at(735.0f, 0)) && p->editRows()[20].src == mod::SRC_NONE;
+    pn.clickAt(pageUp);
+    pn.clickAt(pageUp);
+    ok = ok && pn.matrixTop() == 0 && pn.clickAt(at(735.0f, 5)) && p->editRows()[5].src == mod::SRC_NONE;
+    int used = 0;
+    for (int r = 0; r < mod::kRows; ++r) used += p->editRows()[r].src != mod::SRC_NONE ? 1 : 0;
+    // 29 used + "+ add" (the first free slot, 6) = 30 entries; the last page ends on "+ add".
+    for (int k = 0; k < 5; ++k) pn.clickAt(pageDown);
+    ok = ok && used == 29 && pn.matrixEntryCount() == 30 && pn.matrixTop() == 20;
+    // Remove the rest through the panel: ✕ on whatever row 0 shows, scrolled to the top.
+    int removed = 3;
+    for (int k = 0; k < 40 && pn.matrixEntryCount() > 1; ++k) {
+      pn.clickAt(pageUp);
+      pn.clickAt(pageUp);
+      pn.clickAt(pageUp);
+      if (pn.clickAt(at(735.0f, 0))) ++removed;
+    }
+    used = 0;
+    for (int r = 0; r < mod::kRows; ++r) used += p->editRows()[r].src != mod::SRC_NONE ? 1 : 0;
+    ok = ok && used == 0 && removed == 32 && pn.matrixEntryCount() == 1 && pn.matrixTop() == 0;
+    // Eleven rows: the list is 12 entries, the view scrolls by two and ends on "+ add".
+    for (int r = 0; r < 11; ++r)
+      p->editRows()[r] = {mod::SRC_LFO1, -1, dst, 0.5, mod::SRC_NONE, -1, mod::LIN, true};
+    p->commitEdits();
+    for (int k = 0; k < 5; ++k) pn.wheelAt(over, -1.0f);
+    ok = ok && pn.matrixEntryCount() == 12 && pn.matrixTop() == 2;
+    pn.clickAt(at(620.0f, 8));  // row 8 of the view = slot 11
+    ok = ok && p->editRows()[10].curve == mod::EXP;
+    check(ok, "matrix 32 rows", "pages " + pages + "; " + juce::String(reached) + "/32 reached by wheel, " +
+                                    juce::String(edited) + " edited (CURVE/ON/DEPTH), " + juce::String(removed) +
+                                    " removed with X; 11 rows scroll to " + juce::String(pn.matrixTop()));
+  }
+
   // ---- header: KIT / PATTERN ◀ ▶ step through the bank (INIT + kits) with wraparound; SRC cycles CLOCK:SOURCE
   {
     auto p = fresh();
@@ -397,7 +495,7 @@ int main(int argc, char** argv) {
           juce::String(visited) + " steps over " + juce::String(n) + " programs on 8 tabs, both arrow pairs wrap INIT <-> " +
               juce::String::fromUTF8(factory::programName(n - 1)) + ", ▶▶ = program 2 state");
 
-    // SRC: HOST → INT → EXT → HOST (from whatever the program set), labelled with the source; right-click steps back.
+    // SRC: HOST → INT → EXT → HOST (from the instance's current SRC), labelled with the source; right-click steps back.
     // The engine follows it: the host tempo under HOST, the TEMPO knob otherwise.
     FakeHead head;
     head.bpm = 100.0;
@@ -425,6 +523,77 @@ int main(int argc, char** argv) {
     check(srcOk, "SRC key", labels.joinIntoString(" > ") + ", right-click " + before + " > " + back + "; engine tempo " +
                                tempos + " BPM (host 100, knob " + juce::String(tempoBpm(0.5), 1) + ")");
     p->setPlayHead(nullptr);
+  }
+
+  // ---- SRC is an instance setting (as on the rack): loading any program (the host's program change, the header ◀ ▶,
+  // INIT PATCH) and an A/B recall keep HOST / INT / EXT. The instance's own state still carries it: undo of the SRC
+  // key and the host's save/restore bring it back.
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    pn.setTab(0);
+    const int n = factory::kPrograms;
+    const char* const names[3] = {"HOST", "INT", "EXT"};
+    auto srcIdx = [&] { return stepIndex(static_cast<double>(p->paramU(P_CLOCK_SOURCE)), 3); };
+    bool ok = true;
+    int loads = 0;
+    juce::String per;
+    for (int k = 0; k < 3; ++k) {
+      p->setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(k, 3)));
+      bool kOk = srcIdx() == k;
+      for (int i = 0; i < n; ++i) {  // host program change, every program
+        p->setCurrentProgram(i);
+        kOk = kOk && p->getCurrentProgram() == i && srcIdx() == k;
+        ++loads;
+      }
+      for (int i = 0; i < n; ++i) {  // header KIT ▶ through the bank (wraps to INIT)
+        kOk = kOk && pn.pressBind("prog:1") && srcIdx() == k;
+        ++loads;
+      }
+      kOk = kOk && pn.pressBind("prog:-1") && srcIdx() == k;
+      p->setCurrentProgram(7);
+      pn.setTab(7);
+      kOk = kOk && pn.pressBind("initpatch") && p->getCurrentProgram() == 0 && srcIdx() == k;  // INIT PATCH
+      pn.setTab(0);
+      // a program loaded under this SRC is the INT load of the same program in everything but SRC
+      auto q = fresh();
+      q->setCurrentProgram(9);
+      p->setCurrentProgram(9);
+      juce::var a = juce::JSON::parse(p->stateJson()), b = juce::JSON::parse(q->stateJson());
+      a["params"].getDynamicObject()->removeProperty("CLOCK:SOURCE");
+      b["params"].getDynamicObject()->removeProperty("CLOCK:SOURCE");
+      kOk = kOk && juce::JSON::toString(a) == juce::JSON::toString(b);
+      per << (k ? ", " : "") << names[k] << (kOk ? " kept" : " CHANGED");
+      ok = ok && kOk;
+    }
+    // A/B: B under EXT, A was saved under INT: recalling A keeps EXT.
+    p->setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(1, 3)));
+    pn.pressBind("ab:1");
+    p->setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(2, 3)));
+    pn.pressBind("ab:0");
+    const bool abKeeps = srcIdx() == 2;
+    pn.pressBind("ab:1");
+    // Undo of the SRC key restores the previous SRC (the key is an undo step).
+    p->setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(0, 3)));
+    pn.pressBind("src");
+    p->settleUndoStep();
+    const int afterKey = srcIdx();
+    pn.pressBind("undo");
+    const bool undoRestores = afterKey == 1 && srcIdx() == 0;
+    // Host save/restore: a state saved under EXT restores EXT into an instance at INT (the default).
+    p->setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(2, 3)));
+    juce::MemoryBlock mb;
+    p->getStateInformation(mb);
+    auto r = fresh();
+    const int before = stepIndex(static_cast<double>(r->paramU(P_CLOCK_SOURCE)), 3);
+    r->setStateInformation(mb.getData(), static_cast<int>(mb.getSize()));
+    const bool stateRestores = before == 1 && stepIndex(static_cast<double>(r->paramU(P_CLOCK_SOURCE)), 3) == 2;
+    check(ok && abKeeps && undoRestores && stateRestores, "SRC on program load",
+          per + " over " + juce::String(loads) + " program loads (" + juce::String(n) +
+              " programs, host change + KIT arrows, INIT PATCH); A/B keeps " + juce::String(abKeeps ? "yes" : "NO") +
+              "; undo of SRC key restores " + juce::String(undoRestores ? "yes" : "NO") + "; saved state restores EXT " +
+              juce::String(stateRestores ? "yes" : "NO"));
   }
 
   // ---- A/B compare: two full-state slots; B starts as a copy; right-click B copies A onto B
