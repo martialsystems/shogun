@@ -29,7 +29,7 @@ install-vst: plugin
 		"$(HOME)/Library/Audio/Plug-Ins/VST3/SHOGUN.vst3"
 
 ENGINE_DEPS = engine/shogun.cpp $(wildcard engine/*.h engine/*.inc engine/voices/*.h engine/jidai/dsp/*.h)
-TEST_SRCS = tests/main.cpp tests/blocks.cpp tests/voices.cpp tests/engine.cpp
+TEST_SRCS = tests/main.cpp tests/blocks.cpp tests/voices.cpp tests/engine.cpp tests/mod.cpp
 TEST_DEPS = $(TEST_SRCS) tests/testutil.h tests/rig.h tests/data/levelcomp_cases.h
 
 build/shogun_tests: $(ENGINE_DEPS) $(TEST_DEPS)

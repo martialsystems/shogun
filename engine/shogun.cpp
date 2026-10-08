@@ -786,6 +786,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     driftCents_[v] = sigma > 0.0 ? drift_[v].tick() : 0.0;
   }
   computeEffective(in, con);
+  for (auto& l : mod_.lfo) l.read(ue_);  // before this sample's triggers (OWN VOICE restart needs MODE/RETRIG)
 
   // Triggers.
   for (int v = 0; v < kVoices; ++v) {
@@ -835,10 +836,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
   // Modulation clock (LFOs at base rate; m every 16 samples, §8.4).
   {
     const bool locked = running_ || (host_.valid && host_.playing);
-    for (auto& l : mod_.lfo) {
-      l.read(ue_);
-      l.tick(tempo(), ppq_, locked);
-    }
+    for (auto& l : mod_.lfo) l.tick(tempo(), ppq_, locked);
     for (int v = 0; v < kVoices; ++v) {
       mod_.vs[v].env = active_[v] ? (v >= LEAD ? synth(v).filterEnv() : voices_[v]->env()) : 0.0;
       mod_.vs[v].penv = active_[v] ? voices_[v]->pitchEnv() : 0.0;
