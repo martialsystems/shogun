@@ -49,6 +49,21 @@ void clearSteps(ShogunAudioProcessor& proc) {
       if (proc.isStepOn(voice, step)) proc.toggleStep(voice, step);
 }
 
+// A test beat (INIT is empty): kick and bass on 1 and 9, snare on 5 and 13, hats on the eighths.
+void setTestBeat(ShogunAudioProcessor& proc) {
+  clearSteps(proc);
+  const int bd1 = static_cast<int>(shogun::Voice::Bd1);
+  const int sd = static_cast<int>(shogun::Voice::Sd);
+  const int hh = static_cast<int>(shogun::Voice::Hh);
+  const int bass = static_cast<int>(shogun::Voice::Bass);
+  for (int step : {0, 8}) {
+    proc.toggleStep(bd1, step);
+    proc.toggleStep(bass, step);
+  }
+  for (int step : {4, 12}) proc.toggleStep(sd, step);
+  for (int step = 0; step < 16; step += 2) proc.toggleStep(hh, step);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -58,6 +73,19 @@ int main(int argc, char** argv) {
 
   {
     ShogunAudioProcessor proc;
+    bool anyOn = false;
+    for (int voice = 0; voice < ShogunAudioProcessor::kVoices; ++voice)
+      for (int step = 0; step < ShogunAudioProcessor::kSteps; ++step)
+        anyOn = anyOn || proc.isStepOn(voice, step);
+    ok = expect("init_pattern_empty", ! anyOn, anyOn ? 1.0f : 0.0f) && ok;
+    proc.prepareToPlay(48000.0, 256);
+    const float peak = renderPeak(proc, 48000, none, 0);
+    ok = expect("init_pattern_silent", peak < 1.0e-4f, peak) && ok;
+  }
+
+  {
+    ShogunAudioProcessor proc;
+    setTestBeat(proc);
     proc.prepareToPlay(48000.0, 256);
     const float peak = renderPeak(proc, 48000, none, 0);
     ok = expect("int_pattern", peak > 0.05f, peak) && ok;
@@ -67,6 +95,7 @@ int main(int argc, char** argv) {
 
   {
     ShogunAudioProcessor proc;
+    setTestBeat(proc);
     proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
     proc.prepareToPlay(48000.0, 256);
     const float peak = renderPeak(proc, 48000, none, 0);

@@ -1463,53 +1463,65 @@ void testShuffleSurvivesOddLength() {
   }
 }
 
-void testInitKitIs909Steps() {
-  const char* t = "testInitKitIs909Steps";
+void testInitKitIsEmptyPattern() {
+  const char* t = "testInitKitIsEmptyPattern";
   shogun::Engine e;  // fresh engine, no reset()
   const shogun::Pattern& p = e.pattern();
-  expect(std::strcmp(p.name, "909") == 0, t, "the init pattern is named 909", 0, 0);
+  expect(std::strcmp(p.name, "INIT") == 0, t, "the init pattern is named INIT", 0, 0);
   expect(p.length == 16, t, "one bar of 16 steps", p.length, 16);
-  // Kick 1 and 9, snare and clap 5 and 13, open hat 3 7 11 15, closed hat on the other steps (it would choke the open hat).
-  bool map = true;
+  // The INIT pattern is empty: every track 16 long, no step on in all 32 steps of any track.
+  bool empty = true;
   for (int v = 0; v < shogun::kVoiceCount; ++v) {
     const shogun::Track& tr = p.track[v];
-    if (tr.length != 16) map = false;
+    if (tr.length != 16) empty = false;
     for (int s = 0; s < shogun::kMaxSteps; ++s) {
-      bool want = false;
-      if (s < 16) {
-        switch (static_cast<shogun::Voice>(v)) {
-          case shogun::Voice::Bd1: want = s % 8 == 0; break;
-          case shogun::Voice::Sd:
-          case shogun::Voice::Cp: want = s % 8 == 4; break;
-          case shogun::Voice::Oh: want = s % 4 == 2; break;
-          case shogun::Voice::Hh: want = s % 4 != 2; break;
-          default: break;
-        }
-      }
-      if (tr.drum[s].on != want) {
-        map = false;
-        std::printf("  voice %d step %d: on=%d want %d\n", v, s + 1, tr.drum[s].on ? 1 : 0, want ? 1 : 0);
+      if (tr.drum[s].on) {
+        empty = false;
+        std::printf("  voice %d step %d is on\n", v, s + 1);
       }
     }
   }
-  expect(map, t, "step map matches the 909 sheet", 0, 0);
+  expect(empty, t, "no step is on", 0, 0);
   const double bd1Decay = e.knobs().bd1Decay / 127.0;
   expect(bd1Decay < 0.35, t, "BD1 Decay under 0.35", bd1Decay, 0.35);
   expect(e.level(shogun::Voice::Bd2) == 0.0 && e.level(shogun::Voice::Ltc) == 0.0, t, "BD2 and toms at level 0",
          e.level(shogun::Voice::Bd2), 0.0);
   expect(near(e.master(), 0.7), t, "master 0.7", e.master(), 0.7);
 
-  // One bar at 120 BPM, INT: the open hats ring (no choke), and the mix stays under full scale.
+  // One bar of the empty pattern at 120 BPM, INT, is silence.
   shogun::TrigIn in;
   shogun::Frame f;
+  double quiet = 0;
+  for (int n = 0; n < 16 * 6000; ++n) {
+    e.process(in, f);
+    quiet = std::fmax(quiet, std::fmax(std::fabs(f.mainL), std::fabs(f.mainR)));
+  }
+  expect(quiet == 0.0, t, "the empty pattern is silent", quiet, 0.0);
+
+  // The INIT kit and levels with a test beat (not a factory pattern): kick 1 and 9, snare and clap 5 and 13,
+  // open hat 3 7 11 15, closed hat on the other steps (it would choke the open hat). The open hats ring, and
+  // the mix stays under full scale.
+  shogun::Engine g;
+  shogun::Pattern beat = g.pattern();
+  auto on = [&beat](shogun::Voice v, int s) { beat.track[static_cast<int>(v)].drum[s].on = true; };
+  for (int s = 0; s < 16; ++s) {
+    if (s % 8 == 0) on(shogun::Voice::Bd1, s);
+    if (s % 8 == 4) {
+      on(shogun::Voice::Sd, s);
+      on(shogun::Voice::Cp, s);
+    }
+    if (s % 4 == 2) on(shogun::Voice::Oh, s);
+    else on(shogun::Voice::Hh, s);
+  }
+  g.setPattern(beat);
   double peak = 0;
   double ohPeak = 0;
   for (int n = 0; n < 16 * 6000; ++n) {
-    e.process(in, f);
+    g.process(in, f);
     peak = std::fmax(peak, std::fmax(std::fabs(f.mainL), std::fabs(f.mainR)));
-    if (n >= 2 * 6000 && n < 3 * 6000) ohPeak = std::fmax(ohPeak, e.ohEnv());
+    if (n >= 2 * 6000 && n < 3 * 6000) ohPeak = std::fmax(ohPeak, g.ohEnv());
   }
-  std::printf("%s: one bar peak %.6f\n", t, peak);
+  std::printf("%s: test beat peak %.6f\n", t, peak);
   expect(ohPeak > 0.5, t, "the open hat on step 3 is not choked", ohPeak, 1.0);
   expect(peak > 0.1 && peak < 1.0, t, "one bar plays under full scale", peak, 0.5);
 }
@@ -1539,7 +1551,7 @@ int main() {
   testTomFullEnds();
   testSnareBendAtPitchZero();
   testSoloMutesOtherVoices();
-  testInitKitIs909Steps();
+  testInitKitIsEmptyPattern();
   if (gFails != 0) {
     std::printf("%d failed\n", gFails);
     return 1;

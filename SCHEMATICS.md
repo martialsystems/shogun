@@ -511,9 +511,9 @@ Bass accent uses g_accent on the bass voice in INT. The drums' three-level accen
 
 BD1's Pitch knob is both time and depth, one u, as the instrument chapter states. SD's pitch control is depth, with the time law above. Step bend is an extra signed depth on BD1, BD2, SD, LTC, MTC, and HTC only. On SD it has its own envelope with the 80 ms floor, written in the SD equation. CY, RS, hats, clave, clap, cowbell, and maracas have no step bend. EXT ignores step bend.
 
-## Init kit (909)
+## Init kit (INIT)
 
-STAND-IN, not a Roland capture. A 909-style balance set by ear from the knob ranges above, with no samples. A new engine loads it. reset() still clears to empty knobs, empty steps, level 1, and master 1, which is the state every named test arms from. The plugin writes its own parameters over both on the first block.
+STAND-IN. A balance set by ear from the knob ranges above, with no samples. A new engine loads it. reset() still clears to empty knobs, empty steps, level 1, and master 1, which is the state every named test arms from. The plugin writes its own parameters over both on the first block.
 
 Knob CC is round(u * 127).
 
@@ -533,15 +533,7 @@ Knob CC is round(u * 127).
 
 Every knob not listed keeps its Knobs default. Master 0.7, 120 BPM, 16ths, INT.
 
-Pattern "909", length 16, every track length 16, accent 2 on every step:
-
-| Voice | Steps (1 to 16) |
-| --- | --- |
-| BD1 | 1, 9 |
-| SD | 5, 13 |
-| CP | 5, 13 |
-| OH | 3, 7, 11, 15 |
-| HH | every step except 3, 7, 11, 15 |
+Pattern "INIT", length 16, every track length 16, no step on. The factory patterns are cleared for now; tests that need steps arm their own.
 
 CHOICE: the closed hat skips the open-hat steps. A closed trigger on the same sample chokes the open hat, so a closed hat on every step would leave the open hat silent.
 

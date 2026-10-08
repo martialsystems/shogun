@@ -16,8 +16,8 @@ function undo(redo){const from=redo?REDO:UNDO,to=redo?UNDO:REDO;if(!from.length)
   to.push(snap());restore(from.pop());undoKey=null;info.textContent=(redo?"Redo":"Undo")+" · "+UNDO.length+" more to undo, "+REDO.length+" to redo"}
 
 // Kits: the knob settings without the steps. The factory kits are the ones the factory patterns load; saved kits stay in this browser.
-let USERK=[],curKit={n:"HOUSE",dirty:false};
-const FKITS=Object.keys(STYLE).map(n=>({n:n=="EMPTY"?"BASIC":n,f:n})),kitList=()=>FKITS.concat(USERK);
+let USERK=[],curKit={n:"INIT",dirty:false};
+const FKITS=Object.keys(STYLE).map(n=>({n,f:n})),kitList=()=>FKITS.concat(USERK);
 const kitKnobs=k=>k.knobs||patKnobs({n:k.f});
 const panelKnobs=()=>{const k={};for(const id in MAP)if(!MAP[id].master)k[id]=P[id];return k};
 function loadKit(i){const k=kitList()[i];if(!k)return;undoPush();const kn=kitKnobs(k);

@@ -30,7 +30,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor {
   int getNumPrograms() override { return 1; }
   int getCurrentProgram() override { return 0; }
   void setCurrentProgram(int) override {}
-  const juce::String getProgramName(int) override { return "Placeholder"; }
+  const juce::String getProgramName(int) override { return "INIT"; }
   void changeProgramName(int, const juce::String&) override {}
 
   void getStateInformation(juce::MemoryBlock& destData) override;

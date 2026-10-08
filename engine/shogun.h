@@ -116,7 +116,7 @@ struct Knobs {
   int bassTone = 0;
 };
 
-// The fresh-engine kit and pattern "909". STAND-IN knob values, not a Roland capture.
+// The fresh-engine kit and pattern "INIT". STAND-IN knob values set by ear; the INIT pattern is empty.
 Knobs initKit();
 Pattern initPattern();
 
@@ -158,7 +158,7 @@ class Engine {
   Engine();
 
   void reset();
-  // Init kit, pattern "909", its levels, master 0.7, 120 BPM, 16ths, INT.
+  // Init kit, the empty pattern "INIT", its levels, master 0.7, 120 BPM, 16ths, INT.
   void loadInit();
   void setMode(ClockMode mode);
   void setTempo(double bpm);
