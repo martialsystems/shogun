@@ -355,7 +355,7 @@ All jacks follow the **Jidai Cable Standard**:
 | Gate / clock | Green | Outputs 0 V or +5 V. Inputs go high above 1.0 V and low below 0.5 V. |
 | CV | Yellow | ±5 V (or 0 to 5 V for unipolar sources) |
 
-The bay offers **151 jacks**. A patch keeps every cable when you save it, and patches made with older jack names still load with their cables in place.
+The bay offers **151 jacks**. A patch keeps every cable when you save it, and patches made with older jack names still load with their cables in place. Early patches could hold a cable on **CLOCK › FILL IN** or **MOD › LANE A**, two jacks SHOGUN no longer has; such a patch still loads, without those cables, and the rest of it is untouched.
 
 ### 4.2 Normals and how inputs combine
 
@@ -618,7 +618,7 @@ In the JIDAI RACK, SHOGUN is a 5.8 U device when open and a 1 U strip when close
 
 ### Rear jacks
 
-The rear plate carries the same jacks as the ROUTE tab (section 4.3) in the same colours. It also shows two reserved jacks, **CLOCK › FILL IN** and **MOD › LANE A**, which carry no signal. That is why the plate's sticker counts 153 jacks against the 151 on the ROUTE tab.
+The rear plate carries the same 151 jacks as the ROUTE tab (section 4.3), in the same colours.
 
 Output jacks have a light label and inputs a plain one. The **LAT** plate shows SHOGUN's latency: 0, 23 or 26 samples at 1×, 2× or 4×.
 

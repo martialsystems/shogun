@@ -2,7 +2,7 @@
 
 **A sixteen-voice analog-style drum machine with a full patch bay, from Martial Systems.**
 
-SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every voice, and a 153-jack patch bay that cables to the other instruments in the Jidai Collection. It runs as a VST3 instrument in your DAW and as a playable web page built from the same engine.
+SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every voice, and a 151-jack patch bay that cables to the other instruments in the Jidai Collection. It runs as a VST3 instrument in your DAW and as a playable web page built from the same engine.
 
 ## Features
 
@@ -35,7 +35,7 @@ SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every
 
 ### Patch bay
 
-- 153 jacks: trigger, velocity, pitch, decay, tone, return, output and envelope for every drum. Gate, velocity, note, V/oct, cutoff and note out for each synth voice. Clock and transport in and out, accent out, the four LFOs, random and the mix outputs.
+- 151 jacks: trigger, velocity, pitch, decay, tone, return, output and envelope for every drum. Gate, velocity, note, V/oct, cutoff and note out for each synth voice. Clock and transport in and out, accent out, the four LFOs, random and the mix outputs.
 - Jacks follow the Jidai Collection standard: 1 V/oct with C3 at 0 V, ±5 V signals and colour-coded cable roles. SHOGUN's clock out can drive BUSHIDO directly, and any SHOGUN output can be cabled into RONIN.
 - Patches saved with older jack names still load with every cable in place.
 

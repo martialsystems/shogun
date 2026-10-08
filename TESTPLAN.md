@@ -4,7 +4,7 @@ The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and t
 
 Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 0 V = C3 = note 48; accent volts 2.353/3.706/5.0 V; voice end at −90 dB (kQuiet 3.162e-5); OS 2× unless a row says otherwise (latency 23 base samples).
 
-Result of the last run: **all 339 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
+Result of the last run: **all 342 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
 
 §15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
@@ -561,18 +561,34 @@ lin55 0 V -> -11.215784 V, -2 V -> -11.215784 V, 1 mV -> -11.215784 V (floor log
 
 ### testJackIdsAndTypes
 
-§13.1/13.2: 153 ports, ids exact, unique, types/roles, plainVoltGates.  Tolerance: exact.
+§13.1/13.2: 151 ports, ids exact, unique, types/roles, plainVoltGates. §13.2 listed 153; CLOCK:FILL IN (never read) and MOD:LANE A (a constant 0 V) were removed so the table is exactly the panel bay.  Tolerance: exact.
 
 ```
-153 ports, ids exactly as 13.2: 1, unique 1, type/role errors 0, plainVoltGates 1
+151 ports, ids exactly as 13.2 (less FILL IN / LANE A): 1, unique 1, type/role errors 0, plainVoltGates 1
+```
+
+### testBayMatchesPortTable
+
+The declared port table is the panel bay: every port in `kPortTable` has exactly one `jack:` bind among the JACK rows of `plugin/Source/PanelLayout.inc` (compiled into the test with the editor's row shape), and every bay jack names a port in `kPortTable`.  Tolerance: exact.
+
+```
+bay 151 jacks, ports 151, missing 0, unknown 0, dups 0
+```
+
+### testRemovedPortCablesDropped
+
+Old documents with cables on the removed CLOCK:FILL IN and MOD:LANE A still load. `parsePatch` drops each cable whose end does not resolve and reports it (`Patch::droppedCables`, `droppedRemoved` for removed ports, `droppedIds` with the first four as text); the good cable (MOD:LFO 1 → BD1:PITCH) is kept, `applyPatch` runs and BD1 plays. Checked in the bare, `SHOGUN/` and `SHOGUN#1/` forms; `isRemovedPort` knows both ids in any SHOGUN form and refuses another device's prefix. The plugin reports the same through `droppedCables()` / `loadReport()` (written to the JUCE log; probe check "removed jacks") and the web page through `sg_patch_dropped()` (console warning; `web/test_wasm.mjs` law "old FILL IN / LANE A cables").  Tolerance: exact.
+
+```
+3 forms (bare, SHOGUN/, SHOGUN#1/): 3/3 load, drop FILL IN + LANE A, keep LFO 1 -> BD1:PITCH, play
 ```
 
 ### testJackIdsJcsShared
 
-JCS R6/R14 through the shared jidai-common headers. Every one of the 153 port ids and every alias-table id is parsed whole by `jidai::jcs::parseJackId` in three forms: bare, `SHOGUN/` and `SHOGUN#1/`. Labels keep '/', spaces and digits: LEAD:V/OCT, LEAD:HZ/V OUT, MOD:LD GATE, MOD:LFO 1. `resolvePort` maps each form (and `SHOGUN#12/`) to the same port. Another device's prefix is refused. The three v2.0/2.1 names with no SECTION: (MIX L, MIX R, LFO OUT) are not R6 ids; they are matched whole against the alias table. All 454 parameter ids are R6 SECTION:LABEL ids. Role colours come from the shared table.  Tolerance: exact.
+JCS R6/R14 through the shared jidai-common headers. Every one of the 151 port ids and every alias-table id is parsed whole by `jidai::jcs::parseJackId` in three forms: bare, `SHOGUN/` and `SHOGUN#1/`. Labels keep '/', spaces and digits: LEAD:V/OCT, LEAD:HZ/V OUT, MOD:LD GATE, MOD:LFO 1. `resolvePort` maps each form (and `SHOGUN#12/`) to the same port. Another device's prefix is refused. The three v2.0/2.1 names with no SECTION: (MIX L, MIX R, LFO OUT) are not R6 ids; they are matched whole against the alias table. All 454 parameter ids are R6 SECTION:LABEL ids. Role colours come from the shared table.  Tolerance: exact.
 
 ```
-ports 153/153 round trip whole in 3 forms (labels with '/' 2, with spaces 22, ids with digits 24)
+ports 151/151 round trip whole in 3 forms (labels with '/' 2, with spaces 20, ids with digits 24)
 alias-table ids 25, R6 ids round trip 22, legacy non-R6 names matched whole 3: [MIX L] [MIX R] [LFO OUT]; foreign prefix refused 1; params 454/454 valid R6 ids; PITCH colour #6590f3
 shared AliasTable 6 renames (BASS:HZ/V -> BASS:NOTE, Lin55ToVoct(2.0 V) = -0.25 V); shim: fan-out 2 (shared add of a 2nd target refused 1), legacy names 3 (shared add refused 1)
 ```
@@ -580,8 +596,8 @@ shared AliasTable 6 renames (BASS:HZ/V -> BASS:NOTE, Lin55ToVoct(2.0 V) = -0.25 
 Since jidai-common 1.1.1 (law floored at 1 mV since 1.1.2) the one-to-one renames (LEAD/BASS:HZ/V → :NOTE with `AliasLaw::Lin55ToVoct`, LEAD/BASS:HZ/V OUT → :NOTE OUT, SD:SNAPPY → SD:TONE, LFO:OUT → MOD:LFO 1) are rows of the shared `jidai::jcs::AliasTable`, resolved with its `resolve()`; the engine applies the returned `AliasConversion`. The test also shows why the rest stays in a SHOGUN shim: the shared table refuses a second target for one old id (HAT:DECAY, TOM:PITCH fan out) and refuses ids with no SECTION: (MIX L, MIX R, LFO OUT).
 
 Before this change, no bare id was mis-split. SECTION and LABEL never contain ':', so a first-':' split was right, and the engine matched ids whole. What failed was the prefixed forms:
-- The plugin state loader stripped only `SHOGUN/`, so every `SHOGUN#N/` id failed: 153 ports plus 11 alias names.
-- The web `sg_port_find` matched only bare ids, so all 153 failed in both `SHOGUN/` and `SHOGUN#N/` forms.
+- The plugin state loader stripped only `SHOGUN/`, so every `SHOGUN#N/` id failed: the 153 ports of the time plus 11 alias names.
+- The web `sg_port_find` matched only bare ids, so all 153 (then) failed in both `SHOGUN/` and `SHOGUN#N/` forms.
 
 Now every external id goes through `resolvePort` / `portFromId` (engine/ports.h, which calls `parseJackId`): the plugin state loader (cables, CV AMT, inLaw), editor jack binds, wasm `sg_port_find`, and the web compat patch loader. The engine also builds in the freestanding wasm target, with small `<string>`, `<string_view>` and `<optional>` shims in web/wasm/include. The editor's mod-destination menu splits parameter ids with `parseJackId`.
 
@@ -710,7 +726,8 @@ PASS program state  21/21 programs save and reload to the same state
 PASS state round trip  XML <SHOGUN version=2> JSON 11564 chars; params/pattern/lock/mod/cable restored
 PASS alias load  cables 4 (1 + 3 toms) = 4, BASS:NOTE law 1, MTC:PITCH CV AMT 0.083333
 PASS old HZ/V plays  BASS:HZ/V cable at 2.0 V -> 110.000000 Hz (0.00000 cents from 110), law 1
-PASS editor  1200x672, bay jacks 151/153 (FILL IN, LANE A not offered), ops 2550
+PASS removed jacks  old FILL IN / LANE A cables dropped 2 (removed 2), kept 1; report: SHOGUN: dropped 2 saved cable(s) (2 on removed jacks CLOCK:FILL IN / MOD:LANE A): SHOGUN/CLOCK:CLK OUT -> SHOGUN#1/CLOCK:FILL IN, SHOGUN/MOD:LANE A -> SHOGUN/BD1:DECAY
+PASS editor  1200x672, bay jacks 151/151, ops 2550
 PASS tab renders  8 PNGs in /workspace/shogun/build/plugin-linux/tabs
 PASS KIT/PATTERN arrows  352 steps over 22 programs on 8 tabs, both arrow pairs wrap INIT <-> Lo-Fi Tape Wobble, ▶▶ = program 2 state
 PASS SRC key  SRC INT > SRC EXT > SRC HOST > SRC INT, right-click SRC EXT > SRC INT; engine tempo 120.0 / 120.0 / 100.0 / 120.0 BPM (host 100, knob 120.0)
@@ -749,12 +766,13 @@ ok   LFO sine at amount 1 spans 0 to 5 V around 2.5 V (0.0002 .. 4.9998)
 ok   LFO starts at phase 0 on transport start (2.5000 V)
 ok   LFO amount 0 is 0 V
 ok   LFO sample and hold moves only in the 5 ms after each cycle start (0 stray changes)
-ok   44.1 kHz: rate 44100, latency 23, params 454, ports 153, INIT peak 0
+ok   44.1 kHz: rate 44100, latency 23, params 454, ports 151, INIT peak 0
 ok   44.1 kHz: BD1 hit peak 0.1498
-ok   jack ids: 153/153 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT 115); legacy names ok; foreign prefix refused true
+ok   jack ids: 151/151 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT 115); legacy names ok; foreign prefix refused true
 ok   LFO OUT into BD1 PITCH changes the kick
 ok   factory bank: 22 programs (INIT + 21), unique names 22, 42 renders peak -10.47 .. -8.00 dBFS
 ok   documents: 22/22 programs write the native bytes (317396 bytes), 22 reload to the same text and state
+ok   old FILL IN / LANE A cables: load 1, dropped 2 (on removed jacks 2), LFO 1 -> BD1:PITCH kept true
 ```
 
 The page setters now leave a value alone when it equals what the panel reads back (a knob's CC, a level, a track's shuffle and shift, a step's bend, the clock steps), so re-sending a panel keeps the engine's finer value; the scenario's largest difference moved from 3.77e-9 to 5.00e-10 with that (still float32 output of the same code on both sides). The new `documents` law checks the wasm `sg_state_json` against the native writer for every program.

@@ -565,11 +565,19 @@ EXPORT(sg_doc_buf) char* sg_doc_buf(int n) {
   }
   return gIn;
 }
+// Load report of the last sg_patch_load, kept in plain ints: read from a later export, gLoad (a class object) is back
+// at INIT in the wasm build (no cables, no drops), consistent with wasm-ld calling the global constructors at the start
+// of every export of this --no-entry module. Plain zero-initialised ints are not touched by that.
+namespace {
+int gDropped = 0, gDroppedRemoved = 0;
+}  // namespace
 // Loads the document in sg_doc_buf like a factory program: parameters, mod rows, cables and pattern (1 = read).
 EXPORT(sg_patch_load) int sg_patch_load(int n) {
   if (!gIn || n < 0 || static_cast<unsigned long>(n) >= gInCap) return 0;
   gIn[n] = 0;
   if (!parsePatch(gIn, gLoad)) return 0;
+  gDropped = gLoad.droppedCables;
+  gDroppedRemoved = gLoad.droppedRemoved;
   applyPatch(gLoad, *gE);
   gPattern = gLoad.pattern;
   for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
@@ -577,8 +585,8 @@ EXPORT(sg_patch_load) int sg_patch_load(int n) {
 }
 // Load report of the last sg_patch_load: saved cables dropped (an end on a removed port such as CLOCK:FILL IN or
 // MOD:LANE A, or an unknown id), and of those, the ones on a removed port.
-EXPORT(sg_patch_dropped) int sg_patch_dropped() { return gLoad.droppedCables; }
-EXPORT(sg_patch_dropped_removed) int sg_patch_dropped_removed() { return gLoad.droppedRemoved; }
+EXPORT(sg_patch_dropped) int sg_patch_dropped() { return gDropped; }
+EXPORT(sg_patch_dropped_removed) int sg_patch_dropped_removed() { return gDroppedRemoved; }
 EXPORT(sg_param_steps) int sg_param_steps(int i) { return i >= 0 && i < kParamCount ? kParams[i].steps : 0; }
 EXPORT(sg_param_choices) const char* sg_param_choices(int i) { return i >= 0 && i < kParamCount ? kParams[i].choices : ""; }
 
