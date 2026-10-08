@@ -1,374 +1,310 @@
 #pragma once
-
-// SHOGUN voice engine. Framework-free. No JUCE.
+// SHOGUN engine v2 (spec v2.2). Host rate, one oversampled domain (M = 1/2/4) with one decimator per audio output,
+// latency 0/23/26, control outputs at zero latency. 16 voices, sequencer, mod matrix, mixer, 153-port jack table.
 //
-// Voice samples follow SCHEMATICS.md (printed y, about ±1). Dist CC 0
-// leaves y = pre, because that is the printed BD1 row.
-// Trig jacks are gates in a 5 V domain. A trigger is a rising edge
-// through 1 V. process() does not allocate.
-
-#include "legacy_dsp.h"
+// Allocation happens only in prepare(). processSample() is the per-sample contract shared by jidai-rack
+// (ShogunDevice, §13.4), the plugin and the web build.
 
 #include <cstdint>
+#include <memory>
+
+#include "dsp.h"
+#include "jidai_local.h"
+#include "mix.h"
+#include "mod.h"
+#include "params.h"
+#include "ports.h"
+#include "seq.h"
+#include "voices/bd1.h"
+#include "voices/bd2.h"
+#include "voices/cb.h"
+#include "voices/cp.h"
+#include "voices/metal.h"
+#include "voices/perc.h"
+#include "voices/sd.h"
+#include "voices/synth.h"
+#include "voices/toms.h"
 
 namespace shogun {
 
-enum class Voice : int {
-  Bd1 = 0,
-  Bd2,
-  Sd,
-  Rs,
-  Cy,
-  Oh,
-  Hh,
-  Cl,
-  Cp,
-  Ltc,
-  Mtc,
-  Htc,
-  Cb,
-  Ma,
-  Lead,
-  Bass
+// KEPT target peaks (§4.4/§9.5) used as calibration: each voice at its noon defaults, g_vel = g_level = 1, peaks here.
+constexpr double kTargetPeak[kVoices] = {0.60, 0.60, 0.50, 0.28, 0.50, 0.28, 0.18, 0.28,
+                                         0.24, 0.24, 0.24, 0.42, 0.42, 0.42, 0.30, 0.42};
+
+enum ClockSource : int { SRC_HOST, SRC_INT, SRC_EXT };
+
+struct HostTransport {
+  bool valid = false;   // the host supplied a position this block
+  bool playing = false;
+  double ppq = 0.0;     // quarter notes at the first sample of the block
+  double bpm = 120.0;
 };
-
-enum class ClockMode { Int, Ext };
-
-struct DrumStep {
-  bool on = false;
-  int accent = 2;
-  bool flam = false;
-  int flamIndex = 0;
-  int bendCc = -1;  // -1: bend_st 0. A stored CC of 64 is not zero bend.
-};
-
-struct NoteStep {
-  int note = -1;  // -1: rest
-  int accent = 2;
-  bool tie = false;  // keep the envelope and phase of the note before; the pitch may change
-};
-
-struct Track {
-  int length = 4;
-  int shuffle = 0;
-  int shiftCc = 0;
-  bool mute = false;
-  DrumStep drum[kMaxSteps]{};
-  NoteStep note[kMaxSteps]{};
-};
-
-struct Pattern {
-  const char* name = "";
-  int length = 4;
-  Track track[kVoiceCount]{};
-};
-
-struct Knobs {
-  int bd1Attack = 0;
-  int bd1Decay = 0;
-  int bd1Pitch = 0;
-  int bd1Tune = 0;
-  int bd1Noise = 0;
-  int bd1Filter = 64;
-  int bd1Dist = 0;
-  int bd1Trigger = 0;
-  int bd1Wave = 32;  // six-cell wave folder on the body, 0 is bypass, default 0.25
-  int bd2Decay = 0;
-  int bd2Tune = 0;
-  int bd2Tone = 0;
-  int bd2Wave = 32;
-  int sdTune = 0;
-  int sdDTune = 64;
-  int sdSnappy = 0;
-  int sdSnDecay = 0;
-  int sdTone = 0;
-  int sdToneDecay = 0;
-  int sdPitch = 0;
-  int rsTune = 0;
-  int cyDecay = 0;
-  int cyTone = 0;
-  int cyTune = 0;
-  int ohDecay = 0;
-  int hhTune = 0;
-  int hhDecay = 0;
-  int clTune = 0;
-  int clDecay = 0;
-  int cpDecay = 0;
-  int cpFilter = 64;
-  int cpAttack = 0;
-  int cpTrigger = 0;
-  int cpData = 0;  // burst count, no published CC
-  int htcTune = 0;
-  int htcDecay = 0;
-  int htcNoise = 0;  // >= 64 enables this voice's noise
-  int htcMode = 0;
-  int htcWave = 32;   // >= 64 conga
-  int mtcTune = 0;
-  int mtcDecay = 0;
-  int mtcNoise = 0;
-  int mtcMode = 0;
-  int mtcWave = 32;
-  int ltcTune = 0;
-  int ltcDecay = 0;
-  int ltcNoise = 0;
-  int ltcMode = 0;
-  int ltcWave = 32;
-  int tomNoise = 0;  // shared level, CC 84
-  int cbTune = 0;
-  int cbDecay = 0;
-  int maDecay = 0;
-  int leadTone = 0;
-  int bassTone = 0;
-};
-
-// The fresh-engine kit and pattern "INIT". STAND-IN knob values set by ear; the INIT pattern is empty.
-Knobs initKit();
-Pattern initPattern();
-
-struct TrigIn {
-  double volts[kVoiceCount];
-  int velocity[kVoiceCount];  // < 0: no velocity byte, treated as 127
-  TrigIn() {
-    for (int i = 0; i < kVoiceCount; ++i) {
-      volts[i] = 0.0;
-      velocity[i] = -1;
-    }
-  }
-};
-
-struct Frame {
-  double bdL = 0;
-  double bdR = 0;
-  double sdL = 0;
-  double rsR = 0;
-  double hhL = 0;
-  double cyR = 0;
-  double cpL = 0;
-  double cpR = 0;
-  double toL = 0;
-  double toR = 0;
-  double clL = 0;
-  double cbR = 0;
-  double mainL = 0;
-  double mainR = 0;
-  double cv3 = 0;  // 0 V to 5 V from the bass tone knob
-};
-
-// Six pair jacks. A patched flag is stored and is not read by the summer.
-enum class Pair : int { Bd = 0, SdRs, HhCy, Cp, ToCo, CbCl, Count };
 
 class Engine {
  public:
-  // A new engine loads the init kit and pattern (loadInit). reset() clears to empty knobs, steps and level 1.
   Engine();
+  ~Engine();
+  Engine(const Engine&) = delete;
+  Engine& operator=(const Engine&) = delete;
 
-  void reset();
-  // Init kit, the empty pattern "INIT", its levels, master 0.7, 120 BPM, 16ths, INT.
-  void loadInit();
-  void setMode(ClockMode mode);
-  void setTempo(double bpm);
-  // While playing is true, this BPM is the clock. It does not write the internal tempo.
-  void setHostTempo(double bpm, bool playing);
-  void setScaleSteps(int stepsPerQuarter);
-  void setPattern(const Pattern& pattern);
-  void setKnobs(const Knobs& knobs);
-  void setLevel(Voice voice, double level);
-  void setMaster(double master);
-  // Solo one voice (a Voice index), or -1 for off. Not part of the pattern; the clock switch is not touched.
-  void setSolo(int voice);
-  int solo() const { return solo_; }
-  const Knobs& knobs() const { return knobs_; }
+  // ---------------------------------------------------------------- setup
+  void prepare(double fs, int os);  // os: 1, 2 or 4. Allocates; resets voices and transport.
+  double sampleRate() const { return fs_; }
+  int osFactor() const { return M_; }
+  int latencySamples() const { return osLatency(M_); }  // 0 / 23 / 26 (§3.4)
+  void reset();                                         // voices, clock, mod, mixer state (keeps params, pattern)
+  void loadInit();                                      // INIT kit (noon defaults) + empty pattern (§14.1)
+
+  // ---------------------------------------------------------------- parameters (u ∈ [0,1])
+  void setParam(int id, double u);     // smoothed (5 ms) for continuous parameters
+  void setParamNow(int id, double u);  // no smoothing (patch load, tests)
+  double param(int id) const { return target_[id]; }
+  double effective(int id) const { return ue_[id]; }  // u_eff of the last processed sample (mod + CV + lock)
+  void setCvAmt(int port, double amt) { cvAmt_[port] = amt; }
+  // Input law of a pitch jack loaded through an alias (§12.3): 0 = 1 V/oct, 1 = lin55 (old HZ/V cable).
+  void setInputLaw(int port, int law) { inLaw_[port] = static_cast<std::uint8_t>(law); }
+  int inputLaw(int port) const { return inLaw_[port]; }
+  double cvAmt(int port) const { return cvAmt_[port]; }
+  void setSerial(std::uint32_t serial);
+  std::uint32_t serial() const { return serial_; }
+  // Convenience: TOLERANCE and DRIFT at 0 (§15.5 IDEAL).
+  void setIdeal() {
+    setParamNow(P_GLOBAL_TOLERANCE, 0.0);
+    setParamNow(P_GLOBAL_DRIFT, 0.0);
+  }
+
+  // ---------------------------------------------------------------- pattern and transport
+  Pattern& pattern() { return pattern_; }
   const Pattern& pattern() const { return pattern_; }
-  double level(Voice voice) const { return level_[static_cast<int>(voice)]; }
-  double master() const { return master_; }
-  void setPairPatched(Pair pair, bool patched);
-  // s in 0..15 overrides every track. Pass -1 to use the pattern values again.
-  void setGlobalShuffle(int s);
-  void setLiveNote(Voice voice, int note);
-
-  // Transport. A new engine runs. Stop drops the pattern's queued triggers and releases lead and bass.
-  // Start counts again from step 1 on the next process().
-  void setRunning(bool running);
+  void setPattern(const Pattern& p) { pattern_ = p; }
+  void setHostTransport(const HostTransport& t);  // call at each block start (SOURCE = HOST)
+  void setRunning(bool run);
   bool running() const { return running_; }
-  // Back to step 1 on the next process() without stopping.
-  void restart();
-  // While on, the period no longer moves the counter; each clockPulse() is one step on the next process().
-  void setExternalClock(bool on);
-  void clockPulse() { pulse_ = true; }
+  void restart();                       // position to step 1, keeps running
+  std::int64_t counter() const { return counter_; }  // clock steps fired since start
+  int displayStep() const { return displayStep_; }   // 1-based step of the bar
+  double periodSamples() const;                      // one clock step at the current tempo
+  double tempo() const;
+  long globalStep() const { return gStep_; }
 
-  // Applied on the next process(), before render, at the current sample.
-  // Hats: a closed trigger on that sample chokes the open hat first.
-  void trigger(Voice voice, double gain = 1.0, double bendSt = 0.0);
-  void triggerNote(Voice voice, int note, double gain = 1.0);
-  // Note-off for lead and bass. Drums ignore it.
-  void release(Voice voice);
+  // ---------------------------------------------------------------- immediate events (UI pads, MIDI)
+  void trigger(int voice, double velVolts = 5.0, double bend = 0.0, int accLevel = 3);
+  void noteOn(int voice, double note, double velVolts = 5.0, bool tie = false);
+  void noteOff(int voice);
+  void setModWheel(double v) { mod_.modW = v; }
+  void setAftertouch(double v) { mod_.at = v; }
 
-  void process(const TrigIn& in, Frame& out);
+  // ---------------------------------------------------------------- per-sample processing
+  // values[kPorts]: inputs are read, outputs written (volts). connected[kPorts]: the graph's connected flags
+  // (normals, §12.2). With nullptr for both, every jack is unpatched and only the internal bay applies.
+  void processSample(float* values, const bool* connected);
+  void processSample() { processSample(nullptr, nullptr); }
+  double mainL() const { return outMainL_; }   // host output (±1.0 = ±5 V)
+  double mainR() const { return outMainR_; }
+  const double* aux() const { return outAux_; }  // 8 stereo pairs, interleaved L/R
+  bool auxUsed(int pair) const { return auxUsed_[pair]; }
+  const float* portValues() const { return values_; }  // the internal port buffer (web bay, probes)
 
-  bool pairPatched(Pair pair) const;
+  // Internal bay: cables between Shogun's own jacks (web/plugin ROUTE tab). One sample delay, like a rack cable.
+  bool addCable(int fromPort, int toPort);
+  void removeCable(int fromPort, int toPort);
+  void clearCables();
+  int cableCount() const { return nCables_; }
+  void setExternalInput(int port, float volts, bool connected) {
+    extValue_[port] = volts;
+    extConnected_[port] = connected;
+  }
 
-  double bd1Hz() const { return bd1Hz_; }
-  double bd1TuneHz() const { return bd1TuneHz_; }
-  double bd1TransientHz() const { return bd1TrHz_; }
-  double bd2Env() const { return bd2Env_; }
-  double bd2ScaledTransient() const { return bd2Tr_; }
-  double sdF1() const { return sdF1_; }
-  double sdF2() const { return sdF2_; }
-  double sdHz() const { return sdHz_; }   // tone 1 after the Pitch and bend envelopes
-  double sdT1() const { return sdT1_; }
-  double sdNoise() const { return sdNoise_; }  // ladder output before Snappy and its envelope
-  double hhStack() const { return hhStack_; }  // the six-square metal of the last hat rendered, before noise and band-pass
-  double bd2Hz() const { return bd2Hz_; }
-  double sdT2() const { return sdT2_; }
-  double ohEnv() const { return ohEnv_; }
-  double ohSample() const { return ohSample_; }
-  double hhEnv() const { return hhEnv_; }
-  double hhTau() const { return hhTau_; }
-  double cpBurst(int index) const;
-  int cpCount() const { return cpCount_; }
-  double cyStackA() const { return cyA_; }
-  double cyStackB() const { return cyB_; }
-  double ltcHz() const { return ltcHz_; }
-  double ltcEnv() const { return ltcEnv_; }
-  double leadSaw() const { return leadSaw_; }
-  double maSample() const { return maSample_; }
-  std::int64_t counter() const { return counter_; }
-  int displayStep() const;
-  std::int64_t sampleIndex() const { return sampleIndex_; }
-  double periodSamples() const { return period_; }
-  // False before the first trigger and again once a drum voice has gone quiet.
-  bool voiceActive(Voice voice) const { return voice_[static_cast<int>(voice)].active; }
+  // ---------------------------------------------------------------- modulation
+  mod::ModSystem& modulation() { return mod_; }
+  const mod::ModSystem& modulation() const { return mod_; }
+
+  // ---------------------------------------------------------------- probes (tests, UI meters)
+  bool voiceActive(int v) const { return active_[v]; }
+  Voice& voice(int v) { return *voices_[v]; }
+  const Voice& voice(int v) const { return *voices_[v]; }
+  Bd1Voice& bd1() { return *bd1_; }
+  Bd2Voice& bd2() { return *bd2_; }
+  SdVoice& sd() { return *sd_; }
+  CpVoice& cp() { return *cp_; }
+  HatVoice& ch() { return *ch_; }
+  HatVoice& oh() { return *oh_; }
+  TomVoice& tom(int v) { return v == LTC ? *ltc_ : (v == MTC ? *mtc_ : *htc_); }
+  SynthVoice& synth(int v) { return v == LEAD ? *lead_ : *bass_; }
+  double voiceOut(int v) const { return voiceOut_[v]; }       // post-VCA mono at the last sub-sample (pre-pan)
+  double voiceGain(int v) const { return hitGain_[v]; }       // g_vel of the current hit
+  double calib(int v) const { return calib_[v]; }
+  void setCalib(int v, double c) { calib_[v] = c; }
+  bool overRange(int synthVoice) const { return synthVoice == LEAD ? lead_->over : bass_->over; }
+  bool clipOver() const { return clip_.over; }
 
  private:
-  struct VoiceState {
-    bool active = false;
-    bool choked = false;
-    bool gate = false;
-    bool releasing = false;
-    int n = 0;
-    int note = -1;
-    double phase = 0;
-    double phase2 = 0;
-    double lp = 0;
-    double z[4]{};      // filter state: SD ladder poles, hat and cymbal band-pass, clap high-pass
-    double follow = 0;  // SD ring follower for the duck
-    double gain = 1;
-    double bend = 0;
-    double env = 0;
-    double mono = 0;
-    double left = 0;
-    double right = 0;
-  };
-
-  enum class EventKind : int { Drum, Note, Rest };
-
   struct Event {
     std::int64_t when = 0;
-    int voice = 0;
-    double gain = 1;
-    double bend = 0;
-    int note = -1;
-    EventKind kind = EventKind::Drum;
+    int voice = -1;
+    int kind = 0;  // 0 drum hit, 1 note on, 2 rest (note off)
+    int acc = 2;
+    double bend = 0.0;
+    double note = 48.0;
     bool tie = false;
-    bool pattern = false;
+    int track = -1, pos = -1;  // step whose locks apply
+    bool pattern = true;
     bool live = false;
   };
-
   struct Pending {
-    int voice = 0;
-    double gain = 1;
-    double bend = 0;
-    int note = -1;
-    bool isNote = false;
+    bool on = false;
+    int kind = 0;  // 0 drum hit, 1 note on
+    double velVolts = 5.0;
+    int acc = 2;
+    double bend = 0.0;
+    double note = 48.0;
+    bool tie = false;
+    int track = -1, pos = -1;
+    bool fromJack = false, velPatched = false;
+    double trigVolts = 5.0, velNorm = 1.0, accNorm = 0.5;
   };
+  static constexpr int kMaxEvents = 512;
+  static constexpr int kMaxCables = 64;
 
-  void recomputePeriod();
-  void clearVoices();
-  void onStep(std::int64_t c, double start);
-  void schedule(double when, int voice, double gain, double bend, int note, EventKind kind, bool tie = false);
-  void compactEvents();
-  void fireDue();
-  void applyJacks(const TrigIn& in);
-  void applyPending();
-  void fireDrum(int voice, double gain, double bend);
-  void fireNote(int voice, int note, double gain, bool tie = false);
-  void fireRest(int voice);
-  void renderAll();
-  void renderBd1(VoiceState& st);
-  void renderBd2(VoiceState& st);
-  void renderSd(VoiceState& st);
-  void renderRs(VoiceState& st);
-  void renderCy(VoiceState& st);
-  void renderOh(VoiceState& st);
-  void renderHh(VoiceState& st);
-  void renderCl(VoiceState& st);
-  void renderCp(VoiceState& st);
-  void renderTom(VoiceState& st, int which);
-  void renderCb(VoiceState& st);
-  void renderMa(VoiceState& st);
-  void renderLeadBass(VoiceState& st, bool bass);
-  void mix(Frame& out) const;
-  static double ladder4(VoiceState& st, double x, double fc);
+  void buildTables();
+  void drawTolerances();
+  void clockSample(const float* in, const bool* con);
+  void onTrackStep(int t, long s, double period);
+  void scheduleHits(int t, long s, int pos, double when, double period);
+  void schedule(const Event& e);
+  void fireDue(const float* in, const bool* con);
+  void fireEvent(const Event& e, const float* in, const bool* con);
+  void hit(int v, double velVolts, int accLevel, double bend, int track, int pos, bool fromJack, double trigVolts);
+  void startNote(int v, double note, double velVolts, int accLevel, bool tie, int track, int pos);
+  void applyLocks(int v, int track, int pos);
+  void computeEffective(const float* in, const bool* con);
+  VoiceCtx makeCtx(int v, const float* in, const bool* con) const;
+  void renderSubSamples(const float* in, const bool* con);
+  void writeControlOutputs(float* out);
+  void stopAll();
+  double gVelFor(int v, double velVolts) const;
 
-  static int clampLength(int length);
+  double fs_ = 48000.0, fsE_ = 96000.0;
+  int M_ = 2;
+  std::uint32_t serial_ = 0x5A31C0DEu;
 
-  ClockMode mode_ = ClockMode::Int;
-  double bpm_ = 120.0;
-  double hostBpm_ = 120.0;
-  bool hostPlaying_ = false;
-  int stepsPerQuarter_ = 4;
-  double period_ = 6000.0;
-  Pattern pattern_{};
-  Knobs knobs_{};
-  double level_[kVoiceCount]{};
-  int solo_ = -1;
-  double master_ = 1.0;
-  bool pairPatched_[static_cast<int>(Pair::Count)]{};
-  int globalShuffle_ = -1;
-  int liveNote_[kVoiceCount]{};
+  // parameters
+  double target_[kParamCount] = {};
+  double smooth_[kParamCount] = {};
+  double ue_[kParamCount] = {};
+  double lock_[kParamCount] = {};
+  bool locked_[kParamCount] = {};
+  double velDecayOff_[kVoices] = {};
+  double cvAmt_[kPorts] = {};
+  double aSmooth_ = 0.0;
+  int decayParams_[kVoices][2] = {};
+  int toneParam_[kVoices] = {};
+  VoiceParams vparams_[kVoices] = {};
+  int voiceParamList_[kVoices][96] = {};
+  int voiceParamCount_[kVoices] = {};
+  WaveParams waveIds_[5] = {};
+  Pending pending_[kVoices];
+  XorShift32 rndHit_[kVoices];
+  double driftCents_[kVoices] = {};
 
-  VoiceState voice_[kVoiceCount]{};
-  double prevGate_[kVoiceCount]{};
-  std::uint32_t noiseState_ = 1;
-  std::int64_t sampleIndex_ = 0;
+  // tolerance and drift (§3.5)
+  double zPitch_[kVoices] = {}, zTau_[kVoices] = {}, zCut_[kVoices] = {}, zMetal_[3][6] = {};
+  OuDrift drift_[kVoices];
+
+  // voices
+  std::unique_ptr<Bd1Voice> bd1_;
+  std::unique_ptr<Bd2Voice> bd2_;
+  std::unique_ptr<SdVoice> sd_;
+  std::unique_ptr<RsVoice> rs_;
+  std::unique_ptr<CpVoice> cp_;
+  std::unique_ptr<ClVoice> cl_;
+  std::unique_ptr<MaVoice> ma_;
+  std::unique_ptr<CbVoice> cb_;
+  std::unique_ptr<HatVoice> ch_, oh_;
+  std::unique_ptr<CyVoice> cy_;
+  std::unique_ptr<TomVoice> ltc_, mtc_, htc_;
+  std::unique_ptr<SynthVoice> lead_, bass_;
+  Voice* voices_[kVoices] = {};
+  bool active_[kVoices] = {};
+  double hitGain_[kVoices] = {};
+  double calib_[kVoices] = {};
+  double chokeGain_[kVoices] = {}, chokeA_ = 0.0;
+  bool choking_[kVoices] = {};
+  TptOnePole dcL_[kVoices], dcR_[kVoices];
+  double voiceOut_[kVoices] = {};
+  double vcPrev_[5] = {}, vcCur_[5] = {};
+  double coreOut_[kVoices] = {};
+  VoiceCtx ctx_[kVoices];
+  jcs::TriggerDetector trigDet_[kVoices];
+  jcs::TriggerDetector clkDet_, rstDet_, runDet_, gateDet_[2];
+  bool synthGateJack_[2] = {};
+  double synthSeqNote_[2] = {48.0, 48.0};
+
+  // decimators / upsamplers
+  Decimator decMain_[2], decAux_[16], decOut_[kVoices], decSend_[2];
+  Upsampler upRet_[kVoices], upFx_[2];
+  double retBuf_[kVoices][4] = {};
+  double outTap_[kVoices] = {};
+  double fxBuf_[2][4] = {};
+
+  // mixer
+  mix::Bus bus_[4];
+  mix::Drive masterDrive_;
+  mix::Compressor glue_;
+  mix::Width width_;
+  mix::Clip clip_;
+  mix::Delay delay_;
+  bool glueOn_ = false, delayActive_ = false;
+  int busSc_[4] = {-1, -1, -1, -1};
+  double delayEnergy_ = 0.0;
+  double outMainL_ = 0.0, outMainR_ = 0.0, outAux_[16] = {};
+  bool auxUsed_[8] = {};
+  double volume_ = 1.0;
+
+  // modulation
+  mod::ModSystem mod_;
+
+  // sequencer and clock
+  Pattern pattern_;
+  Event events_[kMaxEvents];
+  int nEvents_ = 0;
+  std::int64_t sample_ = 0;  // absolute base-sample index
+  bool running_ = false, wasRunning_ = false;
+  double ppq_ = 0.0;         // song position of the current sample
+  double intPpq_ = 0.0, intAnchorPpq_ = 0.0, intAnchorBpm_ = 120.0;
+  std::int64_t intAnchorSample_ = 0;
+  HostTransport host_;
+  int hostOffset_ = 0;
+  long lastStep_[16] = {};
+  long gStep_ = -1;
   std::int64_t counter_ = 0;
-  bool booted_ = false;
-  bool running_ = true;
-  bool extClock_ = false;
-  bool pulse_ = false;
-  double nextStep_ = 0;  // sample time of the next step boundary, fractional
+  int displayStep_ = 1;
+  bool started_[16] = {};
+  // EXT clock
+  std::int64_t lastClkEdge_ = -1;
+  double extPeriod_ = 6000.0;
+  long extCount_ = 0;
+  std::int64_t startSample_ = -100;
+  // clock outputs
+  int rstPulse_ = 0, runPulse_ = 0;
+  double accOut_ = 0.0;
+  long accStep_ = -1;
+  double rnd_ = 0.0;
 
-  Event events_[kMaxEvents]{};
-  int eventCount_ = 0;
-  Pending pending_[32]{};
-  int pendingCount_ = 0;
-
-  double cpBurst_[8]{};
-  int cpCount_ = 1;
-
-  double bd1Hz_ = 0;
-  double bd1TuneHz_ = 0;
-  double bd1TrHz_ = 0;
-  double bd2Env_ = 0;
-  double bd2Tr_ = 0;
-  double sdF1_ = 0;
-  double sdHz_ = 0;
-  double sdF2_ = 0;
-  double sdT1_ = 0;
-  double sdT2_ = 0;
-  double sdNoise_ = 0;
-  double hhStack_ = 0;
-  double bd2Hz_ = 0;
-  double ohEnv_ = 0;
-  double ohSample_ = 0;
-  double hhEnv_ = 0;
-  double hhTau_ = 0;
-  double cyA_ = 0;
-  double cyB_ = 0;
-  double ltcHz_ = 0;
-  double ltcEnv_ = 0;
-  double leadSaw_ = 0;
-  double maSample_ = 0;
+  // ports
+  float values_[kPorts] = {};
+  bool connected_[kPorts] = {};
+  float inBuf_[kPorts] = {};
+  std::uint8_t inLaw_[kPorts] = {};
+  int moving_[kParamCount] = {}, touchedList_[kParamCount] = {};
+  int nMoving_ = 0, nTouched_ = 0;
+  bool isMoving_[kParamCount] = {}, touched_[kParamCount] = {};
+  void refreshBase(int p);
+  void addEffective(int p, double d);
+  float extValue_[kPorts] = {};
+  bool extConnected_[kPorts] = {};
+  int cableFrom_[kMaxCables] = {}, cableTo_[kMaxCables] = {};
+  int nCables_ = 0;
 };
 
 }  // namespace shogun

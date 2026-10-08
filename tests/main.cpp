@@ -7,9 +7,13 @@ int tu::gFails = 0;
 int tu::gChecks = 0;
 
 void runBlockTests();
+void runVoiceTests();
+void runEngineTests();
 
 int main() {
   runBlockTests();
+  runVoiceTests();
+  runEngineTests();
   if (tu::gFails != 0) {
     std::printf("%d of %d checks failed\n", tu::gFails, tu::gChecks);
     return 1;
