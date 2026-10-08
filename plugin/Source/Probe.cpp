@@ -129,6 +129,7 @@ int main(int argc, char** argv) {
 
   {
     ShogunAudioProcessor proc;
+    setTestBeat(proc);
     proc.prepareToPlay(44100.0, 256);
     const float peak = renderPeak(proc, 44100, none, 0);
     ok = expect("host_44100", peak > 0.05f, peak) && ok;
@@ -163,6 +164,7 @@ int main(int argc, char** argv) {
 
   {
     ShogunAudioProcessor proc;
+    setTestBeat(proc);
     proc.toggleStep(static_cast<int>(shogun::Voice::Bd1), 1);
     proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
     juce::MemoryBlock block;
