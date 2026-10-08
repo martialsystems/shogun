@@ -74,9 +74,10 @@ ShogunAudioProcessor::ShogunAudioProcessor()
   for (int i = 0; i < kPorts; ++i) uiCvAmt_[static_cast<size_t>(i)] = 1.0;
   for (auto& gr : meters.busGr) gr.store(1.0f);  // compressor gain 1 = no reduction
   setLatencySamples(engine_->latencySamples());
+  startTimerHz(10);
 }
 
-ShogunAudioProcessor::~ShogunAudioProcessor() { cancelPendingUpdate(); }
+ShogunAudioProcessor::~ShogunAudioProcessor() { stopTimer(); }
 
 juce::AudioProcessorValueTreeState::ParameterLayout ShogunAudioProcessor::createLayout() {
   juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -119,9 +120,16 @@ void ShogunAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
   setLatencySamples(engine_->latencySamples());
 }
 
-void ShogunAudioProcessor::handleAsyncUpdate() {
+void ShogunAudioProcessor::timerCallback() {
   // GLOBAL:OS changed: re-prepare off the audio thread and report the new latency (0 / 23 / 26).
-  suspendProcessing(true);
+  // This used to be an AsyncUpdater triggered from processBlock. That posted a message from the audio
+  // thread, which is not realtime-safe, and it raced plugin teardown: a host that is about to delete the
+  // instance can find the plugin's message socket readable in the same event-loop round as its own
+  // delete message (see TESTPLAN, pluginval teardown). Polling a flag from the message thread posts
+  // nothing from the audio thread.
+  if (!osChangeWanted_.load(std::memory_order_acquire)) return;
+  suspendProcessing(true);  // waits out a block in flight; no processBlock runs until resumed
+  osChangeWanted_.store(false, std::memory_order_release);
   prepareToPlay(sr_, block_);
   suspendProcessing(false);
   updateHostDisplay(juce::AudioProcessorListener::ChangeDetails().withLatencyChanged(true));
@@ -420,7 +428,7 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   // OS / OFFLINE changes re-prepare off the audio thread.
   int wantOs = osFromParam(static_cast<double>(paramU(P_GLOBAL_OS)));
   if (isNonRealtime() && stepIndex(static_cast<double>(paramU(P_GLOBAL_OFFLINE)), 2) == 1) wantOs = 4;
-  if (wantOs != osNow_ && !isUpdatePending()) triggerAsyncUpdate();
+  if (wantOs != osNow_) osChangeWanted_.store(true, std::memory_order_release);
 
   // Host lock (§10.1): ppq / bpm / playing at the first sample of the block.
   HostTransport ht;

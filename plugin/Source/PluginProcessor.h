@@ -12,7 +12,7 @@
 
 #include "shogun.h"
 
-class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpdater {
+class ShogunAudioProcessor : public juce::AudioProcessor, private juce::Timer {
  public:
   ShogunAudioProcessor();
   ~ShogunAudioProcessor() override;
@@ -134,7 +134,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
 
  private:
   static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-  void handleAsyncUpdate() override;
+  void timerCallback() override;
   void applyParams(bool now);
   void handleMidi(const juce::MidiMessage& msg);
   void pickUpEdits();
@@ -152,6 +152,9 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   double sr_ = 48000.0;
   int block_ = 512;
   int osNow_ = 2;
+  // Set by processBlock when GLOBAL:OS / OFFLINE asks for a different factor; the message-thread timer
+  // re-prepares. The audio thread never posts a message itself (see timerCallback).
+  std::atomic<bool> osChangeWanted_{false};
   bool offlineNow_ = false;
   std::atomic<bool> needPrepare_{false};
 

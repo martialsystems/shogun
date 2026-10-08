@@ -902,10 +902,12 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, juce::Modif
   };
   if (p.x >= 46 && p.x < 156) {
     ++menuOpen_;
-    sourceMenu(true).showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
-      --menuOpen_;  // the timer settles the undo step now
+    sourceMenu(true).showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(), [safe = juce::Component::SafePointer<ShogunPanel>(this), row](int res) {
+      ShogunPanel* self = safe.getComponent();  // the editor may be gone by the time the menu closes
+      if (self == nullptr) return;
+      --self->menuOpen_;  // the timer settles the undo step now
       if (res <= 0) return;
-      mod::Row& rr = proc_.editRows()[row];
+      mod::Row& rr = self->proc_.editRows()[row];
       if (res == 1000) {
         rr = mod::Row();
       } else {
@@ -913,7 +915,8 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, juce::Modif
         rr.srcVoice = res % 100 == 99 ? -1 : res % 100;
         if (rr.dst < 0) rr.dst = P_BD1_DECAY;
       }
-      commit();
+      self->proc_.commitEdits();
+      self->repaint();
     });
     return;
   }
@@ -935,24 +938,30 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, juce::Modif
     }
     if (cur.isNotEmpty()) menu.addSubMenu(cur, sec);
     ++menuOpen_;
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
-      --menuOpen_;  // the timer settles the undo step now
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(), [safe = juce::Component::SafePointer<ShogunPanel>(this), row](int res) {
+      ShogunPanel* self = safe.getComponent();  // the editor may be gone by the time the menu closes
+      if (self == nullptr) return;
+      --self->menuOpen_;  // the timer settles the undo step now
       if (res <= 0) return;
-      proc_.editRows()[row].dst = res - 1;
-      commit();
+      self->proc_.editRows()[row].dst = res - 1;
+      self->proc_.commitEdits();
+      self->repaint();
     });
   } else if (p.x >= 320 && p.x < 510) {
     matrixDragRow_ = row;
     matrixDragDepth_ = r.depth;
   } else if (p.x >= 518 && p.x < 578) {
     ++menuOpen_;
-    sourceMenu(false).showMenuAsync(juce::PopupMenu::Options(), [this, row, commit](int res) {
-      --menuOpen_;  // the timer settles the undo step now
+    sourceMenu(false).showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(), [safe = juce::Component::SafePointer<ShogunPanel>(this), row](int res) {
+      ShogunPanel* self = safe.getComponent();  // the editor may be gone by the time the menu closes
+      if (self == nullptr) return;
+      --self->menuOpen_;  // the timer settles the undo step now
       if (res <= 0) return;
-      mod::Row& rr = proc_.editRows()[row];
+      mod::Row& rr = self->proc_.editRows()[row];
       rr.via = res == 1000 ? mod::SRC_NONE : res / 100;
       rr.viaVoice = -1;
-      commit();
+      self->proc_.commitEdits();
+      self->repaint();
     });
   } else if (p.x >= 588 && p.x < 652) {
     r.curve = (r.curve + 1) % mod::kCurveCount;
