@@ -8,6 +8,34 @@ The voice engine is `engine/`. Panel art is unpainted. The editor in `plugin/` i
 
 `make strict` compiles the engine, the tests, the web facade and the plugin sources with the warning flags JIDAI RACK uses (JUCE's recommended set plus `-Wfloat-equal -Wimplicit-int-float-conversion -Wshadow -Wconversion -Wdouble-promotion -Werror`) under clang++ and g++. It needs the JUCE checkout at `JUCE_LINUX` (default `/workspace/JUCE`) for the plugin headers.
 
+## Factory bank
+
+Program 1 is INIT (the INIT kit and the empty pattern "001 INIT"). Programs 2 to 22 are the factory kits, each with its pattern "NNN name". The bank is data in one place:
+
+| File | Job |
+| --- | --- |
+| `engine/factory.h` | `shogun::factory::kBank`, `kCount` (21), `kPrograms` (22), `programName(i)`, `programJson(i)`, `loadProgram(i, Patch&)` |
+| `engine/factory_bank.inc` | the 21 documents, generated; do not edit by hand |
+| `engine/patch.h` | the saved-state document: `Patch`, `parsePatch`, `applyPatch`, `capturePatch`, `patchToJson` (native only) |
+| `scripts/make_factory.py` | the kits and patterns as code; `make factory` runs it |
+| `tools/factory_fmt.cpp` | writes the canonical text and measures the peaks (native renders at 44.1 and 48 kHz) |
+
+Each document is what the plugin saves inside `<SHOGUN version=2>`: sparse `params` by `SECTION:LABEL` id (missing ids keep INIT), `mod` rows, `cables` (none in the bank), `cvAmt`, `inLaw` and `seq`. The bank text equals `patchToJson(parsePatch(text), false)`, so it is canonical and nothing in it goes through the alias table. `make factory` trims every kit until its 8-bar peak is -8 dBFS at the default master (within 0.35 dB), then writes the canonical text.
+
+The engine loads a program with `factory::loadProgram` and `applyPatch`. The plugin lists the programs through `getNumPrograms`, `getProgramName` and `setCurrentProgram` (INIT, then the document through the same reader as a saved state; the parameters land at once, without the 5 ms glide), and the KIT and PATTERN displays open the same list. The web build exports `sg_factory_count`, `sg_factory_name`, `sg_factory_load` and `sg_factory_kit`; the page reads the bank back into its pattern and kit lists at load and plays a factory pattern from the document itself.
+
+## Embedding in JIDAI RACK
+
+To run SHOGUN as a rack device, compile one engine translation unit:
+
+- `engine/shogun.cpp` (everything else in `engine/` and `engine/voices/` is headers and `.inc` tables);
+- include directories `engine/` and `third_party/jidai-common/include` (the vendored shared headers, header-only);
+- C++17, no other defines (`SHOGUN_NO_FORMAT` is only for the freestanding wasm build).
+
+Entry points: `shogun::Engine` (`prepare(fs, os)`, `loadInit()`, `setParam`/`setParamNow`, `setHostTransport`, `setRunning`, `trigger`/`noteOn`/`noteOff`, `processSample(values, connected)` with the `kPorts` jack buffer, `mainL`/`mainR`/`aux`, `latencySamples`), the parameter table in `engine/params.h` (`kParams`, `findParam`) and the jack table in `engine/ports.h` (`kPortTable`, `findPort`, `resolvePort`). The factory bank and the state reader are header-only: include `engine/factory.h` (it includes `engine/patch.h` and `engine/factory_bank.inc`) in the device source; there is no extra file to compile. Saved state is `patchToJson` / `parsePatch`.
+
+If the rack reuses the JUCE processor and panel instead of its own wrapper, add `plugin/Source/PluginProcessor.cpp` and `plugin/Source/PluginEditor.cpp` (with `plugin/Source/` on the include path for `PluginProcessor.h`, `PluginEditor.h` and `PanelLayout.inc`). `plugin/Source/Probe.cpp` is the test console only. `make strict` checks all of these with the rack's flags.
+
 Rebuild the pack PDF from the markdown:
 
 ```

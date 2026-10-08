@@ -173,8 +173,14 @@ void testFactoryRenderLevels() {
         pk = std::fmax(pk, std::fmax(std::fabs(e.mainL()), std::fabs(e.mainR())));
       }
       const double db = pk > 0.0 ? tu::db(pk) : -999.0;
-      if (db < lo) lo = db, loName = factory::programName(pr);
-      if (db > hi) hi = db, hiName = factory::programName(pr);
+      if (db < lo) {
+        lo = db;
+        loName = factory::programName(pr);
+      }
+      if (db > hi) {
+        hi = db;
+        hiName = factory::programName(pr);
+      }
       if (!(db > -40.0)) {
         loud = false;
         std::printf("%s: %s at %.0f Hz peaks %.2f dBFS (silent)\n", T, factory::programName(pr), fs, db);

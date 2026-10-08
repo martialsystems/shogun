@@ -1,10 +1,10 @@
 # Test plan (spec v2.2, 2026-10-08)
 
-The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and the web build (`web/`). Each test below is a §15.4 test of `SHOGUN_Redesign.md` v2.2 (or a test this pass added), compiled into `build/shogun_tests` from `tests/blocks.cpp`, `tests/voices.cpp`, `tests/engine.cpp`, `tests/mod.cpp`. Every number is the line the test prints at 48 kHz, double precision; the tolerance column is what the named check uses. `make test` runs them (plus the forge law test), `make asan` runs them under ASan/UBSan.
+The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and the web build (`web/`). Each test below is a §15.4 test of `SHOGUN_Redesign.md` v2.2 (or a test this pass added), compiled into `build/shogun_tests` from `tests/blocks.cpp`, `tests/voices.cpp`, `tests/engine.cpp`, `tests/mod.cpp`, `tests/factory.cpp`. Every number is the line the test prints at 48 kHz, double precision; the tolerance column is what the named check uses. `make test` runs them (plus the forge law test), `make asan` runs them under ASan/UBSan.
 
 Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 0 V = C3 = note 48; accent volts 2.353/3.706/5.0 V; voice end at −90 dB (kQuiet 3.162e-5); OS 2× unless a row says otherwise (latency 23 base samples).
 
-Result of the last run: **all 309 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
+Result of the last run: **all 326 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
 
 §15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
@@ -634,9 +634,45 @@ worst re-anchored phase error over 600 s: 4.24e-13 cycles (limit 1e-9)
 SLEW 1 at 1/4, 120 BPM: tau 125 ms, 63 % at 125.021 ms
 ```
 
+## Factory bank (tests/factory.cpp)
+
+The bank in `engine/factory.h` (INIT, then 21 kits with their patterns; BUILD_GUIDE.md "Factory bank"). 17 named checks.
+
+### testFactoryPresetsLoad
+
+Every program parses with the shared reader (`engine/patch.h`); 16 to 24 kits after INIT; each pattern is named "NNN" + the program name; the engine holds exactly the loaded patch (`applyPatch` then `capturePatch`: every parameter as a host float, every mod row and step); no content that needs the alias table (no cables, no input laws, CV AMT 1); the Acid kit has at least 8 BASS steps; program 0 is INIT, identical to `Engine::loadInit()`.  Tolerance: exact.
+
+```
+22 programs (INIT + 21 kits) load: 529 parameters off INIT, 611 steps (12 ratchets, 4 flams, 35 probability, 22 micro-timed, 72 ties, 3 bends), 18 p-locks, 12 mod rows
+```
+
+### testFactoryRoundTrip
+
+The bank text is the canonical writer's output (`patchToJson(parsePatch(text), false)`). Each program is loaded into an engine, saved in full (the plugin's state), reloaded into a new engine and saved again: the two saves are byte-identical and every parameter, mod row, cable, CV AMT, input law and step is equal.  Tolerance: exact.
+
+```
+22 programs saved (317396 bytes of state), reloaded and saved again
+```
+
+### testFactoryRenderLevels
+
+Each kit with its pattern, from a fresh engine at the default master, renders 2 bars at 44.1 and 48 kHz: every peak is above -40 dBFS (not silent) and at or below -6 dBFS.  Tolerance: the limits.
+
+```
+21 kits x 44.1/48 kHz, 2 bars from a fresh engine, default master: peaks -10.47 (Jungle Break Roller) to -8.00 dBFS (Metallic Industrial)
+```
+
+### testFactoryNames
+
+Names are unique (case-insensitive), fit the pattern name, and carry none of 50 banned brand, gear, model-number, artist and trademarked genre words.  Tolerance: exact.
+
+```
+22 names, 50 banned words checked
+```
+
 ## Plugin shell (ShogunProbe, `make probe-linux`)
 
-The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. Last run, all PASS:
+The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. Last run, all PASS:
 
 ```
 PASS params  count 454 (table 454), float 0..1 SECTION:LABEL ids, mismatches 0
@@ -648,6 +684,9 @@ PASS INT test beat  peak 0.116818 = -18.65 dBFS
 PASS EXT ignores pattern  peak 0.000000
 PASS host lock  ppq 7.25 -> global step 29 (bar-of-16 display 14), step-29 hit peak 0.116818
 PASS aux 1/2 bus  channels 4, aux peak 0.149767, main peak 0.000000
+PASS programs  22 (INIT + 21 factory kits), names 22
+PASS programs play  21 kits x 2 rates, 2 bars, peaks -10.47 .. -8.00 dBFS
+PASS program state  21/21 programs save and reload to the same state
 PASS state round trip  XML <SHOGUN version=2> JSON 11564 chars; params/pattern/lock/mod/cable restored
 PASS alias load  cables 4 (1 + 3 toms) = 4, BASS:NOTE law 1, MTC:PITCH CV AMT 0.083333
 PASS old HZ/V plays  BASS:HZ/V cable at 2.0 V -> 110.000000 Hz (0.00000 cents from 110), law 1
@@ -660,10 +699,10 @@ Tab renders: `build/plugin-linux/tabs/tab_<i>_<name>.png` (1200 × 672) next to 
 
 ## Web build (`make web`)
 
-`build/shogun.wasm` is the same engine (freestanding, `-DSHOGUN_NO_FORMAT`), run at the AudioContext rate. `web/test_wasm.mjs` runs `web/parity_scenario.txt` through wasm and the native build of the same facade (`build/web_parity`) and compares every sample, then checks the bay and LFO laws and the jack-id forms. After the switch to the shared exact-halfband stage 1, the largest wasm/native difference went from 9.68e-10 to 3.74e-9, and with jidai-common 1.1.1 (exact C3 in the synth pitch) to 3.77e-9 (float32 output, same code on both sides; the wasm build imports JS Math):
+`build/shogun.wasm` is the same engine (freestanding, `-DSHOGUN_NO_FORMAT`), run at the AudioContext rate. `web/test_wasm.mjs` runs `web/parity_scenario.txt` through wasm and the native build of the same facade (`build/web_parity`) and compares every sample, then checks the bay and LFO laws, the jack-id forms and the factory bank. The scenario ends by loading every factory program (and one rotated for a chain, and INIT): after each load the wasm state hash (parameters as floats, mod rows, pattern) must equal the native one exactly, which checks the freestanding number reader against `strtod`. After the switch to the shared exact-halfband stage 1, the largest wasm/native difference went from 9.68e-10 to 3.74e-9, and with jidai-common 1.1.1 (exact C3 in the synth pitch) to 3.77e-9 (float32 output, same code on both sides; the wasm build imports JS Math):
 
 ```
-132000 samples, peak 0.310, largest wasm/native difference 3.77e-9 at 92575
+200608 samples, peak 0.341, largest wasm/native difference 3.77e-9 at 92575; 23/23 loaded-state hashes equal (factory programs)
 wasm matches the native engine
 ok   CLK OUT into BD1 Trig, INT: silent
 ok   CLK OUT into BD1 Trig, EXT: fires
@@ -679,6 +718,7 @@ ok   44.1 kHz: rate 44100, latency 23, params 454, ports 153, INIT peak 0
 ok   44.1 kHz: BD1 hit peak 0.1498
 ok   jack ids: 153/153 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT 115); legacy names ok; foreign prefix refused true
 ok   LFO OUT into BD1 PITCH changes the kick
+ok   factory bank: 22 programs (INIT + 21), unique names 22, 42 renders peak -10.47 .. -8.00 dBFS
 ```
 
 ## jidai-common (vendored shared headers)

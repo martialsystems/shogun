@@ -572,7 +572,7 @@ Knob CC is round(u * 127).
 
 Every knob not listed keeps its Knobs default, including Wave at CC 32 on BD1, BD2, and the toms. Master 0.7, 120 BPM, 16ths, INT.
 
-Pattern "INIT", length 16, every track length 16, no step on. The factory patterns are cleared for now; tests that need steps arm their own.
+Pattern "INIT", length 16, every track length 16, no step on. Tests that need steps arm their own. The factory bank (`engine/factory.h`, 21 kits with their patterns) follows INIT as programs 2 to 22; see BUILD_GUIDE.md.
 
 CHOICE: the closed hat skips the open-hat steps. A closed trigger on the same sample chokes the open hat, so a closed hat on every step would leave the open hat silent.
 

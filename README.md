@@ -58,9 +58,10 @@ SHOGUN builds from source. You need CMake, a C++17 compiler and JUCE 8.0.4. Set 
 | `make install-vst` | Builds and links `SHOGUN.vst3` into `~/Library/Audio/Plug-Ins/VST3` |
 | `make plugin-linux` | Builds the Linux VST3 |
 | `make test` | Runs the engine test suite |
+| `make factory` | Rebuilds the factory bank (`engine/factory_bank.inc`) from `scripts/make_factory.py`, trimming each kit to its peak target |
 | `make web` | Compiles the engine to WebAssembly (clang with wasm-ld, plus Node) and writes the playable page `web/shogun.html` |
 
-SHOGUN is built for VST3 hosts such as FL Studio. A new instance starts on the INIT kit with an empty pattern. Factory kits and patterns are coming in a later release.
+SHOGUN is built for VST3 hosts such as FL Studio. A new instance starts on the INIT kit with an empty pattern. The factory bank follows INIT: 21 kits, each with its own pattern, from house, techno, acid and electro to breakbeat, jungle, half-time and odd meters. Pick one from your host's program list, from the KIT or PATTERN display on the panel, or from the web page's pattern list.
 
 ## Documentation
 
@@ -77,6 +78,7 @@ SHOGUN uses the same jack names, voltages and cable colours as the rest of the c
 
 - **BUSHIDO**: a 3 × 12 analog step sequencer with real patch cables. [github.com/martialsystems/bushido](https://github.com/martialsystems/bushido)
 - **RONIN**: a semi-modular synthesizer you patch as an effect. [github.com/martialsystems/Ronin](https://github.com/martialsystems/Ronin)
+- **ORIGAMI**: a west-coast triple wave folder, as a standalone effect and as a JIDAI RACK device. [github.com/martialsystems/origami](https://github.com/martialsystems/origami)
 - **JIDAI RACK**: the collection in one rack, in one plugin. [github.com/martialsystems/jidai-collection](https://github.com/martialsystems/jidai-collection)
 
 ## Legal

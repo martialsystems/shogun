@@ -134,7 +134,10 @@ struct Reader {
     // Freestanding (wasm): exact for up to 15 significant digits and |exponent| <= 22 (every factory value),
     // where mantissa / 10^k is one correctly rounded IEEE operation, the same double strtod gives.
     bool neg = false;
-    if (*p == '-') neg = (++p, true);
+    if (*p == '-') {
+      neg = true;
+      ++p;
+    }
     std::uint64_t m = 0;
     int digits = 0, e10 = 0;
     if (!(*p >= '0' && *p <= '9')) return ok = false;
@@ -173,8 +176,14 @@ struct Reader {
 #endif
   }
   bool boolean(bool& b) {
-    if (word("true")) return b = true, true;
-    if (word("false")) return b = false, true;
+    if (word("true")) {
+      b = true;
+      return true;
+    }
+    if (word("false")) {
+      b = false;
+      return true;
+    }
     return ok = false;
   }
   bool null() { return word("null"); }
