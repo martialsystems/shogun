@@ -4,7 +4,7 @@ The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and t
 
 Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 0 V = C3 = note 48; accent volts 2.353/3.706/5.0 V; voice end at −90 dB (kQuiet 3.162e-5); OS 2× unless a row says otherwise (latency 23 base samples).
 
-Result of the last run: **all 372 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output aside from the long-standing clang++ FMA-fast `testWaveMigration` 2.22e-16 line).
+Result of the last run (2026-10-08): **all 372 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output, also with `-mfma -ffp-contract=fast` passed in `CXXFLAGS`, since the build pins contraction off; the old clang++ FMA-fast `testWaveMigration` 2.22e-16 line no longer appears).
 
 §15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
@@ -790,15 +790,18 @@ The plugin socket is readable whenever the plugin has a message queued. JUCE's `
 
 | pluginval | Plugin build | Runs | SIGSEGV |
 | --- | --- | --- | --- |
-| 1.0.4 release binary, under gdb | g++, before (5d80135 code) | 161 | 4 |
-| 1.0.4 release binary, under gdb | clang++, before | 60 | 1 |
+| 1.0.4 release binary, under gdb | g++, before a3cc0a3 | 161 | 4 |
+| 1.0.4 release binary, under gdb | clang++, before a3cc0a3 | 60 | 1 |
 | 1.0.4 release binary | g++, after (a3cc0a3) | 120 | 2 |
 | 1.0.4 release binary | clang++, after | 120 | 2 |
 | 1.0.4 from source, JUCE 8.0.4, unchanged | g++, after | 115 | 3 |
+| 1.0.4 from source, JUCE 8.0.4, unchanged | clang++, after | 209 | 8 |
 | 1.0.4 from source, JUCE 8.0.4, stale callbacks skipped | g++, after | 120 | 0 |
 | 1.0.4 from source, JUCE 8.0.4, stale callbacks skipped | clang++, after | 120 | 0 |
 
-The "stale callbacks skipped" host is a one-function change to `InternalRunLoop::dispatchPendingEvents` (before calling a collected callback, check it is still the one registered for its fd). It skipped a stale callback in 64 of its 240 runs (74 callbacks: 66 for fd 7, the plugin message socket, and 8 for fd 8, the plugin's X11 connection). Not every skip is at the final delete: a stale callback on an `Impl` that is still alive (after the plugin re-registers its fds) is harmless. The ones at the final delete are the calls that read freed memory in the stock host. The same source build without the check crashed 3 times in 115 runs, so the difference is the check, not the rebuild. The fix belongs in JUCE's host code (and so in pluginval); nothing in this repository changes it. The patch and loop scripts are not part of the repository.
+The "stale callbacks skipped" host is a one-function change to `InternalRunLoop::dispatchPendingEvents` (before calling a collected callback, check it is still the one registered for its fd). It skipped a stale callback in 64 of its 240 runs (74 callbacks: 66 for fd 7, the plugin message socket, and 8 for fd 8, the plugin's X11 connection). Not every skip is at the final delete: a stale callback on an `Impl` that is still alive (after the plugin re-registers its fds) is harmless. The ones at the final delete are the calls that read freed memory in the stock host. The same source build without the check crashed 3 times in 115 runs (g++ plugin) and 8 times in 209 (clang++ plugin), so the difference is the check, not the rebuild. (Not counted in the clang++ control row: 9 runs stopped by pluginval's 30 s no-output watchdog while the box was overloaded, and 2 runs stopped by hand; the rest of that loop ran with `--timeout-ms 600000`.) The fix belongs in JUCE's host code (and so in pluginval); nothing in this repository changes it. The patch and loop scripts are not part of the repository.
+
+**ASan.** The plugin built with `-fsanitize=address` (g++ 14.2, RelWithDebInfo, `build/pv-asan`; `-Wno-stringop-overflow` because g++ under ASan reports a false `stringop-overflow` on the bounded `uiRows_` copy in `patchFromJson`) through the stock pluginval 1.0.4 binary with libasan preloaded, level 10, in-process: 20 runs with `detect_leaks=0` and 11 runs with leak detection (`detect_leaks=1`, libasan preloaded into pluginval only), all SUCCESS, exit 0, no ASan or LeakSanitizer report. pluginval itself is not instrumented, so this checks SHOGUN's code, not the host's use-after-free above (under ASan's allocator the freed `Impl` sits in quarantine and the stale read goes unnoticed).
 
 ## Web build (`make web`)
 
