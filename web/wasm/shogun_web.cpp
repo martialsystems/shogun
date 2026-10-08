@@ -472,6 +472,17 @@ EXPORT(sg_factory_load) int sg_factory_load(int i) {
   for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
   return 1;
 }
+// The kit of program i without its pattern (the page's KIT list): its parameters and mod rows; the page's steps and
+// its CLOCK settings stay.
+EXPORT(sg_factory_kit) int sg_factory_kit(int i) {
+  if (!factory::loadProgram(i, gLoad)) return 0;
+  for (int p = 0; p < kParamCount; ++p)
+    if (std::strncmp(kParams[p].id, "CLOCK:", 6) == 0) gLoad.u[p] = gE->param(p);
+  gLoad.pattern = gPattern;
+  applyPatch(gLoad, *gE);
+  for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
+  return 1;
+}
 // A chained pattern starts on counter rot: every track's steps rotate so its step 0 plays on that counter.
 EXPORT(sg_rotate) void sg_rotate(double rot) {
   for (auto& tr : gPattern.tracks) {
@@ -535,7 +546,8 @@ EXPORT(sg_get_level) double sg_get_level(int v) {  // linear gain, the inverse o
   return 1.4125 * u * u;
 }
 EXPORT(sg_get_tempo) double sg_get_tempo() { return 40.0 + 160.0 * gE->param(P_CLOCK_TEMPO); }
-EXPORT(sg_get_spq) int sg_get_spq() { return stepsPerQuarter(stepIndex(gE->param(P_CLOCK_SCALE), 4)); }
+EXPORT(sg_get_scale) int sg_get_scale() { return stepIndex(gE->param(P_CLOCK_SCALE), 4); }  // 1/32, 1/16, 1/8T, 1/8
+EXPORT(sg_get_spq) double sg_get_spq() { return stepsPerQuarter(sg_get_scale()); }
 EXPORT(sg_get_bar) int sg_get_bar() { return 1 + stepIndex(gE->param(P_CLOCK_BAR), 32); }
 // FNV-1a over everything a program sets (parameters as host floats, mod rows, pattern): the parity test compares the
 // wasm reader against the native one with it.

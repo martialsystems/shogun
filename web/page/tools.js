@@ -15,7 +15,8 @@ function restore(s){Object.assign(P,s.P);tracks=s.tracks;curKit=s.kit;dirty=s.di
 function undo(redo){const from=redo?REDO:UNDO,to=redo?UNDO:REDO;if(!from.length){info.textContent=redo?"Nothing to redo":"Nothing to undo";return}
   to.push(snap());restore(from.pop());undoKey=null;info.textContent=(redo?"Redo":"Undo")+" · "+UNDO.length+" more to undo, "+REDO.length+" to redo"}
 
-// Kits: the knob settings without the steps. The factory kits are the ones the factory patterns load; saved kits stay in this browser.
+// Kits: the knob settings without the steps. The factory kits are the ones the factory patterns load (INIT, then the
+// factory bank); saved kits stay in this browser.
 let USERK=[],curKit={n:"INIT",dirty:false};
 const FKITS=Object.keys(STYLE).map(n=>({n,f:n})),kitList=()=>FKITS.concat(USERK);
 const kitKnobs=k=>k.knobs||patKnobs({n:k.f});
@@ -23,7 +24,11 @@ const panelKnobs=()=>{const k={};for(const id in MAP)if(!MAP[id].master)k[id]=P[
 function loadKit(i){const k=kitList()[i];if(!k)return;undoPush();const kn=kitKnobs(k);
   for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}
   for(const f in LINKED)syncLinked(LINKED[f][LINKED[f].length-1]);
-  curKit={n:k.n,dirty:false};dirty=true;const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);drawAll();info.textContent=`Kit ${k.n} · the steps are unchanged`}
+  curKit={n:k.n,dirty:false};dirty=true;
+  // a factory kit loads its document's sound (every parameter and mod row), then the page's tracks, master, solo and cables
+  const c=k.fx!=null?[["sg_factory_kit",k.fx],["sg_set_mode",P["CLOCK:SOURCE"]>.5?1:0],...knobCalls("OUT:MASTER"),["sg_set_solo",soloV?VI.indexOf(soloV):-1],...cableCalls()]:[];
+  if(k.fx!=null)VOICES.forEach(v=>c.push(...trackCalls(v.k)));else Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));
+  c.push(["sg_commit"]);send(c);drawAll();info.textContent=`Kit ${k.n} · the steps are unchanged`}
 function saveKit(name){const rec={n:name,knobs:panelKnobs()},j=USERK.findIndex(k=>k.n==name);if(j>=0)USERK[j]=rec;else USERK.push(rec);
   store.set("shogun.kits",USERK);curKit={n:name,dirty:false};drawAll();info.textContent=`Saved kit ${name} in this browser`}
 

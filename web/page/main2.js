@@ -2,8 +2,28 @@
 // ================= patterns =================
 // Drum strings: o = soft, x = medium, X = loud (the three accent levels), . = off, repeated to fill the track.
 // Note strings: MIDI note numbers 36 to 72, . = rest, - = tie. len: steps per track, L: per-track lengths, tom: T or C per tom.
-const FACT=[   // factory patterns cleared for now: INIT is one empty bar
+const FACT=[   // INIT is one empty bar; the factory bank (engine/factory.h) follows it, read from the wasm build at load
  {n:"INIT",bpm:120,sh:0,len:16,tom:"TTT",s:{}}];
+// The factory bank: the same documents as the plugin's program list, loaded into a main-thread instance of the wasm
+// build and read back into panel form (tracks, knobs). Playing one loads the document itself (sg_factory_load), so the
+// engine gets every parameter, mod row and step detail, including what this panel does not show.
+function factoryBank(){
+  const x=new WebAssembly.Instance(new WebAssembly.Module(wasmBytes()),{env:{sin:Math.sin,cos:Math.cos,tan:Math.tan,exp:Math.exp,exp2:(v)=>Math.pow(2,v),pow:Math.pow,tanh:Math.tanh,log:Math.log,log2:Math.log2,log10:Math.log10,log1p:Math.log1p,atan2:Math.atan2}}).exports;
+  const str=p=>{const m=new Uint8Array(x.memory.buffer);let t="";while(m[p])t+=String.fromCharCode(m[p++]);return t};
+  x.sg_init(48000);const K={};for(let i=0;i<x.sg_knob_count();i++)K[str(x.sg_knob_name(i))]=i;
+  const cc=f=>K[f]!=null?x.sg_knob_cc(K[f]):0,out=[];
+  for(let i=1;i<x.sg_factory_count();i++){if(!x.sg_factory_load(i))continue;
+    const t={},knobs={};
+    VOICES.forEach(v=>{const n=VI.indexOf(v.k),steps=Array.from({length:32},(_,s)=>{const g=f=>x.sg_get_step(n,s,f),b=g(3);
+        return {on:!!g(0),acc:g(1),flam:g(2),bend:b<0?null:b,note:g(4),tie:!!g(5)}});
+      t[v.k]={len:x.sg_get_track(n,0),shuffle:x.sg_get_track(n,1),shift:x.sg_get_track(n,2),mute:!!x.sg_get_track(n,3),steps}});
+    for(const id in MAP){const m=MAP[id];if(m.master)continue;
+      if(m.level!=null)knobs[id]=x.sg_get_level(m.level);else if(m.f)knobs[id]=m.tog?(cc(m.f)>=64?1:0):vOf(id,cc(m.f),STEPS[id])}
+    const name=str(x.sg_factory_name(i));
+    out.push({n:name,kit:name,fx:i,bpm:+x.sg_get_tempo().toFixed(1),scale:[0,2,3,1][x.sg_get_scale()],bar:x.sg_get_bar(),
+      tom:["ltcMode","mtcMode","htcMode"].map(f=>cc(f)>=64?"C":"T").join(""),tracks:t,knobs})}
+  return out}
+let fxLog=null;   // a factory pattern loaded before the audio starts: the calls since, replayed when it starts
 const store={get(k){try{return JSON.parse(localStorage.getItem(k)||"null")}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const blankStep=()=>({on:false,acc:1,flam:-1,bend:null,note:60,tie:false});
 let sel="BD1",page=0,edit=0,dirty=false,tracks={},soloV=null;   // soloV: the soloed track, or null
@@ -28,8 +48,14 @@ function loadPat(b,i,at){const L=patList(b);if(!L.length){info.textContent=`Bank
   ["LTC","MTC","HTC"].forEach((k,j)=>{P[k+":MODE"]=p.tom&&p.tom[j]=="C"?1:0});
   const kn=patKnobs(p);for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}   // double-click returns a knob to the pattern's setting
   for(const f in LINKED)syncLinked(LINKED[f][LINKED[f].length-1]);
-  page=0;edit=0;dirty=false;loadKnobs();const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);
+  page=0;edit=0;dirty=false;loadKnobs();
+  if(p.fx!=null){fxLog=[];send(factoryCalls(p.fx));info.textContent=`Pattern ${pad3(i+1)} ${p.n} · ${p.bpm} BPM`;return}
+  fxLog=null;const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));send(c);
   sendClock();VOICES.forEach(v=>{sendTrack(v.k);sendSteps(v.k)});info.textContent=`Pattern ${pad3(i+1)} ${p.n} · ${p.bpm} BPM`}
+// A factory pattern: the document itself, its steps rotated for a chain, then what the page owns (clock source, master,
+// solo, cables).
+const factoryCalls=fx=>[["sg_factory_load",fx],["sg_rotate",rot0],["sg_commit"],["sg_set_mode",P["CLOCK:SOURCE"]>.5?1:0],
+  ...knobCalls("OUT:MASTER"),["sg_set_solo",soloV?VI.indexOf(soloV):-1],...cableCalls()];
 // over: the index of the user pattern to write over; otherwise the pattern goes at the end of the list
 function savePat(name,over){const knobs={};for(const id in MAP)if(!MAP[id].master)knobs[id]=P[id];
   const rec={n:name,kit:curKit.n,bpm:+bpmOf(P["CLOCK:TEMPO"]).toFixed(1),scale:Math.round(P["CLOCK:SCALE"]*3),bar:1+Math.round(P["CLOCK:BAR"]*31),
@@ -43,7 +69,7 @@ function loadKnobs(){const t=tracks[sel],st=t.steps[edit];P["SEQ:LENGTH"]=(t.len
 // The page sends batches of calls ([name, ...args]) to the wasm entry points in web/wasm/shogun_web.cpp; ["knob", name, cc] sets a knob by its shogun::Knobs name.
 let ctx=null,node=null,host=null,mon=null,running=false,counter=-1;let outbox=[];
 const SPQ=[8,6,4,3];
-function send(calls){if(node)node.port.postMessage(calls);else if(host)host.run(calls);else outbox.push(...calls)}
+function send(calls){if(node)node.port.postMessage(calls);else if(host)host.run(calls);else{outbox.push(...calls);if(fxLog)fxLog.push(...calls)}}
 function onEngine(m){if(m.lfo!=null){lfoV=m.lfo;lfoP=m.lfoP;lfoT=performance.now()}counter=m.running?m.counter:-1;chainTick();if(m.running!=running){running=m.running;$("go").textContent=running?"Stop":"Start"}}
 const wasmBytes=()=>Uint8Array.from(atob($("wasm").textContent.trim()),c=>c.charCodeAt(0)).buffer;
 function audio(){if(ctx){if(ctx.state=="suspended")ctx.resume();return}
@@ -84,11 +110,13 @@ const lfoCalls=()=>[["sg_set_lfo",lfoDiv()[1],P["LFO:PHASE"],lfoShapeI(),P["LFO:
 const LFOK=["LFO:DIV","LFO:SHAPE","LFO:PHASE","LFO:AMOUNT"];
 function sendLfo(){send(lfoCalls());store.set("shogun.lfo",Object.fromEntries(LFOK.map(k=>[k,P[k]])))}
 function loadLfo(){const o=store.get("shogun.lfo")||{};LFOK.forEach(k=>{if(typeof o[k]=="number")P[k]=clamp(o[k])})}
-function syncAll(){const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());
+function syncAll(){if(fxLog){send(fxLog.concat([["sg_set_running",running?1:0]]));fxLog=null;return}
+  const c=[];Object.keys(MAP).forEach(id=>c.push(...knobCalls(id)));c.push(...clockCalls());
   VOICES.forEach(v=>c.push(...trackCalls(v.k),...stepCalls(v.k)));c.push(["sg_commit"],...cableCalls(),...lfoCalls(),["sg_set_solo",soloV?VI.indexOf(soloV):-1],["sg_set_running",running?1:0]);send(c)}
 function setRun(on){audio();
   // a start counts from 0: the chain starts from its first pattern, else the steps go out unrotated
-  if(on&&!running&&!chainStart()&&rot0){rot0=0;const c=[];VOICES.forEach(v=>c.push(...stepCalls(v.k)));c.push(["sg_commit"]);send(c)}
+  if(on&&!running&&!chainStart()&&rot0){rot0=0;const cp=patList(curPat.b)[curPat.i];
+    if(cp&&cp.fx!=null&&!dirty){send(factoryCalls(cp.fx))}else{const c=[];VOICES.forEach(v=>c.push(...stepCalls(v.k)));c.push(["sg_commit"]);send(c)}}
   running=on;if(!on)counter=-1;send([["sg_set_running",on?1:0]]);$("go").textContent=on?"Stop":"Start"}
 // A voice key while stopped plays the voice, so a sound can be set without running the pattern.
 function audition(k){audio();const v=VI.indexOf(k);if(NOTEK[k]){const st=tracks[k].steps[edit];send([["sg_trigger_note",v,st.note,1]]);setTimeout(()=>send([["sg_release",v]]),300)}else send([["sg_trigger",v,1,0]])}

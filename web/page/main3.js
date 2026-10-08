@@ -107,6 +107,6 @@ $("tabs").onclick=e=>{const b=e.target.closest(".tab");if(b&&b.dataset.v!=view)s
 
 // ================= start =================
 function loop(){if(grab&&cables[grab.i]&&cables[grab.i].el)pins(cables[grab.i]);step();paint();drawAll();requestAnimationFrame(loop)}
-loadLfo();showZones();loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
+loadLfo();showZones();{const fb=factoryBank();FACT.push(...fb);FKITS.push(...fb.map(r=>({n:r.n,knobs:r.knobs,fx:r.fx})))}loadUser();USERK=store.get("shogun.kits")||[];loadChain();midiLoad();loadPat("A",0);
 try{navigator.permissions.query({name:"midi"}).then(r=>{if(r.state=="granted")midiInit(false)},()=>{})}catch(e){}drawAll();build();requestAnimationFrame(loop);
 window.SHOGUN={P,get tracks(){return tracks},get cables(){return cables},JACKS,CTRL,setRun,get running(){return running},get counter(){return counter},patList,loadPat,savePat,get cur(){return curPat},get curKit(){return curKit},kitList,loadKit,saveKit,CHAIN,MIDI,midiMsg,undo,get undoDepth(){return UNDO.length},randomVoice,get rot0(){return rot0},get solo(){return soloV},get bankView(){return bankView},DD,ddOpen,ddKey,legal,get engine(){return node||host},send,press,setP,get sel(){return sel},get bay(){return bay},setBay,get view(){return view},setView,get lfoV(){return lfoV}};
