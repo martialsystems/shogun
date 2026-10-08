@@ -214,6 +214,27 @@ int main(int argc, char** argv) {
     check(cables == 4 && static_cast<int>(v["inLaw"]["BASS:NOTE"]) == 1 && std::fabs(amt - 1.0 / 12.0) < 1e-12, "alias load",
           "cables 4 (1 + 3 toms) = " + juce::String(cables) + ", BASS:NOTE law " + v["inLaw"]["BASS:NOTE"].toString() +
               ", MTC:PITCH CV AMT " + juce::String(amt, 6));
+
+    // The loaded law plays: 2.0 V into the old BASS:HZ/V cable (now BASS:NOTE, shared AliasLaw::Lin55ToVoct) is 110 Hz.
+    juce::AudioBuffer<float> one(r->getTotalNumOutputChannels(), 64);
+    juce::MidiBuffer none;
+    r->processBlock(one, none);  // applies the loaded cables and laws to the engine
+    shogun::Engine& eng = r->engine();
+    const int notePort = findPort("BASS:NOTE"), gatePort = findPort("BASS:GATE");
+    eng.setParamNow(shogun::P_CLOCK_MODE, shogun::stepU(1, 2));  // EXT: the gate plays the voice
+    eng.setParamNow(shogun::P_GLOBAL_TOLERANCE, 0.0);            // no per-voice tolerance or drift: the pure law
+    eng.setParamNow(shogun::P_GLOBAL_DRIFT, 0.0);
+    std::vector<float> vals(static_cast<size_t>(kPorts), 0.0f);
+    std::unique_ptr<bool[]> con(new bool[static_cast<size_t>(kPorts)]());
+    vals[static_cast<size_t>(notePort)] = 2.0f;
+    vals[static_cast<size_t>(gatePort)] = 5.0f;
+    con[static_cast<size_t>(notePort)] = con[static_cast<size_t>(gatePort)] = true;
+    for (int n = 0; n < 4; ++n) eng.processSample(vals.data(), con.get());
+    const double hz = eng.synth(shogun::BASS).f;
+    const double cents = 1200.0 * std::log2(hz / 110.0);
+    check(eng.inputLaw(notePort) == 1 && std::fabs(cents) < 0.01, "old HZ/V plays",
+          "BASS:HZ/V cable at 2.0 V -> " + juce::String(hz, 6) + " Hz (" + juce::String(cents, 5) + " cents from 110), law " +
+              juce::String(eng.inputLaw(notePort)));
   }
 
   // ---- editor: 1200 x 672, 8 tabs, 153 bay jacks; render each tab to PNG
