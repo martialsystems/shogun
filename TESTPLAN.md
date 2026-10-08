@@ -765,6 +765,41 @@ check_panel_bindings: 860 interactive ops, 0 dead
 
 Tab renders: `build/plugin-linux/tabs/tab_<i>_<name>.png` (1200 × 672) next to the spec mockups; mean absolute pixel difference per tab (0 to 255): MAIN 4.7, VOICE 5.8, GRID 12.4, MOD 7.5, ROUTE 8.6, FX/MIX 6.0, SEQ/MIDI 5.0, GLOBAL 4.3. The differences are the mockups' illustrative data (fake pattern, matrix rows, cables, meter levels), which the plugin replaces with live state (INIT: empty), plus font rasterisation, and the keys this pass removed or rebound (FILL, ROLL, MUTE GRP, SCENE, LEARN, LOCK RND, lane editor, NOISE FLOOR, TRANSPOSE, SAVE AS DEFAULT).
 
+## pluginval teardown crash (pluginval 1.0.4, in-process, level 10)
+
+**Symptom.** `pluginval --strictness-level 10 --validate-in-process` (xvfb) prints SUCCESS and then sometimes dies with SIGSEGV while it deletes the last plugin instance.
+
+**Stack (gdb, every crash the same).** Main thread, inside pluginval's own code, not SHOGUN's:
+
+```
+#0 std::unordered_map<int, std::vector<Linux::IEventHandler*>>::operator[]        (freed RunLoop::Impl)
+#1 juce::RunLoop::Impl::registerEventHandler(...)::{lambda(int)#1}                 (pluginval, juce_VST3PluginFormat.cpp)
+#2 juce::LinuxEventLoop::registerFdCallback(...)::{lambda()#1}                     (pluginval, juce_Messaging_linux.cpp)
+#3 juce::MessageManager::runDispatchLoop()
+```
+
+The fd it was called for (register `rbp` at the fault) was 7 in every crash: the read end of the plugin's own JUCE message socket (the second `socketpair` of the run, made by SHOGUN.so's `MessageManager::doPlatformSpecificInitialisation`). By then the fd is already closed.
+
+**Mechanism (host side).** The JUCE VST3 host gives the plugin an `IRunLoop` (`RunLoop`, one shared `RunLoop::Impl`). The plugin registers its message socket with it, and `Impl` registers a callback with the host event loop that captures a raw `this`. Each event-loop round (`InternalRunLoop::dispatchPendingEvents`) first collects the callbacks of every readable fd, then calls them all. pluginval deletes the instance from a message on its own socket (fd 3, `AsyncDeleter`). That delete releases the plugin factory, the factory drops the last reference to the host context, and `RunLoop::Impl` is freed. If the plugin socket was readable in the same round, its callback was already collected; it runs after fd 3 (fds are dispatched in ascending order) and reads the freed `Impl`. Whether it faults depends on what the allocator did with that memory, so most stale calls go unnoticed.
+
+The plugin socket is readable whenever the plugin has a message queued. JUCE's `AudioProcessorValueTreeState` timer (10 Hz, 50 Hz for a while after parameter changes) posts one continuously, and the crashes follow Fuzz parameters, where (by reading pluginval's source; not measured) the message thread is likely still busy flushing parameter changes at 60 Hz when the validation thread posts the delete, so a queued timer message and the delete can land in the same round. Any JUCE plugin with a running timer is exposed; SHOGUN cannot stop JUCE's internal timer.
+
+**What changed in SHOGUN.** (1) processBlock no longer calls `triggerAsyncUpdate` for a GLOBAL:OS change (a message post from the audio thread, which JUCE warns may block); it sets an atomic flag that a 10 Hz message-thread timer acts on. (2) The MOD matrix popup menus no longer capture a raw `this`. These are hardening steps, not the crash fix: the crash rate is the same before and after (counts below). Commit a3cc0a3's message says it fixes the crash; that is wrong, and this section replaces it.
+
+**Evidence.**
+
+| pluginval | Plugin build | Runs | SIGSEGV |
+| --- | --- | --- | --- |
+| 1.0.4 release binary, under gdb | g++, before (5d80135 code) | 161 | 4 |
+| 1.0.4 release binary, under gdb | clang++, before | 60 | 1 |
+| 1.0.4 release binary | g++, after (a3cc0a3) | 120 | 2 |
+| 1.0.4 release binary | clang++, after | 120 | 2 |
+| 1.0.4 from source, JUCE 8.0.4, unchanged | g++, after | 115 | 3 |
+| 1.0.4 from source, JUCE 8.0.4, stale callbacks skipped | g++, after | 120 | 0 |
+| 1.0.4 from source, JUCE 8.0.4, stale callbacks skipped | clang++, after | 120 | 0 |
+
+The "stale callbacks skipped" host is a one-function change to `InternalRunLoop::dispatchPendingEvents` (before calling a collected callback, check it is still the one registered for its fd). It skipped a stale callback in 64 of its 240 runs (74 callbacks: 66 for fd 7, the plugin message socket, and 8 for fd 8, the plugin's X11 connection). Not every skip is at the final delete: a stale callback on an `Impl` that is still alive (after the plugin re-registers its fds) is harmless. The ones at the final delete are the calls that read freed memory in the stock host. The same source build without the check crashed 3 times in 115 runs, so the difference is the check, not the rebuild. The fix belongs in JUCE's host code (and so in pluginval); nothing in this repository changes it. The patch and loop scripts are not part of the repository.
+
 ## Web build (`make web`)
 
 `build/shogun.wasm` is the same engine (freestanding, `-DSHOGUN_NO_FORMAT`), run at the AudioContext rate. `web/test_wasm.mjs` runs `web/parity_scenario.txt` through wasm and the native build of the same facade (`build/web_parity`) and compares every sample, then checks the bay and LFO laws, the jack-id forms and the factory bank. The scenario ends by loading every factory program (and one rotated for a chain, and INIT): after each load the wasm state hash (parameters as floats, mod rows, pattern) must equal the native one exactly, which checks the freestanding number reader against `strtod`. After the switch to the shared exact-halfband stage 1, the largest wasm/native difference went from 9.68e-10 to 3.74e-9, and with jidai-common 1.1.1 (exact C3 in the synth pitch) to 3.77e-9 (float32 output, same code on both sides; the wasm build imports JS Math):
@@ -854,6 +889,8 @@ It does not change: that patch has no WAVE stage at amount 0 with a SYM other th
 | clang++ 19.1 `-O2 -ffp-contract=off` (the Makefile default) | 4feda137ff4c35a9 |
 | clang++ `-mfma -ffp-contract=on -ffp-contract=off` | 4feda137ff4c35a9 |
 | clang++ `-mfma -ffp-contract=fast -ffp-contract=off` | 4feda137ff4c35a9 |
+| clang++ `-march=native -ffp-contract=fast -ffp-contract=off` | 4feda137ff4c35a9 |
+| control, no off flag: g++ / clang++ `-mfma -ffp-contract=fast` | 01f7a8f927921fbf / 126f554cd6e62129 |
 
 `make build/shogun_tests CXXFLAGS="... -mfma -ffp-contract=fast"` prints the same test log as the default build with both compilers (the clang++ FMA-fast `testWaveMigration` 2.22e-16 line is gone). The FMA rows in the table above are what the code gives when contraction is allowed; no build target allows it now.
 
