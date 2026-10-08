@@ -72,7 +72,7 @@ struct CpVoice : Voice {
     lastBp = bp.bpNorm();
     double sl = 0.0, sr = 0.0;
     for (int i = 0; i < kMaxBursts; ++i) {
-      if (eB[i] == 0.0) continue;
+      if (dsp::exactEq(eB[i], 0.0)) continue;
       sl += eB[i] * panLg[i];
       sr += eB[i] * panRg[i];
       eB[i] = eB[i] * aBurst;

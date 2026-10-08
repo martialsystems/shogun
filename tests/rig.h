@@ -13,7 +13,7 @@ using namespace shogun;
 
 inline std::unique_ptr<Engine> make(double fs = 48000.0, int os = 2) {
   auto e = std::make_unique<Engine>();
-  if (fs != 48000.0 || os != 2) e->prepare(fs, os);
+  if (!tu::same(fs, 48000.0) || os != 2) e->prepare(fs, os);
   e->setIdeal();
   return e;
 }

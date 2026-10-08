@@ -81,11 +81,12 @@ inline WaveParams waveParams(int v) {
 #ifndef SHOGUN_NO_FORMAT
 inline void formatParam(int p, double u, char* out, int n) {
   const ParamInfo& pi = kParams[p];
+  const std::size_t cap = static_cast<std::size_t>(n);
   if (pi.kind == ParamKind::Stepped || pi.kind == ParamKind::Toggle) {
     const int idx = stepIndex(u, pi.steps);
     if (std::strcmp(pi.law, "sound") == 0) {
-      if (idx == 0) std::snprintf(out, n, "CLN");
-      else std::snprintf(out, n, "%d", idx);
+      if (idx == 0) std::snprintf(out, cap, "CLN");
+      else std::snprintf(out, cap, "%d", idx);
       return;
     }
     const char* c = pi.choices;
@@ -94,74 +95,74 @@ inline void formatParam(int p, double u, char* out, int n) {
       if (c) ++c;
     }
     if (!c || !*c) {
-      std::snprintf(out, n, "%d", idx);
+      std::snprintf(out, cap, "%d", idx);
       return;
     }
     const char* e = std::strchr(c, '|');
     const int len = e ? static_cast<int>(e - c) : static_cast<int>(std::strlen(c));
-    std::snprintf(out, n, "%.*s", len, c);
+    std::snprintf(out, cap, "%.*s", len, c);
     return;
   }
   const char* law = pi.law;
   double a = 0, b = 0;
   if (std::sscanf(law, "hz %lf %lf", &a, &b) == 2) {
     const double hz = a * std::pow(b / a, u);
-    if (hz >= 1000.0) std::snprintf(out, n, "%.2f kHz", hz / 1000.0);
-    else std::snprintf(out, n, "%.1f Hz", hz);
+    if (hz >= 1000.0) std::snprintf(out, cap, "%.2f kHz", hz / 1000.0);
+    else std::snprintf(out, cap, "%.1f Hz", hz);
   } else if (std::sscanf(law, "st %lf %lf", &a, &b) == 2) {
-    std::snprintf(out, n, "%+.1f st", a + (b - a) * u);
+    std::snprintf(out, cap, "%+.1f st", a + (b - a) * u);
   } else if (std::sscanf(law, "ratio %lf %lf", &a, &b) == 2) {
-    std::snprintf(out, n, "x%.2f", a * std::pow(b / a, u));
+    std::snprintf(out, cap, "x%.2f", a * std::pow(b / a, u));
   } else if (std::strcmp(law, "decay") == 0) {
-    std::snprintf(out, n, "%.0f ms", 1000.0 * dsp::decayTau(u));
+    std::snprintf(out, cap, "%.0f ms", 1000.0 * dsp::decayTau(u));
   } else if (std::strcmp(law, "level") == 0) {
     const double g = dsp::gLevel(u);
-    if (g <= 1e-6) std::snprintf(out, n, "-inf dB");
-    else std::snprintf(out, n, "%+.1f dB", 20.0 * std::log10(g));
+    if (g <= 1e-6) std::snprintf(out, cap, "-inf dB");
+    else std::snprintf(out, cap, "%+.1f dB", 20.0 * std::log10(g));
   } else if (std::strcmp(law, "volume") == 0) {
     const double g = 2.0 * u * u;
-    if (g <= 1e-6) std::snprintf(out, n, "-inf dB");
-    else std::snprintf(out, n, "%+.1f dB", 20.0 * std::log10(g));
+    if (g <= 1e-6) std::snprintf(out, cap, "-inf dB");
+    else std::snprintf(out, cap, "%+.1f dB", 20.0 * std::log10(g));
   } else if (std::strcmp(law, "bpm") == 0) {
-    std::snprintf(out, n, "%.1f BPM", 40.0 + 160.0 * u);
+    std::snprintf(out, cap, "%.1f BPM", 40.0 + 160.0 * u);
   } else if (std::strcmp(law, "swing") == 0) {
-    std::snprintf(out, n, "%.1f %%", 50.0 + 25.0 * u);
+    std::snprintf(out, cap, "%.1f %%", 50.0 + 25.0 * u);
   } else if (std::strcmp(law, "drive") == 0) {
-    if (u <= 0.0) std::snprintf(out, n, "OFF");
-    else std::snprintf(out, n, "%.2f", 9.0 * u);
+    if (u <= 0.0) std::snprintf(out, cap, "OFF");
+    else std::snprintf(out, cap, "%.2f", 9.0 * u);
   } else if (std::strcmp(law, "drive24") == 0) {
-    if (u <= 0.0) std::snprintf(out, n, "OFF");
-    else std::snprintf(out, n, "+%.1f dB", 24.0 * u);
+    if (u <= 0.0) std::snprintf(out, cap, "OFF");
+    else std::snprintf(out, cap, "+%.1f dB", 24.0 * u);
   } else if (std::strcmp(law, "ceiling") == 0) {
-    std::snprintf(out, n, "%.1f dBFS", -6.0 + 6.0 * u);
+    std::snprintf(out, cap, "%.1f dBFS", -6.0 + 6.0 * u);
   } else if (std::strcmp(law, "thresh") == 0) {
-    std::snprintf(out, n, "%.1f dB", -40.0 + 40.0 * u);
+    std::snprintf(out, cap, "%.1f dB", -40.0 + 40.0 * u);
   } else if (std::strcmp(law, "ratio") == 0) {
-    std::snprintf(out, n, "%.1f:1", 1.0 + 19.0 * u);
+    std::snprintf(out, cap, "%.1f:1", 1.0 + 19.0 * u);
   } else if (std::strcmp(law, "attack") == 0) {
-    std::snprintf(out, n, "%.1f ms", 0.1 * std::pow(1000.0, u));
+    std::snprintf(out, cap, "%.1f ms", 0.1 * std::pow(1000.0, u));
   } else if (std::strcmp(law, "release") == 0) {
-    std::snprintf(out, n, "%.0f ms", 10.0 * std::pow(100.0, u));
+    std::snprintf(out, cap, "%.0f ms", 10.0 * std::pow(100.0, u));
   } else if (std::strcmp(law, "makeup") == 0) {
-    std::snprintf(out, n, "+%.1f dB", 24.0 * u);
+    std::snprintf(out, cap, "+%.1f dB", 24.0 * u);
   } else if (std::strcmp(law, "lforate") == 0) {
-    std::snprintf(out, n, "%.3f Hz", 0.01 * std::pow(4000.0, u));
+    std::snprintf(out, cap, "%.3f Hz", 0.01 * std::pow(4000.0, u));
   } else if (std::strcmp(law, "deg") == 0) {
-    std::snprintf(out, n, "%.0f deg", 360.0 * u);
+    std::snprintf(out, cap, "%.0f deg", 360.0 * u);
   } else if (std::strcmp(law, "fade") == 0) {
-    std::snprintf(out, n, "%.2f s", 2.0 * u);
+    std::snprintf(out, cap, "%.2f s", 2.0 * u);
   } else if (std::strcmp(law, "a4") == 0) {
-    std::snprintf(out, n, "%.1f Hz", 415.0 + 51.0 * u);
+    std::snprintf(out, cap, "%.1f Hz", 415.0 + 51.0 * u);
   } else if (std::strcmp(law, "cents") == 0) {
-    std::snprintf(out, n, "%+.0f ct", 100.0 * bip(u));
+    std::snprintf(out, cap, "%+.0f ct", 100.0 * bip(u));
   } else if (std::strcmp(law, "glide") == 0) {
-    std::snprintf(out, n, "%.0f ms", 2.0 * std::exp(5.5 * u));
+    std::snprintf(out, cap, "%.0f ms", 2.0 * std::exp(5.5 * u));
   } else if (std::strcmp(law, "shape") == 0) {
-    std::snprintf(out, n, "%s %.0f %%", u < 0.5 ? "TRI" : "SAW", 100.0 * u);
+    std::snprintf(out, cap, "%s %.0f %%", u < 0.5 ? "TRI" : "SAW", 100.0 * u);
   } else if (pi.kind == ParamKind::Bipolar) {
-    std::snprintf(out, n, "%+.0f %%", 100.0 * bip(u));
+    std::snprintf(out, cap, "%+.0f %%", 100.0 * bip(u));
   } else {
-    std::snprintf(out, n, "%.0f %%", 100.0 * u);
+    std::snprintf(out, cap, "%.0f %%", 100.0 * u);
   }
 }
 #endif

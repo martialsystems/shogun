@@ -33,7 +33,7 @@ int main(int argc, char**) {
       for (int i = 0; i < kPorts; ++i)
         if (kPortTable[i].dir == PortDir::In) vals[i] = 0.0f;
       e.processSample(vals, con);
-      peak = std::fmax(peak, std::fabs(vals[op] / 5.0));
+      peak = std::fmax(peak, std::fabs(static_cast<double>(vals[op]) / 5.0));
     }
     cal[v] = kTargetPeak[v] / peak;
     if (!table) std::printf("%-5s peak %.6f target %.2f calib %.6f\n", kVoiceNames[v], peak, kTargetPeak[v], cal[v]);

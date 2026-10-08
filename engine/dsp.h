@@ -10,10 +10,17 @@
 #include <jidai/dsp/Halfband.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 
 namespace shogun {
 namespace dsp {
+
+// Intentional exact comparison (caches, gates and bit-exact paths); std::equal_to keeps -Wfloat-equal builds quiet
+// with the same result as ==.
+inline bool exactEq(double a, double b) noexcept { return std::equal_to<double>{}(a, b); }
+inline bool exactEq(float a, float b) noexcept { return std::equal_to<float>{}(a, b); }
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kQuiet = 3.1622776601683795e-5;  // −90 dB voice end (§3.7)
@@ -344,7 +351,7 @@ struct OtaSvf {
 // Linear-phase FIRs from scripts/gen_halfband.py. One decimator per audio output; latency 0 / 23 / 26 base samples.
 template <int N>
 struct FirLine {
-  double buf[2 * N] = {};
+  double buf[static_cast<std::size_t>(2 * N)] = {};
   int w = 0;
   void push(double x) {
     buf[w] = x;

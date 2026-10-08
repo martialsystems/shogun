@@ -336,7 +336,7 @@ class ModSystem {
     int w = 0;
     for (int i = 0; i < nActive; ++i) {
       const int d = active[i];
-      bool used = prev[d] != 0.0 || next[d] != 0.0;
+      bool used = !dsp::exactEq(prev[d], 0.0) || !dsp::exactEq(next[d], 0.0);
       if (!used)
         for (const auto& r : rows) used = used || (r.on && r.dst == d && r.src != SRC_NONE);
       if (used) active[w++] = d;

@@ -1,0 +1,61 @@
+// Prototypes of the SHOGUN web entry points (web/wasm/shogun_web.cpp), shared by the wasm facade and the native
+// parity test (tests/web_parity.cpp) so every exported function has a declaration (-Wmissing-prototypes).
+#pragma once
+
+extern "C" {
+void sg_init(double fs);
+double sg_sample_rate();
+int sg_latency();
+void sg_set_os(int os);
+char* sg_text();
+int sg_param_count();
+const char* sg_param_id(int i);
+double sg_param_default(int i);
+int sg_param_find();
+void sg_set_param(int i, double u);
+double sg_param(int i);
+int sg_port_count();
+const char* sg_port_id(int i);
+int sg_port_role(int i);
+int sg_port_find();
+double sg_port_volts(int i);
+int sg_cable(int from, int to, int on);
+void sg_cable_clear();
+void sg_set_cv_amt(int port, double amt);
+void sg_track(int t, int len, int scale, double swing, double shift);
+void sg_step(int t, int s, int on, int acc, double prob, double micro, int flam, int ratchet, double bend, int note, int tie);
+int sg_step_lock(int t, int s, int param, double u);
+void sg_pattern_clear();
+void sg_commit();
+void sg_hit(int v, double velVolts, double bend, int acc);
+void sg_note_on(int v, double note, double velVolts, int tie);
+void sg_note_off(int v);
+void sg_set_running(int on);
+void sg_restart();
+int sg_running();
+double sg_counter();
+int sg_display_step();
+float* sg_out_l();
+float* sg_out_r();
+void sg_process(int n);
+int sg_knob_count();
+const char* sg_knob_name(int i);
+void sg_set_knob(int i, int cc);
+void sg_set_level(int v, double x);
+void sg_set_master(double x);
+void sg_set_solo(int v);
+void sg_set_mode(int ext);
+void sg_set_tempo(double bpm);
+void sg_set_scale(int stepsPerQuarter);
+void sg_set_bar(int len);
+void sg_set_lfo(double cyclesPerBeat, double phase, int shape, double amount);
+double sg_lfo_volts();
+double sg_lfo_phase();
+void sg_set_track(int v, int len, int shuffle, int shiftCc, int mute);
+void sg_set_drum(int v, int s, int on, int accent, int flam, int bend);
+void sg_set_note(int v, int s, int note, int accent, int tie);
+void sg_trigger(int v, double gain, double bend);
+void sg_trigger_note(int v, int note, double gain);
+void sg_release(int v);
+void sg_patch(int input, int source);
+}

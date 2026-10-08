@@ -6,6 +6,8 @@ This tree builds the voice engine, the design-pack PDF, and a placeholder VST3. 
 
 The voice engine is `engine/`. Panel art is unpainted. The editor in `plugin/` is a placeholder plate for listening in a host. JIDAI RACK is not changed by this repository. The equations in [SCHEMATICS.md](SCHEMATICS.md) are the voice contract. `make test` builds `build/shogun_tests`, runs the checks in [TESTPLAN.md](TESTPLAN.md), and runs the clock-switch law. That law test imports GraphForge from `~/graphforge/src`.
 
+`make strict` compiles the engine, the tests, the web facade and the plugin sources with the warning flags JIDAI RACK uses (JUCE's recommended set plus `-Wfloat-equal -Wimplicit-int-float-conversion -Wshadow -Wconversion -Wdouble-promotion -Werror`) under clang++ and g++. It needs the JUCE checkout at `JUCE_LINUX` (default `/workspace/JUCE`) for the plugin headers.
+
 Rebuild the pack PDF from the markdown:
 
 ```

@@ -59,9 +59,10 @@ struct Voice {
 
 // The WAVE block of a WAVE voice: parameters read from ue each base sample (§4.6).
 inline bool sameStage(const TripleShaperParams& a, const TripleShaperParams& b) {
-  if (!(a.macro == b.macro)) return false;
+  if (!(dsp::exactEq(a.macro, b.macro))) return false;
   for (int i = 0; i < 3; ++i)
-    if (!(a.trim[i] == b.trim[i] && a.sym[i] == b.sym[i] && a.vcAmt[i] == b.vcAmt[i] && a.vcSym[i] == b.vcSym[i]))
+    if (!(dsp::exactEq(a.trim[i], b.trim[i]) && dsp::exactEq(a.sym[i], b.sym[i]) && dsp::exactEq(a.vcAmt[i], b.vcAmt[i]) &&
+        dsp::exactEq(a.vcSym[i], b.vcSym[i])))
       return false;
   return true;
 }

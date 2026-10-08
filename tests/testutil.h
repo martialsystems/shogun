@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <complex>
+#include <functional>
 #include <cstdio>
 #include <vector>
 
@@ -28,6 +29,9 @@ inline void atLeast(const char* test, const char* what, double got, double limit
   check(got >= limit, test, what, got, limit, 0.0);
 }
 inline void truth(const char* test, const char* what, bool ok) { check(ok, test, what, ok ? 1 : 0, 1, 0); }
+// Intentional exact comparison (bit-exact checks); std::equal_to keeps -Wfloat-equal builds quiet, same result as ==.
+inline bool same(double a, double b) { return std::equal_to<double>{}(a, b); }
+inline bool same(float a, float b) { return std::equal_to<float>{}(a, b); }
 
 // In-place iterative radix-2 FFT (size must be a power of two).
 inline void fft(std::vector<std::complex<double>>& a) {
@@ -107,7 +111,7 @@ inline double aliasLinesDb(const std::vector<double>& yM, int M, int N, double F
   double al = 0.0, leg = 0.0;
   for (int k = 1; k <= N / 2; ++k) {
     if (k * FS / N > 20000.0) break;
-    const double p = (Y[k] / M) * (Y[k] / M);
+    const double p = (Y[static_cast<size_t>(k)] / M) * (Y[static_cast<size_t>(k)] / M);
     if (k % q == 0) leg += p;
     else al += p;
   }
@@ -147,3 +151,9 @@ inline double peakAbs(const std::vector<double>& x, size_t from = 0, size_t to =
 inline double db(double r) { return 20.0 * std::log10(r); }
 
 }  // namespace tu
+
+// The suites (tests/*.cpp), run by tests/main.cpp.
+void runBlockTests();
+void runVoiceTests();
+void runEngineTests();
+void runModTests();

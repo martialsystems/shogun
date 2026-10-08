@@ -6,11 +6,6 @@
 int tu::gFails = 0;
 int tu::gChecks = 0;
 
-void runBlockTests();
-void runVoiceTests();
-void runEngineTests();
-void runModTests();
-
 int main() {
   runBlockTests();
   runVoiceTests();

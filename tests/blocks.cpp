@@ -65,7 +65,7 @@ void testSvfMinus3dB() {
     f.set(1000.0, 1.0 / std::sqrt(2.0), fs);
     std::vector<double> y(static_cast<size_t>(fs));
     for (size_t i = 0; i < y.size(); ++i) {
-      f.tick(std::sin(2.0 * kPi * 1000.0 * i / fs));
+      f.tick(std::sin(2.0 * kPi * 1000.0 * static_cast<double>(i) / fs));
       y[i] = f.lp;
     }
     const double g = tu::db(tu::sineAmp(y, 1000.0, fs, y.size() / 2));
@@ -149,7 +149,7 @@ double ladderGainDb(double f, double k) {
   l.set(1000.0, 48000.0);
   const double fs = 48000.0;
   std::vector<double> y(48000);
-  for (size_t i = 0; i < y.size(); ++i) y[i] = l.tick(1e-5 * std::sin(2.0 * kPi * f * i / fs), k);
+  for (size_t i = 0; i < y.size(); ++i) y[i] = l.tick(1e-5 * std::sin(2.0 * kPi * f * static_cast<double>(i) / fs), k);
   return tu::db(tu::sineAmp(y, f, fs, 24000) / 1e-5);
 }
 
@@ -249,7 +249,7 @@ void testHalfbandSpec() {
   h1[46] = 0.5;
   for (int j = 0; j < jidai::dsp::Halfband93::kSide; ++j) h1[46 - (2 * j + 1)] = h1[46 + (2 * j + 1)] = jidai::dsp::Halfband93::odd()[j];
   int zeros = 0;
-  for (int k = 0; k < jidai::dsp::Halfband93::kTaps; ++k) zeros += (k != 46 && (k - 46) % 2 == 0 && h1[k] == 0.0) ? 1 : 0;
+  for (int k = 0; k < jidai::dsp::Halfband93::kTaps; ++k) zeros += (k != 46 && (k - 46) % 2 == 0 && tu::same(h1[k], 0.0)) ? 1 : 0;
   double s1, r1, s2, r2;
   stopRipple(h1, jidai::dsp::Halfband93::kTaps, 0.2125, 0.2875, s1, r1);
   stopRipple(shogun::hb::kStage2, shogun::hb::kStage2Taps, 0.10625, 0.39375, s2, r2);
@@ -279,7 +279,7 @@ void testDecimatorDelay() {
     }
     double err = 0.0;
     const int L = osLatency(M);
-    for (int n = 1000; n < 4800; ++n) err = std::fmax(err, std::fabs(out[n] - std::sin(2.0 * kPi * f * (n - L) / fs)));
+    for (int n = 1000; n < 4800; ++n) err = std::fmax(err, std::fabs(out[static_cast<size_t>(n)] - std::sin(2.0 * kPi * f * (n - L) / fs)));
     std::printf("%s: %dx output = input delayed %d base samples, max error %.2e\n", t, M, L, err);
     tu::atMost(t, "aligned error", err, 1e-4);
   }
@@ -303,7 +303,7 @@ void testBlepAlias() {
     y.erase(y.begin(), y.begin() + 200);
     const double a = tu::aliasWorstDb(y, f, fs);
     std::printf("%s: BLEP saw %.2f Hz at 2x, worst alias %.1f dB\n", t, f, a);
-    if (f == f0) tu::atMost(t, "worst alias (verify config 1318.51 Hz)", a, -60.0);
+    if (tu::same(f, f0)) tu::atMost(t, "worst alias (verify config 1318.51 Hz)", a, -60.0);
   }
 }
 
@@ -388,13 +388,13 @@ void testGateHysteresis() {
 std::vector<double> renderShaper(TripleShaper& s, int bins, double amp, int M, int vcBins = 0, bool selfVc = false) {
   const int N = 32768;
   const int L = N * M;
-  std::vector<double> y(2 * L);
+  std::vector<double> y(static_cast<size_t>(2 * L));
   for (int n = 0; n < 2 * L; ++n) {
     const double x = amp * std::sin(2.0 * kPi * bins * n / L);
     double vc = 0.0;
     if (vcBins > 0) vc = std::sin(2.0 * kPi * vcBins * n / L);
     if (selfVc) vc = x / amp;
-    y[n] = s.process(x, vc);
+    y[static_cast<size_t>(n)] = s.process(x, vc);
   }
   return std::vector<double>(y.begin() + L, y.end());
 }
@@ -409,14 +409,14 @@ void testWaveBypass() {
   bool same = true;
   for (int n = 0; n < 9600; ++n) {
     const double x = 0.6 * std::sin(0.01 * n) * std::exp(-n / 3000.0);
-    same = same && (s.process(x) == x);
+    same = same && tu::same(s.process(x), x);
   }
   std::printf("%s: WAVE 0, trims/SYM/SHAPE 0: bypassed %d, output bit-identical %d, level gain untouched %.1f\n", t,
               s.bypassed() ? 1 : 0, same ? 1 : 0, s.levelGain());
   tu::truth(t, "bypassed", s.bypassed());
   tu::truth(t, "bit-identical", same);
-  tu::truth(t, "level comp skipped", s.levelGain() == 1.0);
-  tu::truth(t, "SHAPE 0 is the body", TripleShaper::shapeMorph(0.123456789, -0.3, 0.01, 0.0, 0.01) == 0.123456789);
+  tu::truth(t, "level comp skipped", tu::same(s.levelGain(), 1.0));
+  tu::truth(t, "SHAPE 0 is the body", tu::same(TripleShaper::shapeMorph(0.123456789, -0.3, 0.01, 0.0, 0.01), 0.123456789));
 }
 
 void testWaveMigration() {
@@ -443,10 +443,10 @@ double harmDb(const std::vector<double>& y, int b0, int h, int ref) {
   std::vector<double> z(y);
   double mean = 0.0;
   for (double v : z) mean += v;
-  mean /= z.size();
+  mean /= static_cast<double>(z.size());
   for (double& v : z) v -= mean;
   auto Y = tu::rfftMag(z);
-  return tu::db(Y[h * b0] / Y[ref * b0] + 1e-12);
+  return tu::db(Y[static_cast<size_t>(h * b0)] / Y[static_cast<size_t>(ref * b0)] + 1e-12);
 }
 
 void testWaveStageLaw() {
@@ -461,9 +461,9 @@ void testWaveStageLaw() {
   std::vector<double> tri(N), saw(N);
   for (int n = 0; n < N; ++n) {
     const double ph = 2.0 * kPi * B0 * n / N;
-    tri[n] = TripleShaper::stage((2.0 / kPi) * std::asin(std::sin(ph)), 1.0, 1.0, 0.0);
+    tri[static_cast<size_t>(n)] = TripleShaper::stage((2.0 / kPi) * std::asin(std::sin(ph)), 1.0, 1.0, 0.0);
     double s = std::fmod(ph / kPi + 1.0, 2.0);
-    saw[n] = TripleShaper::stage(s - 1.0, 1.0, 1.0, 0.0);
+    saw[static_cast<size_t>(n)] = TripleShaper::stage(s - 1.0, 1.0, 1.0, 0.0);
   }
   const double t1 = harmDb(tri, B0, 1, 2), t3 = harmDb(tri, B0, 3, 2), t4 = harmDb(tri, B0, 4, 2);
   const double s2 = harmDb(saw, B0, 2, 1), s3 = harmDb(saw, B0, 3, 1);
@@ -580,7 +580,7 @@ void testWaveAudioRateVc() {
   auto Y = tu::rfftMag(y);
   double sb = 0.0, h = 0.0;
   for (int k = 1; k <= 32768 / 2; ++k) {
-    const double pw = Y[k] * Y[k];
+    const double pw = Y[static_cast<size_t>(k)] * Y[static_cast<size_t>(k)];
     if (k % q == 0 && k % F1 != 0) sb += pw;
     if (k % F1 == 0) h += pw;
   }
@@ -646,23 +646,23 @@ void testWavePreVca() {
   for (int n = 0; n < T; ++n) {
     r.tick();
     const double e = std::fmin(1.0, n / (0.002 * fs)) * (n < 0.15 * fs ? 1.0 : std::exp(-(n - 0.15 * fs) / (0.05 * fs)));
-    env[n] = e;
-    lp[n] = r.lp();
-    xpre[n] = 0.9 * TripleShaper::preVcaInput(r.lp(), TripleShaper::quadAmp(r.lp(), r.bp(), r.svf.R), e);
+    env[static_cast<size_t>(n)] = e;
+    lp[static_cast<size_t>(n)] = r.lp();
+    xpre[static_cast<size_t>(n)] = 0.9 * TripleShaper::preVcaInput(r.lp(), TripleShaper::quadAmp(r.lp(), r.bp(), r.svf.R), e);
   }
   const int win = static_cast<int>(fs / f) + 1;
   double dev = 0.0, pre250 = 0.0;
   for (int i = 0; i + win < T; i += win) {
     double pk = 0.0;
-    for (int j = i; j < i + win; ++j) pk = std::fmax(pk, std::fabs(xpre[j]));
-    dev = std::fmax(dev, std::fabs(pk - 0.9 * env[i + win / 2]));
+    for (int j = i; j < i + win; ++j) pk = std::fmax(pk, std::fabs(xpre[static_cast<size_t>(j)]));
+    dev = std::fmax(dev, std::fabs(pk - 0.9 * env[static_cast<size_t>(i + win / 2)]));
     if (i / win == static_cast<int>(0.25 * fs) / win) pre250 = pk;
   }
   std::printf("%s: PRE-VCA folder-input peak vs envelope, max deviation %.4f FS (verify 0.036); at 250 ms %.3f\n", t, dev,
               pre250);
   tu::atMost(t, "peak tracks envelope", dev, 0.04);
   // POST: the shaper input is the body itself (unchanged from v2.1).
-  tu::truth(t, "POST input is the body", TripleShaper::shapeMorph(lp[1000], 0.2, 0.01, 0.0, 0.001) == lp[1000]);
+  tu::truth(t, "POST input is the body", tu::same(TripleShaper::shapeMorph(lp[1000], 0.2, 0.01, 0.0, 0.001), lp[1000]));
 }
 
 void testShapeMorph() {
@@ -677,7 +677,7 @@ void testShapeMorph() {
     ph += dt;
   }
   const double sawA = tu::aliasLinesDb(std::vector<double>(y.begin() + N * M, y.end()), M, N, 48000.0, bins);
-  for (size_t n = 0; n < y.size(); ++n) y[n] = TripleShaper::morphAt(std::sin(2.0 * kPi * (0.25 + n * dt)), 1.0, 0.25 + n * dt, 0.5, dt);
+  for (size_t n = 0; n < y.size(); ++n) y[n] = TripleShaper::morphAt(std::sin(2.0 * kPi * (0.25 + static_cast<double>(n) * dt)), 1.0, 0.25 + static_cast<double>(n) * dt, 0.5, dt);
   const double triA = tu::aliasLinesDb(std::vector<double>(y.begin() + N * M, y.end()), M, N, 48000.0, bins);
   std::printf("%s: 398 Hz at 2x: SHAPE 1.0 (saw) alias %.1f dB (verify -62.2), SHAPE 0.5 (tri) %.1f dB (verify -109.1)\n",
               t, sawA, triA);

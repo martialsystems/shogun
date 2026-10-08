@@ -119,7 +119,7 @@ void testIntIgnoresTrigJacks() {
   for (long n = 0; n < 12000; ++n) {
     g.vals[tp] = (n >= 9000 && n < 9100) ? 5.0f : 0.0f;
     g.step(*e);
-    silent = silent && !e->voiceActive(BD1) && e->voiceOut(BD1) == 0.0;
+    silent = silent && !e->voiceActive(BD1) && tu::same(e->voiceOut(BD1), 0.0);
   }
   auto f = make();
   sharedPattern(*f);
@@ -146,7 +146,7 @@ void testRestIsSilent() {
     bool z = true;
     for (int n = 0; n < 6000; ++n) {
       e->processSample();
-      z = z && e->mainL() == 0.0 && e->mainR() == 0.0 && e->voiceOut(v) == 0.0;
+      z = z && tu::same(e->mainL(), 0.0) && tu::same(e->mainR(), 0.0) && tu::same(e->voiceOut(v), 0.0);
     }
     std::printf("%s: %s rest step outputs 0: %d\n", T, kVoiceNames[v], z ? 1 : 0);
     truth(T, kVoiceNames[v], z);
@@ -218,7 +218,7 @@ void testShuffleSurvivesOddLength() {
   const long want[6] = {0, 8000, 12000, 20000, 24000, 32000};
   truth(T, "six hits", h.hits.size() >= 6);
   for (int i = 0; i < 6 && i < static_cast<int>(h.hits.size()); ++i)
-    near(T, "hit sample", static_cast<double>(h.hits[i]), static_cast<double>(want[i]), 0.0);
+    near(T, "hit sample", static_cast<double>(h.hits[static_cast<size_t>(i)]), static_cast<double>(want[i]), 0.0);
 }
 
 void testInitKitAndEmptyPattern() {
@@ -231,12 +231,12 @@ void testInitKitAndEmptyPattern() {
     for (const Step& s : t.steps) empty = empty && !s.on;
   }
   bool defaults = true;
-  for (int i = 0; i < kParamCount; ++i) defaults = defaults && e->param(i) == kParams[i].def;
+  for (int i = 0; i < kParamCount; ++i) defaults = defaults && tu::same(e->param(i), static_cast<double>(kParams[i].def));
   e->setRunning(true);
   bool silent = true;
   for (int n = 0; n < 96000; ++n) {
     e->processSample();
-    silent = silent && e->mainL() == 0.0 && e->mainR() == 0.0;
+    silent = silent && tu::same(e->mainL(), 0.0) && tu::same(e->mainR(), 0.0);
   }
   std::printf("%s: pattern '%s', every track 16 long: %d, empty: %d, params at INIT: %d, one bar silent: %d\n", T,
               p.name, len16 ? 1 : 0, empty ? 1 : 0, defaults ? 1 : 0, silent ? 1 : 0);
@@ -272,7 +272,7 @@ int bestLag(const std::vector<double>& r, const std::vector<double>& x) {
   double bv = -1e300;
   for (int L = 0; L <= 60; ++L) {
     double s = 0.0;
-    for (size_t n = 0; n + L < x.size(); ++n) s += r[n] * x[n + L];
+    for (size_t n = 0; n + static_cast<size_t>(L) < x.size(); ++n) s += r[n] * x[n + static_cast<size_t>(L)];
     if (s > bv) {
       bv = s;
       best = L;
@@ -292,9 +292,9 @@ void testControlOutsZeroLatency() {
     e->setRunning(true);
     for (int n = 0; n < 3000; ++n) {
       g.step(*e);
-      out.push_back(g.vals[drumPort(BD1, DJ_OUT)]);
-      env.push_back(g.vals[drumPort(BD1, DJ_ENV)]);
-      gate.push_back(g.vals[PORT_LD_GATE]);
+      out.push_back(static_cast<double>(g.vals[drumPort(BD1, DJ_OUT)]));
+      env.push_back(static_cast<double>(g.vals[drumPort(BD1, DJ_ENV)]));
+      gate.push_back(static_cast<double>(g.vals[PORT_LD_GATE]));
     }
   };
   std::vector<double> o1, e1, g1, o2, e2, g2;
@@ -333,7 +333,7 @@ void testOsLatency() {
     for (int n = 0; n < 4000; ++n) {
       g.step(*e);
       mainL.push_back(e->mainL());
-      out.push_back(g.vals[drumPort(BD1, DJ_OUT)]);
+      out.push_back(static_cast<double>(g.vals[drumPort(BD1, DJ_OUT)]));
       aux.push_back(e->aux()[0]);
     }
   };
@@ -356,7 +356,7 @@ void testOsLatency() {
 double synthNoteOut(Engine& e, int v) {
   Graph g;
   g.step(e);
-  return g.vals[synthPort(v - LEAD, SJ_NOTE_OUT)];
+  return static_cast<double>(g.vals[synthPort(v - LEAD, SJ_NOTE_OUT)]);
 }
 
 void testPitchVoct() {
@@ -388,7 +388,7 @@ void testPitchVoct() {
     std::printf("%s: NOTE IN %+.0f V -> note %.4f, pitch error %.5f cents\n", T, volts, s.noteTarget, cents);
     near(T, "NOTE IN note", s.noteTarget, note, 1e-9);
     near(T, "NOTE IN pitch", cents, 0.0, 0.01);
-    if (volts == 0.0) {
+    if (tu::same(volts, 0.0)) {
       const double f0 = s.f;
       g.con[synthPort(0, SJ_VOCT)] = true;
       g.vals[synthPort(0, SJ_VOCT)] = 1.0f;
@@ -536,7 +536,7 @@ void testJackIdsJcsShared() {
   const auto hz = tab.resolve("BASS:HZ/V");
   const bool sharedOk = tab.size() == sizeof kPortRenames / sizeof kPortRenames[0] && hz.aliased &&
                         hz.id == "BASS:NOTE" && hz.conversion.law == jidai::jcs::AliasLaw::Lin55ToVoct &&
-                        hz.conversion.convert(2.0) == -0.25 && tab.resolve("SD:SNAPPY").id == "SD:TONE";
+                        tu::same(hz.conversion.convert(2.0), -0.25) && tab.resolve("SD:SNAPPY").id == "SD:TONE";
   jidai::jcs::AliasTable probe;
   const bool fanRefused = probe.add("HAT:DECAY", "CH:DECAY") && !probe.add("HAT:DECAY", "OH:DECAY");
   const bool legacyRefused = !probe.add("MIX L", "MIX:L") && !probe.add("LFO OUT", "MOD:LFO 1");
@@ -586,7 +586,7 @@ void testJackIdsAndTypes() {
   int typeErr = 0;
   for (int i = 0; i < kPorts && same; ++i) {
     const PortDesc& d = kPortTable[i];
-    same = same && ids[i] == d.id;
+    same = same && ids[static_cast<size_t>(i)] == d.id;
     const std::string id = d.id;
     const auto pj = jidai::jcs::parseJackId(id);  // shared R6 split
     const std::string lab = pj ? pj->label : id;
@@ -658,7 +658,7 @@ void testHostLock() {
 
 // ACC OUT (§13.2: "the step's accent volts while the step is on") follows the pattern in INT and in EXT; in EXT the
 // voice itself stays silent (forge pin). Steps: 0 acc 3, 4 acc 1, step 8 off.
-void testAccOutFollowsPattern() {
+static void testAccOutFollowsPattern() {
   const char* T = "testAccOutFollowsPattern";
   for (int ext = 0; ext < 2; ++ext) {
     auto e = make();
@@ -675,7 +675,7 @@ void testAccOutFollowsPattern() {
     bool voice = false;
     for (long n = 0; n < 9 * P; ++n) {
       g.step(*e);
-      const double v = g.vals[PORT_ACC_OUT];
+      const double v = static_cast<double>(g.vals[PORT_ACC_OUT]);
       if (n == P / 2) a0 = v;
       if (n == 4 * P + P / 2) a4 = v;
       if (n == 8 * P + P / 2) a8 = v;

@@ -13,11 +13,11 @@ namespace {
 
 // y[n] of voice v (post-VCA, pre-pan) for the first `len` samples after a trigger at n = 0.
 std::vector<double> renderVoice(Engine& e, int v, long len, double velVolts = 5.0, double bend = 0.0) {
-  std::vector<double> y(len);
+  std::vector<double> y(static_cast<size_t>(len));
   e.trigger(v, velVolts, bend);
   for (long n = 0; n < len; ++n) {
     e.processSample();
-    y[n] = e.voiceOut(v);
+    y[static_cast<size_t>(n)] = e.voiceOut(v);
   }
   return y;
 }
@@ -76,7 +76,7 @@ void testVoiceEndsWhenQuiet() {
   bool zero = true;
   for (int n = 0; n < 4000; ++n) {
     e->processSample();
-    if (n >= 200) zero = zero && e->mainL() == 0.0 && e->mainR() == 0.0;
+    if (n >= 200) zero = zero && tu::same(e->mainL(), 0.0) && tu::same(e->mainR(), 0.0);
   }
   const double y48b = renderVoice(*e, BD1, 49)[48];
   std::printf("%s: BD1 example end %ld (limit 3.162e-5), main exactly 0 after: %d, retrigger y(48) %.6f vs %.6f\n", T,
@@ -99,7 +99,7 @@ void testVoiceEndsWhenQuiet() {
     bool z = true;
     for (int n = 0; n < 2000; ++n) {
       ev->processSample();
-      if (n >= 200) z = z && ev->mainL() == 0.0 && ev->mainR() == 0.0 && ev->voiceOut(v) == 0.0;
+      if (n >= 200) z = z && tu::same(ev->mainL(), 0.0) && tu::same(ev->mainR(), 0.0) && tu::same(ev->voiceOut(v), 0.0);
     }
     std::printf("%s: %-3s ends at n = %ld, then 0: %d\n", T, kVoiceNames[v], ve, z ? 1 : 0);
     truth(T, kVoiceNames[v], ve > 0 && z);
@@ -314,7 +314,7 @@ void testClapBurstCount() {
   std::printf("; count 1 starts: %zu\n", s1.size());
   truth(T, "four bursts", s4.size() == 4);
   for (size_t i = 1; i < s4.size(); ++i) {
-    const double gapMs = 1000.0 * (s4[i] - s4[i - 1]) / 48000.0;
+    const double gapMs = 1000.0 * static_cast<double>(s4[i] - s4[i - 1]) / 48000.0;
     truth(T, "gap 10..12 ms", gapMs >= 10.0 && gapMs <= 12.0);
   }
   truth(T, "starts 0/528/1056/1584", s4.size() == 4 && s4[0] == 0 && s4[1] == 528 && s4[2] == 1056 && s4[3] == 1584);
@@ -360,8 +360,8 @@ void testNoonIsADrumMachine() {
   near(T, "BD1 f_tune 70 Hz +-3%", e->bd1().fTune / 70.0, 1.0, 0.03);
   near(T, "BD1 f(100 ms) locked", f100, 70.0 * std::exp2(9.0 * std::exp(-0.1 / 0.137) / 12.0), 1e-3);
   atMost(T, "BD1 -60 dB within 0.6 s", t60, 0.6);
-  truth(T, "no SOUND/WAVE/DRIVE", stepIndex(e->param(P_BD1_SOUND), 16) == 0 && e->param(P_BD1_WAVE) == 0.0 &&
-                                      e->param(P_BD1_DRIVE) == 0.0);
+  truth(T, "no SOUND/WAVE/DRIVE", stepIndex(e->param(P_BD1_SOUND), 16) == 0 && tu::same(e->param(P_BD1_WAVE), 0.0) &&
+                                      tu::same(e->param(P_BD1_DRIVE), 0.0));
   // SD noon: noise share of 20–200 ms energy, and the tone peak.
   auto s = make();
   s->trigger(SD);
@@ -377,13 +377,13 @@ void testNoonIsADrumMachine() {
       eT += tone * tone;
       eN += nz * nz;
     }
-    if (n >= 4800) tones[n - 4800] = tone;
+    if (n >= 4800) tones[static_cast<size_t>(n - 4800)] = tone;
   }
   const auto mag = tu::rfftMag(tones, nullptr);
   size_t pk = 1;
   for (size_t i = 1; i < mag.size(); ++i)
     if (mag[i] > mag[pk]) pk = i;
-  const double fPk = pk * 48000.0 / 16384.0;
+  const double fPk = static_cast<double>(pk) * 48000.0 / 16384.0;
   const double share = eN / (eN + eT);
   std::printf("%s: SD noon noise share (20-200 ms) %.3f, tone peak (100-400 ms) %.1f Hz\n", T, share, fPk);
   atLeast(T, "SD noise share >= 25%", share, 0.25);
@@ -459,7 +459,7 @@ void testCenterPanIsNotHalf() {
   bool silent = true, equal = true;
   for (int n = 0; n < 1200; ++n) {
     c->processSample();
-    if (n < 528) silent = silent && c->mainL() == 0.0 && c->mainR() == 0.0;
+    if (n < 528) silent = silent && tu::same(c->mainL(), 0.0) && tu::same(c->mainR(), 0.0);
     else equal = equal && std::fabs(c->mainL() - c->mainR()) < 1e-12;
   }
   std::printf("%s: CP Attack 0: silent before 528 %d, L = R after %d\n", T, silent ? 1 : 0, equal ? 1 : 0);
@@ -477,7 +477,7 @@ void testIndividualOutStaysInMix() {
     g.con[drumPort(BD1, DJ_OUT)] = patched;
     e->trigger(BD1);
     for (int n = 0; n <= 48 + e->latencySamples(); ++n) g.step(*e);
-    outV = g.vals[drumPort(BD1, DJ_OUT)];
+    outV = static_cast<double>(g.vals[drumPort(BD1, DJ_OUT)]);
     mainV = e->mainL();
   };
   double o1, m1, o2, m2, o3, m3;

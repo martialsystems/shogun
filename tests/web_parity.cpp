@@ -4,31 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-extern "C" {
-void sg_init(double);
-int sg_knob_count();
-const char* sg_knob_name(int);
-void sg_set_knob(int, int);
-void sg_set_level(int, double);
-void sg_set_master(double);
-void sg_set_mode(int);
-void sg_set_tempo(double);
-void sg_set_scale(int);
-void sg_set_running(int);
-void sg_restart();
-void sg_set_bar(int);
-void sg_set_track(int, int, int, int, int);
-void sg_set_drum(int, int, int, int, int, int);
-void sg_set_note(int, int, int, int, int);
-void sg_commit();
-void sg_trigger(int, double, double);
-void sg_trigger_note(int, int, double);
-void sg_release(int);
-void sg_patch(int, int);
-float* sg_out_l();
-float* sg_out_r();
-void sg_process(int);
-}
+#include "../web/wasm/shogun_web.h"
 
 int main(int argc, char** argv) {
   if (argc < 2) return 2;
@@ -76,7 +52,7 @@ int main(int argc, char** argv) {
       while (n > 0) {
         const int k = n > 1024 ? 1024 : n;
         sg_process(k);
-        for (int i = 0; i < k; ++i) std::printf("%.9g %.9g\n", sg_out_l()[i], sg_out_r()[i]);
+        for (int i = 0; i < k; ++i) std::printf("%.9g %.9g\n", static_cast<double>(sg_out_l()[i]), static_cast<double>(sg_out_r()[i]));
         n -= k;
       }
     }

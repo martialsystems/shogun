@@ -140,7 +140,7 @@ struct Width {
   void process(double& L, double& R) {
     const double M = 0.5 * (L + R), S = 0.5 * (L - R);
     const double lo = sLp.lp(S);
-    if (w == 1.0) return;
+    if (dsp::exactEq(w, 1.0)) return;
     const double S2 = lo * (w < 1.0 ? w : 1.0) + (S - lo) * w;
     L = M + S2;
     R = M - S2;
@@ -193,7 +193,7 @@ struct Delay {
     const int i0 = static_cast<int>(pos);
     const double fr = pos - i0;
     const int i1 = (i0 + 1) % size;
-    return (1.0 - fr) * b[static_cast<size_t>(i0)] + fr * b[static_cast<size_t>(i1)];
+    return (1.0 - fr) * static_cast<double>(b[static_cast<size_t>(i0)]) + fr * static_cast<double>(b[static_cast<size_t>(i1)]);
   }
   void process(double inL, double inR, double& outL, double& outR) {
     const double dl = read(bufL, time), dr = read(bufR, time);

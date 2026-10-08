@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
         continue;
       }
       const int id = findParam(wid->getParameterID().toRawUTF8());
-      if (id != n || f->range.start != 0.0f || f->range.end != 1.0f || std::fabs(f->get() - kParams[id].def) > 1e-6f) ++bad;
+      if (id != n || !dsp::exactEq(f->range.start, 0.0f) || !dsp::exactEq(f->range.end, 1.0f) || std::fabs(f->get() - kParams[id].def) > 1e-6f) ++bad;
       ++n;
     }
     check(n == kParamCount && bad == 0, "params", "count " + juce::String(n) + " (table " + juce::String(kParamCount) +
@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
     check(l1 == 0 && l2 == 23 && l4 == 26, "latency", juce::String(l1) + "/" + juce::String(l2) + "/" + juce::String(l4) + " samples");
     // host rate: the engine runs at the host's rate (no resampler)
     auto q = fresh(44100.0);
-    check(q->engine().sampleRate() == 44100.0, "host rate", "engine fs " + juce::String(q->engine().sampleRate(), 1) + " Hz at host 44100");
+    check(dsp::exactEq(q->engine().sampleRate(), 44100.0), "host rate", "engine fs " + juce::String(q->engine().sampleRate(), 1) + " Hz at host 44100");
   }
 
   // ---- INIT: empty pattern is silent while running; MIDI note 36 plays BD1
@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
     auto p = fresh();
     p->requestRun(true);
     const Render r = render(*p, 48000);
-    check(r.peakMain == 0.0f && juce::String(p->editPattern().name) == "001 INIT", "INIT silent",
+    check(dsp::exactEq(r.peakMain, 0.0f) && juce::String(p->editPattern().name) == "001 INIT", "INIT silent",
           "peak " + juce::String(r.peakMain, 6) + ", pattern '" + juce::String(p->editPattern().name) + "'");
     juce::MidiBuffer m;
     m.addEvent(juce::MidiMessage::noteOn(10, 36, static_cast<juce::uint8>(127)), 0);
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
     p->requestRun(true);
     const Render r = render(*p, 96000);
     check(r.peakMain > 0.05f, "INT test beat", "peak " + juce::String(r.peakMain, 6) + " = " +
-                                                   juce::String(20.0 * std::log10(r.peakMain), 2) + " dBFS");
+                                                   juce::String(20.0 * std::log10(static_cast<double>(r.peakMain)), 2) + " dBFS");
     auto q = fresh();
     setU(*q, "CLOCK:SOURCE", 0.5f);
     setU(*q, "CLOCK:MODE", 0.75f);  // EXT
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
     q->commitEdits();
     q->requestRun(true);
     const Render r2 = render(*q, 96000);
-    check(r2.peakMain == 0.0f, "EXT ignores pattern", "peak " + juce::String(r2.peakMain, 6));
+    check(dsp::exactEq(r2.peakMain, 0.0f), "EXT ignores pattern", "peak " + juce::String(r2.peakMain, 6));
   }
 
   // ---- host lock: SOURCE = HOST follows ppq (7.25 quarters = step 29 at 1/16)

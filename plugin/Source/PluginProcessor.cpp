@@ -37,7 +37,7 @@ void srcFromString(const juce::String& s, int& src, int& voice) {
 // Display text (host automation lanes): the engine's formatParam, the same text the panel LCDs show.
 juce::String paramText(int id, float u) {
   char buf[48];
-  formatParam(id, u, buf, sizeof buf);
+  formatParam(id, static_cast<double>(u), buf, sizeof buf);
   return juce::String::fromUTF8(buf);
 }
 
@@ -104,8 +104,8 @@ void ShogunAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
   sr_ = sampleRate;
   block_ = samplesPerBlock;
   offlineNow_ = isNonRealtime();
-  int os = osFromParam(paramU(P_GLOBAL_OS));
-  if (offlineNow_ && stepIndex(paramU(P_GLOBAL_OFFLINE), 2) == 1) os = 4;
+  int os = osFromParam(static_cast<double>(paramU(P_GLOBAL_OS)));
+  if (offlineNow_ && stepIndex(static_cast<double>(paramU(P_GLOBAL_OFFLINE)), 2) == 1) os = 4;
   osNow_ = os;
   // Coefficients at the host rate (§3.1): prepare() recomputes every filter for fs = sampleRate, no resampler.
   engine_->prepare(sr_, osNow_);
@@ -128,12 +128,12 @@ void ShogunAudioProcessor::handleAsyncUpdate() {
 void ShogunAudioProcessor::applyParams(bool now) {
   for (int i = 0; i < kParamCount; ++i) {
     const float u = raw_[static_cast<size_t>(i)]->load(std::memory_order_relaxed);
-    if (u == last_[static_cast<size_t>(i)]) continue;
+    if (shogun::dsp::exactEq(u, last_[static_cast<size_t>(i)])) continue;
     last_[static_cast<size_t>(i)] = u;
     if (now)
-      engine_->setParamNow(i, u);
+      engine_->setParamNow(i, static_cast<double>(u));
     else
-      engine_->setParam(i, u);
+      engine_->setParam(i, static_cast<double>(u));
   }
 }
 
@@ -261,8 +261,8 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
   const double t0 = juce::Time::getMillisecondCounterHiRes();
 
   // OS / OFFLINE changes re-prepare off the audio thread.
-  int wantOs = osFromParam(paramU(P_GLOBAL_OS));
-  if (isNonRealtime() && stepIndex(paramU(P_GLOBAL_OFFLINE), 2) == 1) wantOs = 4;
+  int wantOs = osFromParam(static_cast<double>(paramU(P_GLOBAL_OS)));
+  if (isNonRealtime() && stepIndex(static_cast<double>(paramU(P_GLOBAL_OFFLINE)), 2) == 1) wantOs = 4;
   if (wantOs != osNow_ && !isUpdatePending()) triggerAsyncUpdate();
 
   // Host lock (§10.1): ppq / bpm / playing at the first sample of the block.
@@ -365,11 +365,11 @@ juce::var ShogunAudioProcessor::patchToJson() const {
   root->setProperty("version", 2);
   root->setProperty("name", juce::String(uiPattern_.name));
   root->setProperty("unit", "0x" + juce::String::toHexString(static_cast<juce::int64>(engine_->serial())).toUpperCase());
-  root->setProperty("tolerance", paramU(P_GLOBAL_TOLERANCE));
-  root->setProperty("drift", paramU(P_GLOBAL_DRIFT));
+  root->setProperty("tolerance", static_cast<double>(paramU(P_GLOBAL_TOLERANCE)));
+  root->setProperty("drift", static_cast<double>(paramU(P_GLOBAL_DRIFT)));
 
   auto* params = new juce::DynamicObject();
-  for (int i = 0; i < kParamCount; ++i) params->setProperty(kParams[i].id, paramU(i));
+  for (int i = 0; i < kParamCount; ++i) params->setProperty(kParams[i].id, static_cast<double>(paramU(i)));
   root->setProperty("params", juce::var(params));
 
   juce::Array<juce::var> mods;
@@ -398,7 +398,7 @@ juce::var ShogunAudioProcessor::patchToJson() const {
 
   auto* cv = new juce::DynamicObject();
   for (int i = 0; i < kPorts; ++i)
-    if (kPortTable[i].dir == PortDir::In && uiCvAmt_[static_cast<size_t>(i)] != 1.0)
+    if (kPortTable[i].dir == PortDir::In && !shogun::dsp::exactEq(uiCvAmt_[static_cast<size_t>(i)], 1.0))
       cv->setProperty(kPortTable[i].id, uiCvAmt_[static_cast<size_t>(i)]);
   root->setProperty("cvAmt", juce::var(cv));
   auto* laws = new juce::DynamicObject();  // alias laws of migrated inputs (lin55 / drum PITCH 1/12)
@@ -427,17 +427,17 @@ juce::var ShogunAudioProcessor::patchToJson() const {
       so->setProperty("i", s);
       so->setProperty("on", st.on);
       so->setProperty("acc", st.acc);
-      so->setProperty("prob", st.prob);
-      so->setProperty("micro", st.micro);
+      so->setProperty("prob", static_cast<double>(st.prob));
+      so->setProperty("micro", static_cast<double>(st.micro));
       so->setProperty("flam", st.flam);
       so->setProperty("ratchet", st.ratchet);
-      if (st.bend != 0.0f) so->setProperty("bend", st.bend);
+      if (!shogun::dsp::exactEq(st.bend, 0.0f)) so->setProperty("bend", static_cast<double>(st.bend));
       if (!isDrum(t)) {
         so->setProperty("note", st.note);
         so->setProperty("tie", st.tie);
       }
       auto* locks = new juce::DynamicObject();
-      for (int k = 0; k < st.nLocks; ++k) locks->setProperty(kParams[st.locks[k].param].id, st.locks[k].u);
+      for (int k = 0; k < st.nLocks; ++k) locks->setProperty(kParams[st.locks[k].param].id, static_cast<double>(st.locks[k].u));
       so->setProperty("locks", juce::var(locks));
       steps.add(juce::var(so));
     }

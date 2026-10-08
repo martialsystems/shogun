@@ -114,7 +114,7 @@ class WaveShaper {
     for (int i = 0; i < 3; ++i) {
       const double a = clamp(macroStage(i, p.macro) + p.trim[i] + vc * p.vcAmt[i], 0.0, 1.0);
       const double b = clamp(p.sym[i] + vc * p.vcSym[i], -1.0, 1.0);
-      if (a == 0.0 && b == 0.0) continue;
+      if (dsp::exactEq(a, 0.0) && dsp::exactEq(b, 0.0)) continue;
       x = stage(x, a, b, kK[i]);
     }
     return x;

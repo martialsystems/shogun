@@ -120,7 +120,7 @@ void Engine::buildTables() {
 
 void Engine::loadInit() {
   for (int p = 0; p < kParamCount; ++p) {
-    target_[p] = smooth_[p] = ue_[p] = kParams[p].def;
+    target_[p] = smooth_[p] = ue_[p] = static_cast<double>(kParams[p].def);
     locked_[p] = false;
     lock_[p] = 0.0;
     isMoving_[p] = touched_[p] = false;
@@ -255,7 +255,7 @@ void Engine::setParam(int id, double u) {
   if (kParams[id].kind == ParamKind::Stepped || kParams[id].kind == ParamKind::Toggle) {
     smooth_[id] = target_[id];
     refreshBase(id);
-  } else if (!isMoving_[id] && smooth_[id] != target_[id]) {
+  } else if (!isMoving_[id] && !dsp::exactEq(smooth_[id], target_[id])) {
     isMoving_[id] = true;
     moving_[nMoving_++] = id;
   }
@@ -407,9 +407,9 @@ void Engine::clockSample(const float* in, const bool* con) {
     }
     const int mode = stepIndex(target_[P_CLOCK_CLK_IN], 6);
     const double perQ = mode == 0 ? spqG : kPpqn[mode];
-    ppq = extCount_ > 0 ? (extCount_ - 1) / perQ : -1.0;
+    ppq = extCount_ > 0 ? static_cast<double>(extCount_ - 1) / perQ : -1.0;
   } else {
-    if (bpm != intAnchorBpm_) {
+    if (!dsp::exactEq(bpm, intAnchorBpm_)) {
       intAnchorPpq_ = intPpq_;
       intAnchorSample_ = sample_;
       intAnchorBpm_ = bpm;
@@ -451,7 +451,7 @@ void Engine::clockSample(const float* in, const bool* con) {
     if (s == lastStep_[t]) continue;
     const double period = src == SRC_EXT ? extPeriod_ * spqG / spq : 60.0 * fs_ / (bpm * spq);
     bool fire = (s == lastStep_[t] + 1) || lastStep_[t] < 0 || src == SRC_EXT;
-    if (!fire) fire = (pos - s) * period < 1.0;  // host jump/loop: fire only on an exact boundary
+    if (!fire) fire = (pos - static_cast<double>(s)) * period < 1.0;  // host jump/loop: fire only on an exact boundary
     if (fire) onTrackStep(t, s, period);
     lastStep_[t] = s;
   }
@@ -480,14 +480,14 @@ void Engine::onTrackStep(int t, long s, double period) {
     const double sw = tr.swing < 0.0 ? 0.5 + 0.25 * target_[P_CLOCK_SWING] : tr.swing;
     double off = 0.0;
     if ((k & 1) == 1) off += (2.0 * sw - 1.0) * period;  // odd clock steps (KEPT)
-    off += st.micro * period;
+    off += static_cast<double>(st.micro) * period;
     off += std::round(tr.shift * 0.030 * fs_);
     return off;
   };
   const double off = offset(s);
-  if (off >= 0.0 || !started_[t]) scheduleHits(t, s, static_cast<int>(((s % len) + len) % len), sample_ + std::max(0.0, off), period);
+  if (off >= 0.0 || !started_[t]) scheduleHits(t, s, static_cast<int>(((s % len) + len) % len), static_cast<double>(sample_) + std::max(0.0, off), period);
   const double off2 = offset(s + 1);
-  if (off2 < 0.0) scheduleHits(t, s + 1, static_cast<int>((((s + 1) % len) + len) % len), sample_ + period + off2, period);
+  if (off2 < 0.0) scheduleHits(t, s + 1, static_cast<int>((((s + 1) % len) + len) % len), static_cast<double>(sample_) + period + off2, period);
   started_[t] = true;
 }
 
@@ -499,7 +499,7 @@ void Engine::scheduleHits(int t, long s, int pos, double when, double period) {
   e.pos = pos;
   e.pattern = true;
   e.acc = std::clamp<int>(st.acc, 1, 3);
-  e.bend = st.bend;
+  e.bend = static_cast<double>(st.bend);
   e.note = st.note;
   e.tie = st.tie;
   if (t == LEAD || t == BASS) {
@@ -512,7 +512,7 @@ void Engine::scheduleHits(int t, long s, int pos, double when, double period) {
   const int bar = 1 + stepIndex(target_[P_CLOCK_BAR], 32);
   if (st.prob < 1.0f) {
     const double u = seededUniform(pattern_.seed, s / bar, t, s, 0x9B0Bu);
-    if (u >= st.prob) return;
+    if (u >= static_cast<double>(st.prob)) return;
   }
   e.kind = 0;
   if (st.flam > 0 && t != CP) {  // flam is not on clap (KEPT)
@@ -595,7 +595,7 @@ void Engine::fireEvent(const Event& e, const float* in, const bool* con) {
   p.fromJack = false;
   // VEL normal: the step accent volts; a patched VEL jack replaces them (one law, §4.8).
   const int velPort = isDrum(v) ? drumPort(v, DJ_VEL) : synthPort(v - LEAD, SJ_VEL);
-  p.velVolts = (con && con[velPort]) ? in[velPort] : kAccentVolts[e.acc - 1];
+  p.velVolts = (con && con[velPort]) ? static_cast<double>(in[velPort]) : kAccentVolts[e.acc - 1];
   p.velPatched = con && con[velPort];
   if (e.pattern && isDrum(v)) {
     accOut_ = std::max(accOut_, kAccentVolts[e.acc - 1]);
@@ -617,7 +617,7 @@ void Engine::applyLocks(int v, int track, int pos) {
     const int p = st.locks[i].param;
     if (p < 0 || p >= kParamCount) continue;
     locked_[p] = true;
-    lock_[p] = st.locks[i].u;
+    lock_[p] = static_cast<double>(st.locks[i].u);
     refreshBase(p);
   }
 }
@@ -641,7 +641,7 @@ void Engine::computeEffective(const float* in, const bool* con) {
     const int p = moving_[i];
     smooth_[p] = smooth_[p] + (1.0 - aSmooth_) * (target_[p] - smooth_[p]);
     if (std::fabs(target_[p] - smooth_[p]) < 1e-12) smooth_[p] = target_[p];
-    if (smooth_[p] != target_[p]) moving_[w++] = p;
+    if (!dsp::exactEq(smooth_[p], target_[p])) moving_[w++] = p;
     else isMoving_[p] = false;
     refreshBase(p);
   }
@@ -655,15 +655,15 @@ void Engine::computeEffective(const float* in, const bool* con) {
   for (int v = 0; v < kDrumVoices; ++v) {
     const int dPort = drumPort(v, DJ_DECAY), tPort = drumPort(v, DJ_TONE);
     const bool dCon = con && con[dPort];
-    if (velDecayOff_[v] != 0.0 || dCon) {
-      const double d = velDecayOff_[v] + (dCon ? cvAmt_[dPort] * in[dPort] / 5.0 : 0.0);
+    if (!dsp::exactEq(velDecayOff_[v], 0.0) || dCon) {
+      const double d = velDecayOff_[v] + (dCon ? cvAmt_[dPort] * static_cast<double>(in[dPort]) / 5.0 : 0.0);
       for (int k = 0; k < 2; ++k)
         if (decayParams_[v][k] >= 0) addEffective(decayParams_[v][k], d);
     }
-    if (toneParam_[v] >= 0 && con && con[tPort]) addEffective(toneParam_[v], cvAmt_[tPort] * in[tPort] / 5.0);
+    if (toneParam_[v] >= 0 && con && con[tPort]) addEffective(toneParam_[v], cvAmt_[tPort] * static_cast<double>(in[tPort]) / 5.0);
   }
-  if (con && con[PORT_BD1_WAVE]) addEffective(P_BD1_WAVE, cvAmt_[PORT_BD1_WAVE] * in[PORT_BD1_WAVE] / 5.0);
-  if (con && con[PORT_BD2_WAVE]) addEffective(P_BD2_WAVE, cvAmt_[PORT_BD2_WAVE] * in[PORT_BD2_WAVE] / 5.0);
+  if (con && con[PORT_BD1_WAVE]) addEffective(P_BD1_WAVE, cvAmt_[PORT_BD1_WAVE] * static_cast<double>(in[PORT_BD1_WAVE]) / 5.0);
+  if (con && con[PORT_BD2_WAVE]) addEffective(P_BD2_WAVE, cvAmt_[PORT_BD2_WAVE] * static_cast<double>(in[PORT_BD2_WAVE]) / 5.0);
   for (int i = 0; i < nTouched_; ++i) ue_[touchedList_[i]] = clampd(ue_[touchedList_[i]], 0.0, 1.0);
 }
 
@@ -676,9 +676,9 @@ VoiceCtx Engine::makeCtx(int v, const float* in, const bool* con) const {
   c.modulated = touched_;
   if (isDrum(v) && con) {
     const int pp = drumPort(v, DJ_PITCH), tp = drumPort(v, DJ_TONE), dp = drumPort(v, DJ_DECAY);
-    if (con[pp]) c.pitchOct = cvAmt_[pp] * in[pp];  // 1 V/oct × AMT (§12.3)
-    if (con[tp]) c.toneV = cvAmt_[tp] * in[tp];
-    if (con[dp]) c.decayV = cvAmt_[dp] * in[dp];
+    if (con[pp]) c.pitchOct = cvAmt_[pp] * static_cast<double>(in[pp]);  // 1 V/oct × AMT (§12.3)
+    if (con[tp]) c.toneV = cvAmt_[tp] * static_cast<double>(in[tp]);
+    if (con[dp]) c.decayV = cvAmt_[dp] * static_cast<double>(in[dp]);
   }
   const double tol = ue_[P_GLOBAL_TOLERANCE];
   c.tolPitch = std::exp2((4.0 * tol * zPitch_[v] + driftCents_[v]) / 1200.0);
@@ -727,21 +727,21 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     p.bend = 0.0;
     p.track = p.pos = -1;
     p.fromJack = true;
-    p.trigVolts = in[tp];
+    p.trigVolts = static_cast<double>(in[tp]);
     const int vp = drumPort(v, DJ_VEL);
     p.velPatched = con[vp];
-    p.velVolts = con[vp] ? in[vp] : 5.0;
+    p.velVolts = con[vp] ? static_cast<double>(in[vp]) : 5.0;
   }
   for (int s = 0; s < 2; ++s) {
     const int v = LEAD + s;
     SynthVoice& sv = synth(v);
     const int gp = synthPort(s, SJ_GATE), np = synthPort(s, SJ_NOTE), vo = synthPort(s, SJ_VOCT), cp = synthPort(s, SJ_CUTOFF);
     auto pitchIn = [&](int port) {
-      const double x = in[port];
+      const double x = static_cast<double>(in[port]);
       return inConv_[port].identity() ? x : inConv_[port].convert(x);  // old HZ/V cable: shared Lin55ToVoct (§12.3)
     };
     sv.vOct = (con && con[vo]) ? cvAmt_[vo] * pitchIn(vo) : 0.0;
-    sv.cutoffOct = (con && con[cp]) ? cvAmt_[cp] * in[cp] : 0.0;
+    sv.cutoffOct = (con && con[cp]) ? cvAmt_[cp] * static_cast<double>(in[cp]) : 0.0;
     sv.a4 = a4Hz(target_[P_GLOBAL_A4]);
     const bool noteJack = con && con[np];
     // A patched NOTE jack is a continuous pitch: it moves the held note at once (slew is the patch's job; GLIDE is for
@@ -757,7 +757,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
         p.kind = 1;
         p.note = noteJack ? voctNote(pitchIn(np)) : synthSeqNote_[s];
         const int vp = synthPort(s, SJ_VEL);
-        p.velVolts = con[vp] ? in[vp] : 5.0;
+        p.velVolts = con[vp] ? static_cast<double>(in[vp]) : 5.0;
         p.velPatched = con[vp];
         p.acc = p.velVolts >= 4.5 ? 3 : 2;
         p.tie = false;
@@ -819,7 +819,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
       SynthVoice& sv = synth(v);
       const int np = synthPort(v - LEAD, SJ_NOTE);
       if (con && con[np])  // NOTE jack overrides the sequencer note
-        h.note = voctNote(inConv_[np].identity() ? in[np] : inConv_[np].convert(in[np]));
+        h.note = voctNote(inConv_[np].identity() ? static_cast<double>(in[np]) : inConv_[np].convert(static_cast<double>(in[np])));
       const bool legato = h.tie && sv.gate;
       sv.noteOn(c, h.note, h.acc * ue_[sv.pAcc] > 0.0 ? h.acc : 0.0, h.tie);
       if (!legato) hitGain_[v] = h.gVel;
@@ -900,7 +900,7 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   for (int v = 0; v < kVoices; ++v) {
     const int rp = isDrum(v) ? drumPort(v, DJ_RET) : synthPort(v - LEAD, SJ_RET);
     retOn[v] = con && con[rp];
-    if (retOn[v]) upRet_[v].push(in[rp] / 5.0, retBuf_[v]);
+    if (retOn[v]) upRet_[v].push(static_cast<double>(in[rp]) / 5.0, retBuf_[v]);
   }
   // FOLD VC (§4.6): jack (linear interpolation across sub-samples) or the internal source.
   static constexpr int kFoldPort[5] = {PORT_FOLD_VC_BD1, PORT_FOLD_VC_BD2, PORT_FOLD_VC_LTC, PORT_FOLD_VC_MTC,
@@ -914,7 +914,7 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
     vcSrc[i] = stepIndex(ue_[w.vcSrc], 6 + kVoices);
     vcLevel[i] = ue_[w.vcLevel];
     vcPrev_[i] = vcCur_[i];
-    vcCur_[i] = vcJack[i] ? cvAmt_[kFoldPort[i]] * in[kFoldPort[i]] / 5.0 : 0.0;
+    vcCur_[i] = vcJack[i] ? cvAmt_[kFoldPort[i]] * static_cast<double>(in[kFoldPort[i]]) / 5.0 : 0.0;
   }
 
   // Bus / send / solo bookkeeping.

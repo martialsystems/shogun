@@ -9,7 +9,6 @@ using namespace shogun;
 
 namespace {
 
-constexpr float kNoRing = 0.0f;  // referenced by the generated table (the ring value is not exported)
 const LayoutOp kOps[] = {
 #include "PanelLayout.inc"
 };
@@ -47,7 +46,7 @@ juce::Font font(float z, bool bold, bool mono = false, float ls = 0.0f) {
 #endif
   juce::Font f(juce::FontOptions().withName(mono ? "DejaVu Sans Mono" : sans).withPointHeight(z).withStyle(
       bold ? "Bold" : "Regular"));
-  if (ls != 0.0f && z > 0.0f) f.setExtraKerningFactor(ls / z);
+  if (!shogun::dsp::exactEq(ls, 0.0f) && z > 0.0f) f.setExtraKerningFactor(ls / z);
   return f;
 }
 
@@ -71,7 +70,7 @@ juce::ColourGradient radial(juce::Rectangle<float> b, float cx, float cy, float 
   juce::ColourGradient grad(juce::Colour(it->second), c, juce::Colour((stops.end() - 1)->second),
                             c.translated(rad, 0.0f), true);
   for (const auto& s : stops)
-    if (s.first > 0.0f && s.first < 1.0f) grad.addColour(s.first, juce::Colour(s.second));
+    if (s.first > 0.0f && s.first < 1.0f) grad.addColour(static_cast<double>(s.first), juce::Colour(s.second));
   return grad;
 }
 
@@ -142,12 +141,12 @@ void drawKnob(juce::Graphics& g, float cx, float cy, float r, const juce::String
               int steps, float ring, bool dim) {
   const int n = steps ? steps : ticks;
   for (int i = 0; i < n && n > 1; ++i) {
-    const float a = juce::degreesToRadians(-135.0f + 270.0f * i / (n - 1) - 90.0f);
+    const float a = juce::degreesToRadians(-135.0f + 270.0f * static_cast<float>(i) / static_cast<float>(n - 1) - 90.0f);
     const float l = (i == 0 || i == n - 1 || i == (n - 1) / 2) ? 3.2f : 2.0f;
     line(g, cx + (r + 2.5f) * std::cos(a), cy + (r + 2.5f) * std::sin(a), cx + (r + 2.5f + l) * std::cos(a),
          cy + (r + 2.5f + l) * std::sin(a), juce::Colour(0xFFBDBCB2), 0.9f);
   }
-  if (ring != 0.0f) {  // modulation ring: green arc from the knob value over the summed depth
+  if (!shogun::dsp::exactEq(ring, 0.0f)) {  // modulation ring: green arc from the knob value over the summed depth
     const float a0 = -135.0f + 270.0f * v, a1 = juce::jlimit(-135.0f, 135.0f, a0 + 270.0f * ring);
     juce::Path p;
     p.addCentredArc(cx, cy, r + 1.2f, r + 1.2f, 0.0f, juce::degreesToRadians(a0), juce::degreesToRadians(a1), true);
@@ -198,7 +197,7 @@ void drawToggle(juce::Graphics& g, float cx, float cy, const juce::String& l, co
 }
 
 void drawRtext(juce::Graphics& g, float x, float y, const juce::String& t, float z) {
-  const float w = t.length() * z * 0.62f + 6.0f;
+  const float w = static_cast<float>(t.length()) * z * 0.62f + 6.0f;
   rect(g, x - w / 2, y - z + 0.5f, w, z + 3, 1.5f, 0xFFF2F1EA);
   text(g, x, y, t, z, 1, juce::Colour(0xFF0B0C0B), true);
 }
@@ -220,7 +219,7 @@ void drawJack(juce::Graphics& g, float cx, float cy, const juce::String& label, 
 void drawBox(juce::Graphics& g, float x, float y, float w, float h, const juce::String& title, float tz) {
   rect(g, x, y, w, h, 2, 0, 0xFF4AA862, 1.1f);
   if (title.isNotEmpty()) {
-    rect(g, x + 6, y - 6, title.length() * tz * 0.66f + 10.0f, 12, 0, 0xFF121412);
+    rect(g, x + 6, y - 6, static_cast<float>(title.length()) * tz * 0.66f + 10.0f, 12, 0, 0xFF121412);
     text(g, x + 11, y + 3.5f, title, tz, 0, INK, true, 1.2f);
   }
 }
@@ -228,7 +227,7 @@ void drawBox(juce::Graphics& g, float x, float y, float w, float h, const juce::
 
 juce::String paramDisplay(int id, float u) {
   char buf[48];
-  formatParam(id, u, buf, sizeof buf);  // the engine's display law (same text as host automation)
+  formatParam(id, static_cast<double>(u), buf, sizeof buf);  // the engine's display law (same text as host automation)
   return u8(buf);
 }
 
@@ -380,7 +379,7 @@ void ShogunPanel::paintStatic(juce::Graphics& g, int tab) {
 
 void ShogunPanel::paint(juce::Graphics& g) {
   const float scale = juce::jmax(1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
-  if (!cache_[tab_].isValid() || cacheScale_[tab_] != scale) {
+  if (!cache_[tab_].isValid() || !shogun::dsp::exactEq(cacheScale_[tab_], scale)) {
     cache_[tab_] = juce::Image(juce::Image::RGB, juce::roundToInt(kW * scale), juce::roundToInt(kH * scale), true);
     juce::Graphics cg(cache_[tab_]);
     cg.addTransform(juce::AffineTransform::scale(scale));
@@ -448,8 +447,8 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       const ParamInfo& pi = kParams[pid];
       v = u;
       if (o.kind == KNOB && (pi.kind == ParamKind::Stepped) && pi.steps > 1)
-        v = static_cast<float>(stepIndex(u, pi.steps)) / static_cast<float>(pi.steps - 1);
-      on = stepIndex(u, pi.steps > 0 ? pi.steps : 2) > 0;
+        v = static_cast<float>(stepIndex(static_cast<double>(u), pi.steps)) / static_cast<float>(pi.steps - 1);
+      on = stepIndex(static_cast<double>(u), pi.steps > 0 ? pi.steps : 2) > 0;
       if (o.kind == KEY) {
         fill = on ? (t == "M" || t.containsIgnoreCase("MUTE") ? RED.getARGB() : (fill ? fill : AMB.getARGB())) : 0;
         stroke = o.stroke;
@@ -471,7 +470,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       break;
     case B_CHOICE: {
       const ParamInfo& pi = kParams[b->a];
-      const bool sel = stepIndex(proc_.paramU(b->a), pi.steps) == b->b;
+      const bool sel = stepIndex(static_cast<double>(proc_.paramU(b->a)), pi.steps) == b->b;
       fill = sel ? GRN.getARGB() : 0;
       break;
     }
@@ -529,7 +528,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       const float db = pk > 1e-6f ? 20.0f * std::log10(pk) : -120.0f;
       const int lit = juce::jlimit(0, 34, juce::roundToInt((db + 48.0f) / 48.0f * 34.0f));
       for (int i = 0; i < lit; ++i)
-        rect(g, 959.5f + i * 5.0f, y + 1.2f, 3.6f, 4.6f, 0, i < 24 ? METERGRN.getARGB() : (i < 30 ? AMB.getARGB() : RED.getARGB()));
+        rect(g, 959.5f + static_cast<float>(i) * 5.0f, y + 1.2f, 3.6f, 4.6f, 0, i < 24 ? METERGRN.getARGB() : (i < 30 ? AMB.getARGB() : RED.getARGB()));
       return;
     }
     case B_VMETER: {
@@ -548,7 +547,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     }
     case B_BUS: {
       const int oid = paramOf("OUTPUT", b->a);
-      const int i = oid >= 0 ? stepIndex(proc_.paramU(oid), 14) : 0;
+      const int i = oid >= 0 ? stepIndex(static_cast<double>(proc_.paramU(oid)), 14) : 0;
       static const char* const s[] = {"M", "A", "B", "C", "D", "1/2", "3/4", "5/6", "7/8", "9/10", "11/12", "13/14", "15/16", "PR"};
       t = s[i];
       break;
@@ -585,14 +584,14 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       char buf[32];
       std::snprintf(buf, sizeof buf, "LFO %d:MODE", b->a + 1);
       const int id = findParam(buf);
-      fill = id >= 0 && stepIndex(proc_.paramU(id), 3) == b->b ? GRN.getARGB() : 0;
+      fill = id >= 0 && stepIndex(static_cast<double>(proc_.paramU(id)), 3) == b->b ? GRN.getARGB() : 0;
       break;
     }
     case B_LFORATE: {
       char buf[32];
       std::snprintf(buf, sizeof buf, "LFO %d:SYNC", b->a + 1);
       const int sy = findParam(buf);
-      std::snprintf(buf, sizeof buf, "LFO %d:%s", b->a + 1, sy >= 0 && stepIndex(proc_.paramU(sy), 2) == 1 ? "DIV" : "RATE");
+      std::snprintf(buf, sizeof buf, "LFO %d:%s", b->a + 1, sy >= 0 && stepIndex(static_cast<double>(proc_.paramU(sy)), 2) == 1 ? "DIV" : "RATE");
       const int id = findParam(buf);
       if (id >= 0) t = paramDisplay(id, proc_.paramU(id));
       break;
@@ -602,13 +601,13 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       char buf[32];
       std::snprintf(buf, sizeof buf, "LFO %d:SHAPE", b->a + 1);
       const int sid = findParam(buf);
-      const int shape = sid >= 0 ? stepIndex(proc_.paramU(sid), 6) : 0;
+      const int shape = sid >= 0 ? stepIndex(static_cast<double>(proc_.paramU(sid)), 6) : 0;
       const float x0 = o.x, yc = o.y, ww = 260.0f, hh = 24.4f;
       juce::Path p;
       juce::Random rnd(7);
       float hold = 0.0f;
       for (int i = 0; i <= 120; ++i) {
-        const float ph = std::fmod(2.0f * i / 120.0f, 1.0f);
+        const float ph = std::fmod(2.0f * static_cast<float>(i) / 120.0f, 1.0f);
         float s = 0.0f;
         switch (shape) {
           case 0: s = std::sin(juce::MathConstants<float>::twoPi * ph); break;
@@ -621,7 +620,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
             s = hold;
             break;
         }
-        const float px = x0 + ww * i / 120.0f, py = yc - hh * s;
+        const float px = x0 + ww * static_cast<float>(i) / 120.0f, py = yc - hh * s;
         if (i == 0) p.startNewSubPath(px, py);
         else p.lineTo(px, py);
       }
@@ -667,7 +666,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
           int ri = 0;
           for (int q = 0; q < 6; ++q)
             if (kRatchets[q] == st.ratchet) ri = q;
-          v = ri / 5.0f;
+          v = static_cast<float>(ri) / 5.0f;
           break;
         }
         case 3: v = st.prob; break;
@@ -802,7 +801,7 @@ void ShogunPanel::paintMatrix(juce::Graphics& g, const LayoutOp&) {
   const int n = matrixRows(proc_.editRows(), slots);
   for (int i = 0; i < n; ++i) {
     const mod::Row& row = proc_.editRows()[slots[i]];
-    const float y = kRowY0 + i * kRowH;
+    const float y = kRowY0 + static_cast<float>(i) * kRowH;
     const bool empty = row.src == mod::SRC_NONE;
     if (i % 2 == 0) rect(g, 14, y - 2, 772, 26, 0, 0xFFFFFFFF, 0, 1, .025f);
     text(g, 26, y + 14, juce::String(slots[i] + 1), 8, 1, DIM, false);
@@ -980,7 +979,7 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
       } else {
         // keys, toggles, LCDs: step to the next choice (toggles flip)
         const int n = pi.steps > 0 ? pi.steps : 2;
-        const int i = (stepIndex(proc_.paramU(pid), n) + (e.mods.isRightButtonDown() ? n - 1 : 1)) % n;
+        const int i = (stepIndex(static_cast<double>(proc_.paramU(pid)), n) + (e.mods.isRightButtonDown() ? n - 1 : 1)) % n;
         proc_.setParamU(pid, pi.kind == ParamKind::Toggle ? static_cast<float>(i) : static_cast<float>(stepU(i, n)));
         dragBound_ = -1;
       }
@@ -1149,7 +1148,7 @@ void ShogunPanel::mouseDrag(const juce::MouseEvent& e) {
   const float dy = (dragStart_.y - e.position.y) / (e.mods.isShiftDown() ? 800.0f : 200.0f);
   if (matrixDragRow_ >= 0) {
     proc_.editRows()[matrixDragRow_].depth =
-        juce::jlimit(-1.0, 1.0, matrixDragDepth_ + (e.position.x - dragStart_.x) / (70.0 * 0.9467));
+        juce::jlimit(-1.0, 1.0, matrixDragDepth_ + static_cast<double>(e.position.x - dragStart_.x) / (70.0 * 0.9467));
     proc_.commitEdits();
     repaint();
     return;
@@ -1166,7 +1165,7 @@ void ShogunPanel::mouseDrag(const juce::MouseEvent& e) {
       const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
       if (pid >= 0 && o.kind == KNOB) proc_.param(pid)->setValueNotifyingHost(u);
       else if (b.kind == B_SP && pid < 0) {
-        const double amt = 2.0 * u - 1.0;
+        const double amt = 2.0 * static_cast<double>(u) - 1.0;
         const int v = selVoice_;
         if (isDrum(v)) for (int j : {DJ_PITCH, DJ_DECAY, DJ_TONE}) proc_.setCvAmt(drumPort(v, j), amt);
         else proc_.setCvAmt(synthPort(v - LEAD, SJ_NOTE), amt);
@@ -1183,13 +1182,13 @@ void ShogunPanel::mouseDrag(const juce::MouseEvent& e) {
     }
     case B_CVAMT: {
       // CV AMT applies to the voice's PITCH/DECAY/TONE jacks (§11 ROUTE); right-click menus set them separately.
-      const double amt = 2.0 * u - 1.0;
+      const double amt = 2.0 * static_cast<double>(u) - 1.0;
       if (isDrum(b.a)) for (int j : {DJ_PITCH, DJ_DECAY, DJ_TONE}) proc_.setCvAmt(drumPort(b.a, j), amt);
       else proc_.setCvAmt(synthPort(b.a - LEAD, SJ_NOTE), amt);
       break;
     }
-    case B_TSWING: pat.tracks[b.a].swing = u <= 0.0f ? -1.0 : 0.5 + 0.25 * u; proc_.commitEdits(); break;
-    case B_TSHIFT: pat.tracks[b.a].shift = u; proc_.commitEdits(); break;
+    case B_TSWING: pat.tracks[b.a].swing = u <= 0.0f ? -1.0 : 0.5 + 0.25 * static_cast<double>(u); proc_.commitEdits(); break;
+    case B_TSHIFT: pat.tracks[b.a].shift = static_cast<double>(u); proc_.commitEdits(); break;
     case B_SK: {
       float cur = 0.0f;
       const Step& st = selStep();

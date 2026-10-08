@@ -156,7 +156,7 @@ void testLfoHostPhase() {
     for (int k = 0; k < B; ++k) {
       const double ppq = blockPpq + k * bpm / (60.0 * fs);
       l.tick(bpm, ppq, true);
-      const long double exact = static_cast<long double>(n + k) / fs * bpm / 60.0;
+      const long double exact = static_cast<long double>(n + k) / static_cast<long double>(fs) * static_cast<long double>(bpm) / 60.0L;
       const double ex = static_cast<double>(exact - std::floor(exact));
       double err = l.global.ph - ex;
       err -= std::round(err);
@@ -182,18 +182,18 @@ void testLfoDeclick() {
   double maxStep = 0.0;
   for (int n = 0; n < N; ++n) {
     l.tick(120.0, 0.0, false);
-    y[n] = l.value(-1);
-    if (n > 0) maxStep = std::fmax(maxStep, std::fabs(y[n] - y[n - 1]));
+    y[static_cast<size_t>(n)] = l.value(-1);
+    if (n > 0) maxStep = std::fmax(maxStep, std::fabs(y[static_cast<size_t>(n)] - y[static_cast<size_t>(n - 1)]));
   }
   const auto w = tu::hann(N);
   std::vector<std::complex<double>> a(16384);
-  for (int i = 0; i < N; ++i) a[i] = y[i] * w[i];
+  for (int i = 0; i < N; ++i) a[static_cast<size_t>(i)] = y[static_cast<size_t>(i)] * w[static_cast<size_t>(i)];
   // Energy above 2 kHz over total, on the exact-length DFT as verify (direct, N not a power of two).
   double hi = 0.0, tot = 0.0;
   for (int k = 0; k <= N / 2; ++k) {
     std::complex<double> s(0.0, 0.0);
     const double ang = -2.0 * kPi * k / N;
-    for (int i = 0; i < N; ++i) s += y[i] * w[i] * std::polar(1.0, ang * i);
+    for (int i = 0; i < N; ++i) s += y[static_cast<size_t>(i)] * w[static_cast<size_t>(i)] * std::polar(1.0, ang * i);
     const double p = std::norm(s);
     tot += p;
     if (k * 48000.0 / N > 2000.0) hi += p;
@@ -220,7 +220,7 @@ void testShSlew() {
     l.tick(120.0, 0.0, false);
     if (l.global.y >= 1.0 - std::exp(-1.0)) n63 = n + 1;
   }
-  const double ms = 1000.0 * n63 / 48000.0;
+  const double ms = 1000.0 * static_cast<double>(n63) / 48000.0;
   std::printf("%s: SLEW 1 at 1/4, 120 BPM: tau 125 ms, 63 %% at %.3f ms\n", T, ms);
   near(T, "63% at 125.0 ms", ms, 125.0, 0.1);
 }

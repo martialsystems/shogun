@@ -5,6 +5,7 @@
 //     redesigned: old CC values map to u = cc/127, shuffle s to swing 0.5 + s/90, old jacks through the alias table.
 
 #include "shogun.h"
+#include "shogun_web.h"
 
 #ifdef __wasm__
 #define EXPORT(name) extern "C" __attribute__((export_name(#name)))
@@ -250,7 +251,7 @@ EXPORT(sg_text) char* sg_text() { return gText; }
 
 EXPORT(sg_param_count) int sg_param_count() { return kParamCount; }
 EXPORT(sg_param_id) const char* sg_param_id(int i) { return i >= 0 && i < kParamCount ? kParams[i].id : ""; }
-EXPORT(sg_param_default) double sg_param_default(int i) { return i >= 0 && i < kParamCount ? kParams[i].def : 0.0; }
+EXPORT(sg_param_default) double sg_param_default(int i) { return i >= 0 && i < kParamCount ? static_cast<double>(kParams[i].def) : 0.0; }
 EXPORT(sg_param_find) int sg_param_find() { return findParam(gText); }  // id written to sg_text()
 EXPORT(sg_set_param) void sg_set_param(int i, double u) {
   if (i >= 0 && i < kParamCount) applyU(i, u);
@@ -261,7 +262,7 @@ EXPORT(sg_port_count) int sg_port_count() { return kPorts; }
 EXPORT(sg_port_id) const char* sg_port_id(int i) { return i >= 0 && i < kPorts ? kPortTable[i].id : ""; }
 EXPORT(sg_port_role) int sg_port_role(int i) { return i >= 0 && i < kPorts ? static_cast<int>(kPortTable[i].role) : -1; }
 EXPORT(sg_port_find) int sg_port_find() { return portFromId(gText); }  // any R6 form, shared parseJackId
-EXPORT(sg_port_volts) double sg_port_volts(int i) { return i >= 0 && i < kPorts ? gE->portValues()[i] : 0.0; }
+EXPORT(sg_port_volts) double sg_port_volts(int i) { return i >= 0 && i < kPorts ? static_cast<double>(gE->portValues()[i]) : 0.0; }
 EXPORT(sg_cable) int sg_cable(int from, int to, int on) {
   if (on) return gE->addCable(from, to) ? 1 : 0;
   gE->removeCable(from, to);
@@ -369,7 +370,7 @@ EXPORT(sg_set_lfo) void sg_set_lfo(double cyclesPerBeat, double phase, int shape
   setU("LFO 1:MODE", stepU(mod::M_FREE_RUN, 3));
   setU("LFO 1:DEPTH", amount);
 }
-EXPORT(sg_lfo_volts) double sg_lfo_volts() { return gE->portValues()[findPort("MOD:LFO 1")]; }
+EXPORT(sg_lfo_volts) double sg_lfo_volts() { return static_cast<double>(gE->portValues()[findPort("MOD:LFO 1")]); }
 EXPORT(sg_lfo_phase) double sg_lfo_phase() { return gE->modulation().lfo[0].instanceFor(-1).ph; }
 
 EXPORT(sg_set_track) void sg_set_track(int v, int len, int shuffle, int shiftCc, int mute) {
