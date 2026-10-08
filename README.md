@@ -68,6 +68,7 @@ SHOGUN is built for VST3 hosts such as FL Studio. A new instance starts on the I
 
 ## Documentation
 
+- [SHOGUN User Manual](docs/manual/SHOGUN_Manual.md) ([PDF](docs/manual/SHOGUN_Manual.pdf)): the panel, patching, MIDI, factory kits, DAW setup and the JIDAI RACK back panel
 - [SCHEMATICS.md](SCHEMATICS.md): the signal flow and equations for every voice
 - [TESTPLAN.md](TESTPLAN.md): the named tests and the numbers they check
 - [BUILD_GUIDE.md](BUILD_GUIDE.md): engine layout and build notes
