@@ -58,4 +58,16 @@ void sg_trigger(int v, double gain, double bend);
 void sg_trigger_note(int v, int note, double gain);
 void sg_release(int v);
 void sg_patch(int input, int source);
+int sg_factory_count();
+const char* sg_factory_name(int i);
+int sg_factory_load(int i);
+void sg_rotate(double rot);
+int sg_get_track(int v, int field);
+int sg_get_step(int v, int s, int field);
+int sg_knob_cc(int i);
+double sg_get_level(int v);
+double sg_get_tempo();
+int sg_get_spq();
+int sg_get_bar();
+double sg_state_hash();
 }

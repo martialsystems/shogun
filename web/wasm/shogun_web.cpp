@@ -4,6 +4,7 @@
 //   * the old page API (sg_set_knob, sg_set_drum, sg_patch, …), kept so web/page keeps working while its panel is
 //     redesigned: old CC values map to u = cc/127, shuffle s to swing 0.5 + s/90, old jacks through the alias table.
 
+#include "factory.h"
 #include "shogun.h"
 #include "shogun_web.h"
 
@@ -51,6 +52,19 @@ extern "C" unsigned long strlen(const char* s) {
   unsigned long n = 0;
   while (s[n]) ++n;
   return n;
+}
+extern "C" char* strcpy(char* d, const char* s) {
+  char* r = d;
+  while ((*d++ = *s++) != 0) {
+  }
+  return r;
+}
+extern "C" int strncmp(const char* a, const char* b, unsigned long n) {
+  for (; n; --n, ++a, ++b) {
+    if (*a != *b) return static_cast<unsigned char>(*a) - static_cast<unsigned char>(*b);
+    if (!*a) return 0;
+  }
+  return 0;
 }
 extern "C" char* strncpy(char* d, const char* s, unsigned long n) {
   unsigned long i = 0;
@@ -433,4 +447,128 @@ EXPORT(sg_patch) void sg_patch(int input, int source) {
     gE->setCvAmt(to[k], amt);
   }
   gPatch[input] = source;
+}
+
+// ================================================================ factory bank (engine/factory.h, the same table as
+// the engine tests and the plugin's program list; read here by the freestanding patch reader)
+
+namespace {
+Patch gLoad;  // static: a patch is too large for the wasm stack
+std::uint32_t fnv(std::uint32_t h, const void* p, unsigned long n) {
+  const auto* b = static_cast<const unsigned char*>(p);
+  while (n--) h = (h ^ *b++) * 16777619u;
+  return h;
+}
+}  // namespace
+
+EXPORT(sg_factory_count) int sg_factory_count() { return factory::kPrograms; }
+EXPORT(sg_factory_name) const char* sg_factory_name(int i) { return factory::programName(i); }
+// Loads program i (0 = INIT) as the plugin does: INIT, then the kit's parameters (set at once), mod rows and pattern.
+// The transport keeps running; the page's own cables are cleared (the bank has none).
+EXPORT(sg_factory_load) int sg_factory_load(int i) {
+  if (!factory::loadProgram(i, gLoad)) return 0;
+  applyPatch(gLoad, *gE);
+  gPattern = gLoad.pattern;
+  for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
+  return 1;
+}
+// A chained pattern starts on counter rot: every track's steps rotate so its step 0 plays on that counter.
+EXPORT(sg_rotate) void sg_rotate(double rot) {
+  for (auto& tr : gPattern.tracks) {
+    const long len = tr.len, r = static_cast<long>(rot);
+    const long ph = ((-r) % len + len) % len, o = ph ? len - ph : 0;
+    if (!o) continue;
+    Step tmp[kMaxSteps];
+    for (long j = 0; j < len; ++j) tmp[(j + o) % len] = tr.steps[j];
+    for (long j = 0; j < len; ++j) tr.steps[j] = tmp[j];
+  }
+}
+// Read-back for the page panel, old voice order: track 0 len, 1 shuffle 0..15 (nearest to the swing that plays),
+// 2 shift CC, 3 mute; step 0 on, 1 accent 0..2, 2 flam -1..15, 3 bend CC (-1 none), 4 note, 5 tie, 6 hidden detail
+// (probability, micro-timing, ratchet or p-locks the panel does not show).
+EXPORT(sg_get_track) int sg_get_track(int v, int field) {
+  const int t = voiceOf(v);
+  if (t < 0) return 0;
+  const Track& tr = gPattern.tracks[t];
+  switch (field) {
+    case 0: return tr.len;
+    case 1: {
+      const double sw = tr.swing < 0.0 ? 0.5 + 0.25 * gE->param(P_CLOCK_SWING) : tr.swing;
+      const int s = static_cast<int>(std::floor((sw - 0.5) * 90.0 + 0.5));
+      return s < 0 ? 0 : (s > 15 ? 15 : s);
+    }
+    case 2: return static_cast<int>(std::floor(tr.shift * 127.0 + 0.5));
+    case 3: {
+      char buf[48];
+      std::snprintf(buf, sizeof buf, "%s:MUTE", kVoiceNames[t]);
+      return gE->param(findParam(buf)) > 0.5 ? 1 : 0;
+    }
+    default: return 0;
+  }
+}
+EXPORT(sg_get_step) int sg_get_step(int v, int s, int field) {
+  const int t = voiceOf(v);
+  if (t < 0 || s < 0 || s >= kMaxSteps) return 0;
+  const Step& st = gPattern.tracks[t].steps[s];
+  switch (field) {
+    case 0: return st.on ? 1 : 0;
+    case 1: return st.acc - 1;
+    case 2: return st.flam - 1;
+    case 3: return dsp::exactEq(st.bend, 0.0f) ? -1 : static_cast<int>(std::floor((st.bend / 12.0f + 1.0f) * 63.5f + 0.5f));
+    case 4: return st.note;
+    case 5: return st.tie ? 1 : 0;
+    case 6: return (st.prob < 1.0f || !dsp::exactEq(st.micro, 0.0f) || st.ratchet > 1 || st.nLocks > 0) ? 1 : 0;
+    default: return 0;
+  }
+}
+EXPORT(sg_knob_cc) int sg_knob_cc(int i) {
+  if (i < 0 || i >= kKnobCount) return 0;
+  const int p = findParam(kKnobs[i].id);
+  return p < 0 ? 0 : static_cast<int>(std::floor(gE->param(p) * 127.0 + 0.5));
+}
+EXPORT(sg_get_level) double sg_get_level(int v) {  // linear gain, the inverse of sg_set_level
+  const int t = voiceOf(v);
+  if (t < 0) return 0.0;
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%s:LEVEL", kVoiceNames[t]);
+  const double u = gE->param(findParam(buf));
+  return 1.4125 * u * u;
+}
+EXPORT(sg_get_tempo) double sg_get_tempo() { return 40.0 + 160.0 * gE->param(P_CLOCK_TEMPO); }
+EXPORT(sg_get_spq) int sg_get_spq() { return stepsPerQuarter(stepIndex(gE->param(P_CLOCK_SCALE), 4)); }
+EXPORT(sg_get_bar) int sg_get_bar() { return 1 + stepIndex(gE->param(P_CLOCK_BAR), 32); }
+// FNV-1a over everything a program sets (parameters as host floats, mod rows, pattern): the parity test compares the
+// wasm reader against the native one with it.
+EXPORT(sg_state_hash) double sg_state_hash() {
+  std::uint32_t h = 2166136261u;
+  for (int i = 0; i < kParamCount; ++i) {
+    const float f = static_cast<float>(gE->param(i));
+    h = fnv(h, &f, sizeof f);
+  }
+  for (const auto& r : gE->modulation().rows) {
+    const int w[7] = {r.src, r.srcVoice, r.dst, r.via, r.viaVoice, r.curve, r.on ? 1 : 0};
+    h = fnv(h, w, sizeof w);
+    h = fnv(h, &r.depth, sizeof r.depth);
+  }
+  const Pattern& pt = gE->pattern();
+  h = fnv(h, pt.name, std::strlen(pt.name));
+  h = fnv(h, &pt.seed, sizeof pt.seed);
+  for (const auto& tr : pt.tracks) {
+    const int w[2] = {tr.len, tr.scale};
+    h = fnv(h, w, sizeof w);
+    h = fnv(h, &tr.swing, sizeof tr.swing);
+    h = fnv(h, &tr.shift, sizeof tr.shift);
+    for (int s = 0; s < tr.len; ++s) {
+      const Step& st = tr.steps[s];
+      const int b[8] = {st.on ? 1 : 0, st.acc, st.flam, st.ratchet, st.note, st.tie ? 1 : 0, st.nLocks, 0};
+      h = fnv(h, b, sizeof b);
+      const float f[3] = {st.prob, st.micro, st.bend};
+      h = fnv(h, f, sizeof f);
+      for (int k = 0; k < st.nLocks; ++k) {
+        h = fnv(h, &st.locks[k].param, sizeof st.locks[k].param);
+        h = fnv(h, &st.locks[k].u, sizeof st.locks[k].u);
+      }
+    }
+  }
+  return static_cast<double>(h);
 }

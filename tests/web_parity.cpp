@@ -42,10 +42,14 @@ int main(int argc, char** argv) {
       else if (!std::strcmp(fn, "sg_trigger_note")) sg_trigger_note(i0, i1, a[2]);
       else if (!std::strcmp(fn, "sg_release")) sg_release(i0);
       else if (!std::strcmp(fn, "sg_patch")) sg_patch(i0, i1);
+      else if (!std::strcmp(fn, "sg_factory_load")) sg_factory_load(i0);
+      else if (!std::strcmp(fn, "sg_rotate")) sg_rotate(a[0]);
       else {
         std::fprintf(stderr, "unknown call %s\n", fn);
         return 2;
       }
+    } else if (!std::strcmp(op, "hash")) {  // loaded state, compared exactly
+      std::printf("H %.0f\n", sg_state_hash());
     } else if (!std::strcmp(op, "process")) {
       int n = 0;
       std::sscanf(line, "%*s %d", &n);

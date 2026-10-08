@@ -30,10 +30,11 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   bool isMidiEffect() const override { return false; }
   double getTailLengthSeconds() const override { return 2.0; }
 
-  int getNumPrograms() override { return 1; }
-  int getCurrentProgram() override { return 0; }
-  void setCurrentProgram(int) override {}
-  const juce::String getProgramName(int) override { return "INIT"; }
+  // Programs: the factory bank (engine/factory.h), INIT first. A host program change loads the kit and its pattern.
+  int getNumPrograms() override;
+  int getCurrentProgram() override { return currentProgram_; }
+  void setCurrentProgram(int program) override;
+  const juce::String getProgramName(int program) override;
   void changeProgramName(int, const juce::String&) override {}
 
   void getStateInformation(juce::MemoryBlock& destData) override;
@@ -61,6 +62,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   void requestRestart();
   void requestIdeal();
   void initPatch();
+  void loadProgram(int program);  // INIT, then the bank document through patchFromJson (the saved-state path)
 
   // ---------------------------------------------------------------- meters (written by the audio thread)
   struct Meters {
@@ -93,6 +95,8 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   std::vector<juce::RangedAudioParameter*> params_;
   std::vector<std::atomic<float>*> raw_;
   std::vector<float> last_;
+  int currentProgram_ = 0;
+  std::atomic<bool> snapParams_{false};  // next block sets parameters without smoothing (program change)
   std::vector<int> ccToParam_[128];
 
   double sr_ = 48000.0;

@@ -2,6 +2,8 @@
 
 #include <jidai/CableStandard.h>
 
+#include "factory.h"
+
 #include <cmath>
 #include <cstring>
 
@@ -516,7 +518,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
           (running ? u8(" \xE2\x96\xB6") : u8(" \xE2\x96\xA0"));
       break;
     }
-    case B_KIT: t = "INIT"; break;
+    case B_KIT: t = u8(factory::programName(proc_.getCurrentProgram())).toUpperCase(); break;
     case B_PATTERN: t = u8(pat.name); break;
     case B_CPU: t = "CPU " + juce::String(juce::roundToInt(100.0f * proc_.meters.cpu.load())) + "%"; break;
     case B_CPULED: on = proc_.meters.cpu.load() < 0.8f; fill = on ? GRN.getARGB() : RED.getARGB(); on = true; break;
@@ -930,7 +932,7 @@ int ShogunPanel::findBound(juce::Point<float> p) const {
       case B_TABTEXT: case B_RUN: case B_RST: case B_CVAMT: case B_TSCALE: case B_TSWING: case B_TSHIFT:
       case B_LFOMODE: case B_MATRIX: case B_JACK: case B_TRK: case B_PAGE: case B_COPY: case B_PASTE: case B_CLEAR:
       case B_RANDOM: case B_SHIFTL: case B_SHIFTR: case B_CLEARLOCKS: case B_IDEAL: case B_INITPATCH: case B_PANIC:
-      case B_REROLL: case B_SP: case B_WP: case B_CLIPLED: case B_FADER: case B_DISP:
+      case B_REROLL: case B_SP: case B_WP: case B_CLIPLED: case B_FADER: case B_DISP: case B_KIT: case B_PATTERN:
         return *it;
       default: break;
     }
@@ -1098,7 +1100,22 @@ void ShogunPanel::click(int bi, const juce::MouseEvent& e, juce::Point<float> p)
     }
     case B_CLEARLOCKS: selStep().clearLocks(); commit(); break;
     case B_IDEAL: proc_.requestIdeal(); break;
-    case B_INITPATCH: proc_.initPatch(); break;
+    case B_INITPATCH: proc_.setCurrentProgram(0); break;
+    case B_KIT:
+    case B_PATTERN: {  // the factory bank browser: INIT and the kits, each with its pattern
+      juce::PopupMenu m;
+      for (int i = 0; i < factory::kPrograms; ++i)
+        m.addItem(i + 1, juce::String(i + 1).paddedLeft('0', 3) + " " + u8(factory::programName(i)), true,
+                  i == proc_.getCurrentProgram());
+      juce::Component::SafePointer<ShogunPanel> safe(this);
+      m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(), [safe](int r) {
+        if (safe != nullptr && r > 0) {
+          safe->proc_.setCurrentProgram(r - 1);
+          safe->repaint();
+        }
+      });
+      break;
+    }
     case B_PANIC: proc_.requestRestart(); proc_.requestRun(false); break;
     case B_REROLL: break;  // serial re-roll: next pass (needs the per-unit tolerance re-seed on the audio thread)
     case B_FADER: {

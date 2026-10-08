@@ -6,15 +6,16 @@
 #include <cstring>
 
 #include "PluginEditor.h"
+#include "factory.h"
 
 using namespace shogun;
 
 namespace {
 
-const char* const kSrcNames[] = {"", "LFO 1", "LFO 2", "LFO 3", "LFO 4", "ENV", "PENV", "VEL",
-                                 "ACC", "RND HIT", "NOTE", "RND", "MOD W", "AT"};
-constexpr int kSrcCount = static_cast<int>(sizeof kSrcNames / sizeof kSrcNames[0]);
-const char* const kCurveNames[] = {"LIN", "EXP", "LOG", "S"};
+// Mod source and curve names of the saved state: the engine's (engine/patch.h), shared with the factory bank.
+const char* const* const kSrcNames = kStateSrcNames;
+constexpr int kSrcCount = mod::kSourceCount;
+const char* const* const kCurveNames = kStateCurveNames;
 
 juce::String srcToString(int src, int voice) {
   if (src <= mod::SRC_NONE || src >= kSrcCount) return {};
@@ -202,6 +203,26 @@ void ShogunAudioProcessor::initPatch() {
   commitEdits();
 }
 
+int ShogunAudioProcessor::getNumPrograms() { return factory::kPrograms; }
+const juce::String ShogunAudioProcessor::getProgramName(int program) {
+  return juce::String::fromUTF8(factory::programName(program));
+}
+void ShogunAudioProcessor::setCurrentProgram(int program) { loadProgram(program); }
+
+void ShogunAudioProcessor::loadProgram(int program) {
+  if (program < 0 || program >= factory::kPrograms) return;
+  currentProgram_ = program;
+  if (program == 0) {
+    initPatch();
+    snapParams_.store(true, std::memory_order_release);
+    return;
+  }
+  // The bank documents are sparse: INIT first, then the document exactly as a saved state loads.
+  for (int i = 0; i < kParamCount; ++i) param(i)->setValueNotifyingHost(kParams[i].def);
+  patchFromJson(juce::JSON::parse(juce::String::fromUTF8(factory::programJson(program))));
+  snapParams_.store(true, std::memory_order_release);  // the kit's values, not a glide from INIT's
+}
+
 void ShogunAudioProcessor::pickUpEdits() {
   const std::uint32_t e = editEpoch_.load(std::memory_order_acquire);
   if (e == appliedEpoch_) return;
@@ -278,7 +299,7 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     }
   }
   engine_->setHostTransport(ht);
-  applyParams(false);
+  applyParams(snapParams_.exchange(false, std::memory_order_acq_rel));  // a program change lands at once
   pickUpEdits();
 
   const int rq = runReq_.exchange(-1);
@@ -558,6 +579,7 @@ void ShogunAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {
   juce::XmlElement xml("SHOGUN");
   xml.setAttribute("version", 2);
   xml.setAttribute("running", engine_->running() ? 1 : 0);
+  xml.setAttribute("program", currentProgram_);
   xml.addTextElement(juce::JSON::toString(patchToJson(), true));
   copyXmlToBinary(xml, destData);
 }
@@ -567,6 +589,7 @@ void ShogunAudioProcessor::setStateInformation(const void* data, int sizeInBytes
   if (xml == nullptr || !xml->hasTagName("SHOGUN")) return;
   if (xml->getIntAttribute("version", 1) < 2) return;  // v1 plugin states (old AudioParameterInt ids) are not migrated
   patchFromJson(juce::JSON::parse(xml->getAllSubText()));
+  currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, xml->getIntAttribute("program", 0));
 }
 
 juce::AudioProcessorEditor* ShogunAudioProcessor::createEditor() { return new ShogunAudioProcessorEditor(*this); }

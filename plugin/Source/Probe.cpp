@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "PluginEditor.h"
+#include "factory.h"
 
 using namespace shogun;
 
@@ -170,6 +171,52 @@ int main(int argc, char** argv) {
     const Render r = render(*p, 24000, &m);
     check(ok && r.peakAux > 0.05f, "aux 1/2 bus", "channels " + juce::String(p->getTotalNumOutputChannels()) + ", aux peak " +
                                                     juce::String(r.peakAux, 6) + ", main peak " + juce::String(r.peakMain, 6));
+  }
+
+  // ---- factory programs (engine/factory.h): the host program list, each program plays 2 bars between -40 and -6 dBFS
+  //      at 44.1 and 48 kHz (INT clock), and its saved state reloads to the same document
+  {
+    auto p = fresh();
+    int names = 0;
+    for (int i = 0; i < p->getNumPrograms(); ++i)
+      if (p->getProgramName(i) == juce::String::fromUTF8(factory::programName(i)) && p->getProgramName(i).isNotEmpty()) ++names;
+    check(p->getNumPrograms() == factory::kPrograms && factory::kPrograms > 16 && names == factory::kPrograms &&
+              p->getProgramName(0) == "INIT",
+          "programs", juce::String(p->getNumPrograms()) + " (INIT + " + juce::String(factory::kCount) + " factory kits), names " +
+                          juce::String(names));
+    int bad = 0, trips = 0;
+    double lo = 0.0, hi = -200.0;
+    juce::String worst;
+    for (int i = 1; i < factory::kPrograms; ++i) {
+      for (double sr : {44100.0, 48000.0}) {
+        auto q = fresh(sr);
+        q->setCurrentProgram(i);
+        if (q->getCurrentProgram() != i || juce::String(q->editPattern().name).substring(4) != q->getProgramName(i)) ++bad;
+        if (dsp::exactEq(sr, 44100.0)) {  // saved state of the loaded program reloads to the same document
+          juce::MemoryBlock a, b;
+          q->getStateInformation(a);
+          auto t = fresh(sr);
+          t->setStateInformation(a.getData(), static_cast<int>(a.getSize()));
+          t->getStateInformation(b);
+          if (a == b && t->getCurrentProgram() == i) ++trips;
+        }
+        setU(*q, "CLOCK:SOURCE", 0.5f);  // INT: no host transport in the probe
+        q->requestRun(true);
+        const double bpm = 40.0 + 160.0 * static_cast<double>(q->paramU(findParam("CLOCK:TEMPO")));
+        const Render r = render(*q, static_cast<int>(std::ceil(2.0 * 4.0 * 60.0 / bpm * sr)));
+        const double db = r.peakMain > 0.0f ? 20.0 * std::log10(static_cast<double>(r.peakMain)) : -200.0;
+        if (db <= -40.0 || db > -6.0) {
+          ++bad;
+          worst = q->getProgramName(i) + " " + juce::String(db, 2);
+        }
+        lo = std::fmin(lo, db);
+        hi = std::fmax(hi, db);
+      }
+    }
+    check(bad == 0, "programs play", juce::String(factory::kCount) + " kits x 2 rates, 2 bars, peaks " + juce::String(lo, 2) +
+                                         " .. " + juce::String(hi, 2) + " dBFS" + (worst.isEmpty() ? "" : ", out: " + worst));
+    check(trips == factory::kCount, "program state", juce::String(trips) + "/" + juce::String(factory::kCount) +
+                                                         " programs save and reload to the same state");
   }
 
   // ---- state: XML SHOGUN version=2 with the JSON patch; alias resolution on load

@@ -7,8 +7,11 @@ const root = new URL("..", import.meta.url).pathname;
 // The engine's transcendental math comes from the page (Math.*): the same imports as web/page/host.js.
 const ENV = { env: { sin: Math.sin, cos: Math.cos, tan: Math.tan, exp: Math.exp, exp2: (x) => Math.pow(2, x), pow: Math.pow, tanh: Math.tanh, log: Math.log, log2: Math.log2, log10: Math.log10, log1p: Math.log1p, atan2: Math.atan2 } };
 const scenario = readFileSync(root + "web/parity_scenario.txt", "utf8");
-const native = execFileSync(root + "build/web_parity", [root + "web/parity_scenario.txt"], { maxBuffer: 1 << 28 })
-  .toString().trim().split("\n").map((l) => l.split(" ").map(Number));
+const nativeLines = execFileSync(root + "build/web_parity", [root + "web/parity_scenario.txt"], { maxBuffer: 1 << 28 })
+  .toString().trim().split("\n");
+const native = nativeLines.filter((l) => !l.startsWith("H ")).map((l) => l.split(" ").map(Number));
+const nativeHash = nativeLines.filter((l) => l.startsWith("H ")).map((l) => +l.slice(2));
+const hashes = [];
 
 const { instance } = await WebAssembly.instantiate(readFileSync(root + "build/shogun.wasm"), ENV);
 const x = instance.exports;
@@ -23,6 +26,7 @@ for (const line of scenario.split("\n")) {
   if (!w[0] || w[0].startsWith("#")) continue;
   if (w[0] === "knob") x.sg_set_knob(knobs[w[1]], +w[2]);
   else if (w[0] === "call") x[w[1]](...w.slice(2).map(Number));
+  else if (w[0] === "hash") hashes.push(x.sg_state_hash());
   else if (w[0] === "process") {
     for (let n = +w[1]; n > 0; n -= 1024) {
       const k = Math.min(n, 1024);
@@ -39,8 +43,10 @@ for (let i = 0; i < out.length; i++) {
   if (d > worst) { worst = d; at = i; }
   loud = Math.max(loud, Math.abs(native[i][0]), Math.abs(native[i][1]));
 }
-const ok = out.length === native.length && worst < 1e-5 && loud > 0.1;
-console.log(`${out.length} samples, peak ${loud.toFixed(3)}, largest wasm/native difference ${worst.toExponential(2)} at ${at}`);
+const hashOk = hashes.length === nativeHash.length && hashes.length > 0 && hashes.every((h, i) => h === nativeHash[i]);
+const ok = out.length === native.length && worst < 1e-5 && loud > 0.1 && hashOk;
+console.log(`${out.length} samples, peak ${loud.toFixed(3)}, largest wasm/native difference ${worst.toExponential(2)} at ${at}; ` +
+  `${hashes.filter((h, i) => h === nativeHash[i]).length}/${nativeHash.length} loaded-state hashes equal (factory programs)`);
 console.log(ok ? "wasm matches the native engine" : "MISMATCH");
 
 // The bay law, on a fresh instance with an empty pattern: a cable from CLK OUT (or ACC OUT) into BD1 Trig fires BD1
@@ -152,6 +158,35 @@ async function bd1With(patch) {
 {
   const a = await bd1With(false), b = await bd1With(true);
   law.push(["LFO OUT into BD1 PITCH changes the kick", a.some((x, i) => Math.abs(x - b[i]) > 1e-3)]);
+}
+// The factory bank through the wasm reader: every kit with its pattern plays 2 bars between -40 and -6 dBFS at
+// 44.1 and 48 kHz at the engine's default master (the page's own default master, 0.65, is lower still).
+{
+  let lo = 0, hi = -999, bad = 0, n = 0;
+  const y0 = await fresh();
+  const count = y0.sg_factory_count();
+  for (let i = 1; i < count; i++)
+    for (const fs of [44100, 48000]) {
+      const y = await fresh();
+      y.sg_init(fs);
+      if (!y.sg_factory_load(i)) { bad++; continue; }
+      y.sg_set_running(1);
+      const len = Math.ceil(2 * y.sg_get_bar() * 60 * fs / (y.sg_get_tempo() * y.sg_get_spq()));
+      let pk = 0;
+      for (let o = 0; o < len; o += 1024) {
+        const k = Math.min(1024, len - o);
+        y.sg_process(k);
+        const L = new Float32Array(y.memory.buffer, y.sg_out_l(), k), R = new Float32Array(y.memory.buffer, y.sg_out_r(), k);
+        for (let j = 0; j < k; j++) pk = Math.max(pk, Math.abs(L[j]), Math.abs(R[j]));
+      }
+      const db = pk > 0 ? 20 * Math.log10(pk) : -999;
+      lo = Math.min(lo, db); hi = Math.max(hi, db); n++;
+      if (!(db > -40 && db <= -6)) bad++;
+    }
+  const str0 = (y, p) => { const m = new Uint8Array(y.memory.buffer); let t = ""; while (m[p]) t += String.fromCharCode(m[p++]); return t; };
+  const names = new Set(); for (let i = 0; i < count; i++) names.add(str0(y0, y0.sg_factory_name(i)));
+  law.push(["factory bank: " + count + " programs (INIT + " + (count - 1) + "), unique names " + names.size + ", " + n + " renders peak " +
+    lo.toFixed(2) + " .. " + hi.toFixed(2) + " dBFS", bad === 0 && count >= 17 && names.size === count && str0(y0, y0.sg_factory_name(0)) === "INIT"]);
 }
 for (const [name, pass] of law) console.log((pass ? "ok   " : "FAIL ") + name);
 process.exit(ok && law.every((l) => l[1]) ? 0 : 1);
