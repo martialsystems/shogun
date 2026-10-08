@@ -21,6 +21,8 @@ set_target_properties(shogun_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set(SHOGUN_PLUGIN_SOURCES
   Source/PluginProcessor.cpp
   Source/PluginEditor.cpp)
+# Our sources build warning-clean (-Werror); JUCE's own modules keep JUCE's flags.
+set_source_files_properties(${SHOGUN_PLUGIN_SOURCES} Source/Probe.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 
 juce_add_plugin(Shogun
   COMPANY_NAME "Martial Systems"
@@ -48,8 +50,9 @@ target_link_libraries(Shogun
     shogun_engine
     juce::juce_audio_utils
   PUBLIC
-    juce::juce_recommended_config_flags
-    juce::juce_recommended_warning_flags)
+    juce::juce_recommended_config_flags)
+# Warning policy is the project's -Wall -Wextra -Werror (set on our sources above), not JUCE's extended set
+# (-Wsign-conversion, -Wfloat-equal …), which the engine does not target.
 
 juce_add_console_app(ShogunProbe PRODUCT_NAME "ShogunProbe")
 target_sources(ShogunProbe PRIVATE Source/Probe.cpp ${SHOGUN_PLUGIN_SOURCES})
@@ -62,5 +65,4 @@ target_link_libraries(ShogunProbe
   PRIVATE
     shogun_engine
     juce::juce_audio_utils
-    juce::juce_recommended_config_flags
-    juce::juce_recommended_warning_flags)
+    juce::juce_recommended_config_flags)

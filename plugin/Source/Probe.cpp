@@ -1,208 +1,280 @@
-#include "PluginEditor.h"
-
+// ShogunProbe: headless checks of the plugin shell (spec v2.2 §15.0 step 4) and the 8 tab renders.
+//   ShogunProbe <out-dir>   writes tab_0_main.png … tab_7_global.png and prints one line per check.
 #include <cmath>
 #include <iostream>
 
+#include "PluginEditor.h"
+
+using namespace shogun;
+
 namespace {
 
-float peakOf(const juce::AudioBuffer<float>& buffer) {
-  float peak = 0.0f;
-  for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-    peak = std::max(peak, buffer.getMagnitude(ch, 0, buffer.getNumSamples()));
-  return peak;
+int failures = 0;
+void check(bool ok, const juce::String& name, const juce::String& numbers) {
+  std::cout << (ok ? "PASS " : "FAIL ") << name << "  " << numbers << std::endl;
+  if (!ok) ++failures;
 }
 
-float renderPeak(ShogunAudioProcessor& proc, int totalSamples, juce::MidiBuffer& midi, int tailSamples) {
-  const int block = 256;
-  juce::AudioBuffer<float> buffer(2, block);
-  float peak = 0.0f;
-  float tail = 0.0f;
-  int seen = 0;
-  bool primed = false;
-  for (int left = totalSamples; left > 0; left -= block) {
-    const int n = std::min(block, left);
-    buffer.setSize(2, n, false, false, true);
-    buffer.clear();
-    juce::MidiBuffer blockMidi;
-    if (!primed) {
-      blockMidi.swapWith(midi);
-      primed = true;
-    }
-    proc.processBlock(buffer, blockMidi);
-    const float blockPeak = peakOf(buffer);
-    peak = std::max(peak, blockPeak);
-    seen += n;
-    if (seen > totalSamples - tailSamples) tail = std::max(tail, blockPeak);
+struct FakeHead : juce::AudioPlayHead {
+  double ppq = 0.0, bpm = 120.0;
+  bool playing = true;
+  juce::Optional<PositionInfo> getPosition() const override {
+    PositionInfo p;
+    p.setPpqPosition(ppq);
+    p.setBpm(bpm);
+    p.setIsPlaying(playing);
+    return p;
   }
-  if (tailSamples > 0) return tail;
-  return peak;
-}
+};
 
-bool expect(const char* name, bool ok, float value) {
-  std::cout << name << (ok ? " pass " : " FAIL ") << value << "\n";
-  return ok;
-}
+struct Render {
+  float peakMain = 0.0f, peakAux = 0.0f;
+};
 
-void clearSteps(ShogunAudioProcessor& proc) {
-  for (int voice = 0; voice < ShogunAudioProcessor::kVoices; ++voice)
-    for (int step = 0; step < ShogunAudioProcessor::kSteps; ++step)
-      if (proc.isStepOn(voice, step)) proc.toggleStep(voice, step);
-}
-
-// A test beat (INIT is empty): kick and bass on 1 and 9, snare on 5 and 13, hats on the eighths.
-void setTestBeat(ShogunAudioProcessor& proc) {
-  clearSteps(proc);
-  const int bd1 = static_cast<int>(shogun::Voice::Bd1);
-  const int sd = static_cast<int>(shogun::Voice::Sd);
-  const int hh = static_cast<int>(shogun::Voice::Hh);
-  const int bass = static_cast<int>(shogun::Voice::Bass);
-  for (int step : {0, 8}) {
-    proc.toggleStep(bd1, step);
-    proc.toggleStep(bass, step);
+Render render(ShogunAudioProcessor& proc, int samples, juce::MidiBuffer* midi = nullptr, FakeHead* head = nullptr) {
+  const int block = 512;
+  const int ch = proc.getTotalNumOutputChannels();
+  juce::AudioBuffer<float> buf(ch, block);
+  Render r;
+  bool first = true;
+  for (int done = 0; done < samples; done += block) {
+    buf.clear();
+    juce::MidiBuffer m;
+    if (first && midi) m.swapWith(*midi);
+    first = false;
+    proc.processBlock(buf, m);
+    if (head) head->ppq += head->bpm / 60.0 * block / proc.getSampleRate();
+    r.peakMain = std::fmax(r.peakMain, std::fmax(buf.getMagnitude(0, 0, block), buf.getMagnitude(1, 0, block)));
+    for (int c = 2; c < ch; ++c) r.peakAux = std::fmax(r.peakAux, buf.getMagnitude(c, 0, block));
   }
-  for (int step : {4, 12}) proc.toggleStep(sd, step);
-  for (int step = 0; step < 16; step += 2) proc.toggleStep(hh, step);
+  return r;
+}
+
+void setU(ShogunAudioProcessor& p, const char* id, float u) { p.param(findParam(id))->setValueNotifyingHost(u); }
+
+std::unique_ptr<ShogunAudioProcessor> fresh(double sr = 48000.0) {
+  auto p = std::make_unique<ShogunAudioProcessor>();
+  p->setRateAndBufferSizeDetails(sr, 512);
+  p->prepareToPlay(sr, 512);
+  return p;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
   juce::ScopedJuceInitialiser_GUI gui;
-  bool ok = true;
-  juce::MidiBuffer none;
+  const juce::File outDir(argc > 1 ? juce::File::getCurrentWorkingDirectory().getChildFile(argv[1])
+                                   : juce::File::getCurrentWorkingDirectory());
+  outDir.createDirectory();
 
+  // ---- parameters: float, SECTION:LABEL ids, u ∈ [0, 1], defaults from the table
   {
-    ShogunAudioProcessor proc;
-    bool anyOn = false;
-    for (int voice = 0; voice < ShogunAudioProcessor::kVoices; ++voice)
-      for (int step = 0; step < ShogunAudioProcessor::kSteps; ++step)
-        anyOn = anyOn || proc.isStepOn(voice, step);
-    ok = expect("init_pattern_empty", ! anyOn, anyOn ? 1.0f : 0.0f) && ok;
-    proc.prepareToPlay(48000.0, 256);
-    const float peak = renderPeak(proc, 48000, none, 0);
-    ok = expect("init_pattern_silent", peak < 1.0e-4f, peak) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    setTestBeat(proc);
-    proc.prepareToPlay(48000.0, 256);
-    const float peak = renderPeak(proc, 48000, none, 0);
-    ok = expect("int_pattern", peak > 0.05f, peak) && ok;
-    const float clock = proc.apvts.getRawParameterValue("clock")->load();
-    ok = expect("int_stays_int", std::lround(clock) == 0, clock) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    setTestBeat(proc);
-    proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
-    proc.prepareToPlay(48000.0, 256);
-    const float peak = renderPeak(proc, 48000, none, 0);
-    ok = expect("ext_ignores_pattern", peak < 1.0e-4f, peak) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    clearSteps(proc);
-    proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
-    proc.prepareToPlay(48000.0, 256);
-    juce::MidiBuffer midi;
-    midi.addEvent(juce::MidiMessage::noteOn(1, 36, (juce::uint8)110), 0);
-    const float peak = renderPeak(proc, 24000, midi, 0);
-    const float clock = proc.apvts.getRawParameterValue("clock")->load();
-    ok = expect("ext_midi_bd1", peak > 0.02f, peak) && ok;
-    ok = expect("midi_does_not_force_ext_off", std::lround(clock) == 1, clock) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
-    clearSteps(proc);
-    proc.prepareToPlay(48000.0, 256);
-    proc.pushPad(static_cast<int>(shogun::Voice::Bd1));
-    const float peak = renderPeak(proc, 24000, none, 0);
-    const float clock = proc.apvts.getRawParameterValue("clock")->load();
-    ok = expect("trig_button", peak > 0.02f, peak) && ok;
-    ok = expect("trig_button_keeps_ext", std::lround(clock) == 1, clock) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    setTestBeat(proc);
-    proc.prepareToPlay(44100.0, 256);
-    const float peak = renderPeak(proc, 44100, none, 0);
-    ok = expect("host_44100", peak > 0.05f, peak) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    proc.prepareToPlay(48000.0, 256);
-    clearSteps(proc);
-    // BD1 with the stand-in decay is still moving at two seconds. Eight seconds
-    // is past that tail, so a cleared pattern reads as silence.
-    const float tail = renderPeak(proc, 48000 * 8, none, 8000);
-    ok = expect("steps_off_tail", tail < 0.01f, tail) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    clearSteps(proc);
-    proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
-    proc.prepareToPlay(48000.0, 256);
-    juce::MidiBuffer on;
-    on.addEvent(juce::MidiMessage::noteOn(1, 51, (juce::uint8)100), 0);
-    const float peak = renderPeak(proc, 8000, on, 0);
-    juce::MidiBuffer off;
-    off.addEvent(juce::MidiMessage::noteOff(1, 51), 0);
-    const float tail = renderPeak(proc, 48000, off, 8000);
-    const float clock = proc.apvts.getRawParameterValue("clock")->load();
-    ok = expect("bass_note", peak > 0.02f, peak) && ok;
-    ok = expect("bass_note_off", tail < 0.01f, tail) && ok;
-    ok = expect("bass_keeps_ext", std::lround(clock) == 1, clock) && ok;
-  }
-
-  {
-    ShogunAudioProcessor proc;
-    setTestBeat(proc);
-    proc.toggleStep(static_cast<int>(shogun::Voice::Bd1), 1);
-    proc.apvts.getParameter("clock")->setValueNotifyingHost(1.0f);
-    juce::MemoryBlock block;
-    proc.getStateInformation(block);
-    ShogunAudioProcessor restored;
-    restored.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
-    const bool steps = restored.isStepOn(0, 0) && restored.isStepOn(0, 1) && restored.isStepOn(0, 8) &&
-                       !restored.isStepOn(0, 2);
-    const float clock = restored.apvts.getRawParameterValue("clock")->load();
-    ok = expect("state_steps", steps, steps ? 1.0f : 0.0f) && ok;
-    ok = expect("state_clock", std::lround(clock) == 1, clock) && ok;
-  }
-
-  ShogunAudioProcessor proc;
-  std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditor());
-  const int w = editor->getWidth();
-  const int h = editor->getHeight();
-  editor->setSize(w, h);
-  juce::Image image(juce::Image::RGB, w, h, true);
-  {
-    juce::Graphics g(image);
-    editor->paintEntireComponent(g, true);
-  }
-  int ink = 0;
-  for (int y = 0; y < h; y += 8)
-    for (int x = 0; x < w; x += 8)
-      if (image.getPixelAt(x, y).getBrightness() > 0.2f) ++ink;
-  ok = expect("plate_pixels", ink > 50 && w == 980 && h == 640, static_cast<float>(ink)) && ok;
-
-  if (argc > 1) {
-    juce::File file(argv[1]);
-    if (auto stream = file.createOutputStream()) {
-      juce::PNGImageFormat png;
-      png.writeImageToStream(image, *stream);
-      std::cout << "plate " << file.getFullPathName() << "\n";
+    auto p = fresh();
+    int bad = 0, n = 0;
+    for (auto* ap : p->getParameters()) {
+      auto* f = dynamic_cast<juce::AudioParameterFloat*>(ap);
+      auto* wid = dynamic_cast<juce::AudioProcessorParameterWithID*>(ap);
+      if (f == nullptr || wid == nullptr) {
+        ++bad;
+        continue;
+      }
+      const int id = findParam(wid->getParameterID().toRawUTF8());
+      if (id != n || f->range.start != 0.0f || f->range.end != 1.0f || std::fabs(f->get() - kParams[id].def) > 1e-6f) ++bad;
+      ++n;
     }
+    check(n == kParamCount && bad == 0, "params", "count " + juce::String(n) + " (table " + juce::String(kParamCount) +
+                                                    "), float 0..1 SECTION:LABEL ids, mismatches " + juce::String(bad));
   }
 
-  std::cout << (ok ? "placeholder plate ok\n" : "placeholder plate failed\n");
-  return ok ? 0 : 1;
+  // ---- latency 0 / 23 / 26 (GLOBAL:OS 1X/2X/4X), reported to the host
+  {
+    auto p = fresh();
+    const int l2 = p->getLatencySamples();
+    setU(*p, "GLOBAL:OS", 0.1f);
+    p->prepareToPlay(48000.0, 512);
+    const int l1 = p->getLatencySamples();
+    setU(*p, "GLOBAL:OS", 0.9f);
+    p->prepareToPlay(48000.0, 512);
+    const int l4 = p->getLatencySamples();
+    check(l1 == 0 && l2 == 23 && l4 == 26, "latency", juce::String(l1) + "/" + juce::String(l2) + "/" + juce::String(l4) + " samples");
+    // host rate: the engine runs at the host's rate (no resampler)
+    auto q = fresh(44100.0);
+    check(q->engine().sampleRate() == 44100.0, "host rate", "engine fs " + juce::String(q->engine().sampleRate(), 1) + " Hz at host 44100");
+  }
+
+  // ---- INIT: empty pattern is silent while running; MIDI note 36 plays BD1
+  {
+    auto p = fresh();
+    p->requestRun(true);
+    const Render r = render(*p, 48000);
+    check(r.peakMain == 0.0f && juce::String(p->editPattern().name) == "001 INIT", "INIT silent",
+          "peak " + juce::String(r.peakMain, 6) + ", pattern '" + juce::String(p->editPattern().name) + "'");
+    juce::MidiBuffer m;
+    m.addEvent(juce::MidiMessage::noteOn(10, 36, static_cast<juce::uint8>(127)), 0);
+    const Render r2 = render(*p, 24000, &m);
+    check(r2.peakMain > 0.05f, "MIDI 36 -> BD1", "peak " + juce::String(r2.peakMain, 6));
+  }
+
+  // ---- test beat (INT): BD1 on 1/5/9/13 plays; EXT ignores the pattern (forge pin)
+  {
+    auto p = fresh();
+    setU(*p, "CLOCK:SOURCE", 0.5f);  // INT
+    for (int s : {0, 4, 8, 12}) p->editPattern().tracks[BD1].steps[s].on = true;
+    p->commitEdits();
+    p->requestRun(true);
+    const Render r = render(*p, 96000);
+    check(r.peakMain > 0.05f, "INT test beat", "peak " + juce::String(r.peakMain, 6) + " = " +
+                                                   juce::String(20.0 * std::log10(r.peakMain), 2) + " dBFS");
+    auto q = fresh();
+    setU(*q, "CLOCK:SOURCE", 0.5f);
+    setU(*q, "CLOCK:MODE", 0.75f);  // EXT
+    for (int s : {0, 4, 8, 12}) q->editPattern().tracks[BD1].steps[s].on = true;
+    q->commitEdits();
+    q->requestRun(true);
+    const Render r2 = render(*q, 96000);
+    check(r2.peakMain == 0.0f, "EXT ignores pattern", "peak " + juce::String(r2.peakMain, 6));
+  }
+
+  // ---- host lock: SOURCE = HOST follows ppq (7.25 quarters = step 29 at 1/16)
+  {
+    auto p = fresh();
+    setU(*p, "CLOCK:SOURCE", 0.1f);  // HOST
+    for (int s = 0; s < 32; ++s) p->editPattern().tracks[BD1].steps[s].on = (s == 29);
+    p->editPattern().tracks[BD1].len = 32;
+    p->commitEdits();
+    FakeHead head;
+    head.ppq = 7.25;
+    p->setPlayHead(&head);
+    p->requestRun(true);
+    const Render r = render(*p, 512 * 4, nullptr, &head);
+    const int step = p->meters.step.load();
+    const int gstep = p->meters.globalStep.load();
+    check(r.peakMain > 0.05f && gstep == 29, "host lock",
+          "ppq 7.25 -> global step " + juce::String(gstep) + " (bar-of-16 display " + juce::String(step) + "), step-29 hit peak " +
+              juce::String(r.peakMain, 6));
+    p->setPlayHead(nullptr);
+  }
+
+  // ---- aux outputs: BD1 OUTPUT = AUX 1/2 → plugin bus "Aux 1"
+  {
+    auto p = std::make_unique<ShogunAudioProcessor>();
+    auto layout = p->getBusesLayout();
+    layout.outputBuses.getReference(1) = juce::AudioChannelSet::stereo();
+    const bool ok = p->setBusesLayout(layout);
+    p->setRateAndBufferSizeDetails(48000.0, 512);
+    p->prepareToPlay(48000.0, 512);
+    setU(*p, "BD1:OUTPUT", static_cast<float>(stepU(5, 14)));
+    p->prepareToPlay(48000.0, 512);
+    juce::MidiBuffer m;
+    m.addEvent(juce::MidiMessage::noteOn(10, 36, static_cast<juce::uint8>(127)), 0);
+    const Render r = render(*p, 24000, &m);
+    check(ok && r.peakAux > 0.05f, "aux 1/2 bus", "channels " + juce::String(p->getTotalNumOutputChannels()) + ", aux peak " +
+                                                    juce::String(r.peakAux, 6) + ", main peak " + juce::String(r.peakMain, 6));
+  }
+
+  // ---- state: XML SHOGUN version=2 with the JSON patch; alias resolution on load
+  {
+    auto p = fresh();
+    setU(*p, "BD1:DECAY", 0.25f);
+    p->editPattern().tracks[SD].steps[4].on = true;
+    p->editPattern().tracks[SD].steps[4].setLock(findParam("SD:TONE"), 0.8f);
+    p->editPattern().setName("002 PROBE");
+    p->editRows()[0].src = mod::SRC_LFO1;
+    p->editRows()[0].dst = findParam("BD1:DECAY");
+    p->editRows()[0].depth = 0.18;
+    p->commitEdits();
+    p->addCable(findPort("MOD:LFO 1"), findPort("BD1:PITCH"));
+    juce::MemoryBlock mb;
+    p->getStateInformation(mb);
+    auto xml = juce::AudioProcessor::getXmlFromBinary(mb.getData(), static_cast<int>(mb.getSize()));
+    auto q = fresh();
+    q->setStateInformation(mb.getData(), static_cast<int>(mb.getSize()));
+    const bool same = std::fabs(q->paramU(findParam("BD1:DECAY")) - 0.25f) < 1e-6f && q->editPattern().tracks[SD].steps[4].on &&
+                      q->editPattern().tracks[SD].steps[4].nLocks == 1 && juce::String(q->editPattern().name) == "002 PROBE" &&
+                      q->editRows()[0].src == mod::SRC_LFO1 && std::fabs(q->editRows()[0].depth - 0.18) < 1e-9 && q->cableCount() == 1;
+    check(xml && xml->hasTagName("SHOGUN") && xml->getIntAttribute("version") == 2 && same, "state round trip",
+          "XML <SHOGUN version=" + juce::String(xml ? xml->getIntAttribute("version") : -1) + "> JSON " +
+              juce::String(static_cast<int>(xml ? xml->getAllSubText().length() : 0)) + " chars; params/pattern/lock/mod/cable restored");
+
+    // v2.0 patch with an old jack id: BASS:HZ/V → BASS:NOTE with the lin55 law; TOM:PITCH → 3 toms at CV AMT 1/12
+    juce::String json = R"({"format":"shogun-patch","version":2,"params":{},"cables":[["SHOGUN/MOD:LFO 1","SHOGUN/BASS:HZ/V"],["SHOGUN/MOD:LFO 2","SHOGUN/TOM:PITCH"]]})";
+    juce::XmlElement x2("SHOGUN");
+    x2.setAttribute("version", 2);
+    x2.addTextElement(json);
+    juce::MemoryBlock mb2;
+    juce::AudioProcessor::copyXmlToBinary(x2, mb2);
+    auto r = fresh();
+    r->setStateInformation(mb2.getData(), static_cast<int>(mb2.getSize()));
+    juce::MemoryBlock mb3;
+    r->getStateInformation(mb3);
+    auto x3 = juce::AudioProcessor::getXmlFromBinary(mb3.getData(), static_cast<int>(mb3.getSize()));
+    const juce::var v = juce::JSON::parse(x3->getAllSubText());
+    const int cables = r->cableCount();
+    const double amt = r->cvAmt(findPort("MTC:PITCH"));
+    check(cables == 4 && static_cast<int>(v["inLaw"]["BASS:NOTE"]) == 1 && std::fabs(amt - 1.0 / 12.0) < 1e-12, "alias load",
+          "cables 4 (1 + 3 toms) = " + juce::String(cables) + ", BASS:NOTE law " + v["inLaw"]["BASS:NOTE"].toString() +
+              ", MTC:PITCH CV AMT " + juce::String(amt, 6));
+  }
+
+  // ---- editor: 1200 x 672, 8 tabs, 153 bay jacks; render each tab to PNG
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto* se = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get());
+    int jacks = 0;
+    for (int i = 0; i < kPorts; ++i) {
+      juce::Point<float> pt;
+      jacks += se->panel().jackPosition(i, pt) ? 1 : 0;
+    }
+    check(ed->getWidth() == 1200 && ed->getHeight() == 672 && jacks == kPorts, "editor",
+          juce::String(ed->getWidth()) + "x" + juce::String(ed->getHeight()) + ", bay jacks " + juce::String(jacks) + "/" +
+              juce::String(kPorts) + ", ops " + juce::String(ShogunPanel::opCount()));
+    static const char* const names[8] = {"main", "voice", "grid", "mod", "route", "fxmix", "seqmidi", "global"};
+    int written = 0;
+    for (int t = 0; t < 8; ++t) {
+      se->panel().setTab(t);
+      juce::Image img(juce::Image::RGB, 1200, 672, true);
+      {
+        juce::Graphics g(img);
+        se->panel().paintEntireComponent(g, true);
+      }
+      const juce::File f = outDir.getChildFile(juce::String("tab_") + juce::String(t) + "_" + names[t] + ".png");
+      f.deleteFile();
+      juce::FileOutputStream os(f);
+      juce::PNGImageFormat png;
+      if (os.openedOk() && png.writeImageToStream(img, os)) ++written;
+    }
+    // demo content (dynamic layers: grid, steps, matrix rows, cables)
+    Pattern& pat = p->editPattern();
+    for (int st : {0, 4, 8, 12}) pat.tracks[BD1].steps[st].on = true;
+    for (int st : {4, 12}) pat.tracks[SD].steps[st].on = true;
+    for (int st = 0; st < 16; st += 2) pat.tracks[CH].steps[st].on = true;
+    pat.tracks[SD].steps[12].acc = 3;
+    p->editRows()[0] = {mod::SRC_LFO1, -1, findParam("BD1:DECAY"), 0.18, mod::SRC_NONE, -1, mod::LIN, true};
+    p->editRows()[1] = {mod::SRC_ENV, BASS, findParam("BASS:CUTOFF"), 0.30, mod::SRC_VEL, -1, mod::EXP, true};
+    p->editRows()[2] = {mod::SRC_LFO2, -1, findParam("CH:DECAY"), -0.16, mod::SRC_NONE, -1, mod::LIN, true};
+    p->commitEdits();
+    p->addCable(findPort("MOD:LFO 1"), findPort("BD1:PITCH"));
+    p->addCable(findPort("LTC:OUT"), findPort("CLOCK:FILL IN"));
+    p->addCable(findPort("LEAD:NOTE OUT"), findPort("BASS:NOTE"));
+    se->panel().setSelectedVoice(SD);
+    for (int t : {0, 2, 3, 4}) {
+      se->panel().setTab(t);
+      juce::Image img(juce::Image::RGB, 1200, 672, true);
+      {
+        juce::Graphics g(img);
+        se->panel().paintEntireComponent(g, true);
+      }
+      const juce::File f = outDir.getChildFile(juce::String("demo_") + juce::String(t) + "_" + names[t] + ".png");
+      f.deleteFile();
+      juce::FileOutputStream os(f);
+      juce::PNGImageFormat png;
+      if (os.openedOk()) png.writeImageToStream(img, os);
+    }
+    check(written == 8, "tab renders", juce::String(written) + " PNGs in " + outDir.getFullPathName());
+  }
+
+  std::cout << (failures == 0 ? "ShogunProbe: all checks passed" : "ShogunProbe: FAILURES " + juce::String(failures).toStdString())
+            << std::endl;
+  return failures == 0 ? 0 : 1;
 }

@@ -19,9 +19,20 @@ plugin:
 		-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
 		-DFETCHCONTENT_SOURCE_DIR_JUCE="$(JUCE_SRC)"
 	cmake --build build/plugin --target Shogun_VST3 ShogunProbe -j 8
-	./build/plugin/ShogunProbe_artefacts/Release/ShogunProbe /tmp/shogun-plate.png
+	./build/plugin/ShogunProbe_artefacts/Release/ShogunProbe build/plugin/tabs
 	codesign --force --sign - --timestamp=none \
 		build/plugin/Shogun_artefacts/Release/VST3/SHOGUN.vst3
+
+# Linux path (the box): JUCE 8.0.4 from a local checkout, no network fetch. VST3 + the probe (8 tab PNGs + checks).
+JUCE_LINUX ?= /workspace/JUCE
+plugin-linux:
+	cmake -S plugin -B build/plugin-linux -G "Unix Makefiles" \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DFETCHCONTENT_SOURCE_DIR_JUCE="$(JUCE_LINUX)"
+	cmake --build build/plugin-linux --target Shogun_VST3 ShogunProbe -j 8
+
+probe-linux: plugin-linux
+	./build/plugin-linux/ShogunProbe_artefacts/Release/ShogunProbe build/plugin-linux/tabs
 
 install-vst: plugin
 	mkdir -p "$(HOME)/Library/Audio/Plug-Ins/VST3"
@@ -54,11 +65,11 @@ calib: build/measure_calib
 
 # The web page: the engine compiled to wasm (clang with the wasm32 target and wasm-ld, no libc),
 # checked sample by sample against the native build, then inlined into web/shogun.html.
-WASM_FLAGS = --target=wasm32 -std=c++17 -O2 -nostdlib -nostdinc -isystem web/wasm/include -Iengine \
+WASM_FLAGS = --target=wasm32 -std=c++17 -O2 -nostdlib -nostdinc -isystem web/wasm/include -Iengine -DSHOGUN_NO_FORMAT \
 	-fno-exceptions -fno-rtti -fno-builtin -Wall -Wextra -Werror \
 	-Wl,--no-entry -Wl,--allow-undefined -Wl,-z,stack-size=262144
 
-build/shogun.wasm: $(ENGINE_DEPS) web/wasm/shogun_web.cpp web/wasm/include/cmath web/wasm/include/cstdint
+build/shogun.wasm: $(ENGINE_DEPS) web/wasm/shogun_web.cpp $(wildcard web/wasm/include/*)
 	mkdir -p build
 	clang++ $(WASM_FLAGS) -o $@ engine/shogun.cpp web/wasm/shogun_web.cpp
 
