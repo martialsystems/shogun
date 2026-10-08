@@ -2,7 +2,7 @@
 
 **Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack, voice engine, a GraphForge pin for the clock switch, and a placeholder plate.**
 
-SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in FL Studio.
+SHOGUN is a drum computer and two note voices, an original Martial Systems design inspired by classic analog drum machines. The jobs of the voices follow the design pack (its sources are cited in `METHODOLOGY.md`) and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in FL Studio.
 
 ## Revisions
 
@@ -66,4 +66,4 @@ BUSHIDO and RONIN share one patch format and one cable feel. JIDAI RACK compiles
 
 Copyright © 2026 Martial Systems LLC. All rights reserved. See `LICENSE`.
 
-MFB and Tanzbär are names of their owner. Martial Systems is not affiliated with or endorsed by that owner. This pack quotes short phrases for the parameter disputes. It does not reproduce the manuals, and it does not use that maker's logo or dancing-bear mark.
+SHOGUN is an original Martial Systems design inspired by classic analog drum machines. Martial Systems is not affiliated with or endorsed by any drum machine maker. The design pack quotes short phrases from published manuals for the parameter disputes and cites them in `METHODOLOGY.md`. It does not reproduce the manuals, and it does not use any maker's logo or marks.
