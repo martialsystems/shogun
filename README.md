@@ -10,7 +10,7 @@ SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every
 
 - **Fourteen drums:** two kicks (BD1, BD2), snare (SD), rim (RS), clap (CP), claves (CL), maracas (MA), cowbell (CB), closed and open hats (CH, OH) with choke, cymbal (CY), and three toms that switch to congas (LTC, MTC, HTC).
 - **Two synth voices:** LEAD with a state-variable filter and BASS with a 4-pole ladder filter, both with glide and ties.
-- **Triple wave shaper** on the kicks and toms, with SHAPE morph, symmetry, an optional pre-VCA position and level compensation. At 0 it is a true bypass.
+- **Triple wave shaper** on the kicks and toms, with SHAPE morph, symmetry, an optional pre-VCA position and level compensation. At 0 it is a true bypass, whatever the symmetry.
 - **Drive** with alias-suppressed saturation, analog drift and a per-unit tolerance you can save with the patch.
 - **Oversampling** at 1×, 2× or 4× (0, 23 or 26 samples of latency, reported to the host), with a separate setting for offline renders.
 

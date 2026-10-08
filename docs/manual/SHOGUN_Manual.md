@@ -191,7 +191,7 @@ Every DECAY runs from 8 to 720 ms. Click a group's name to select its voice.
 | **VC SOURCE** | BODY, NOISE, LFO 1 to 4, any voice | The internal modulation source, at audio rate. A cable into the voice's FOLD VC jack replaces it. |
 | **LEVEL COMP** | OFF, ON | Keeps the level steady while you turn WAVE up. |
 
-With WAVE and the WAVE 1 to 3 trims at 0, the shaper is bypassed.
+With WAVE and the WAVE 1 to 3 trims at 0, the shaper is bypassed, whatever the SYM settings: the sound passes through untouched. A stage whose amount is 0 is a straight wire at any SYM, so SYM only colours a stage that WAVE or its trim has opened. VC → AMT with a live VC source and SHAPE above 0 take the shaper out of bypass.
 
 ### 3.6 GRID tab
 

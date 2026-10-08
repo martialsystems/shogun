@@ -4,7 +4,7 @@ The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and t
 
 Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 0 V = C3 = note 48; accent volts 2.353/3.706/5.0 V; voice end at −90 dB (kQuiet 3.162e-5); OS 2× unless a row says otherwise (latency 23 base samples).
 
-Result of the last run: **all 330 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
+Result of the last run: **all 339 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
 
 §15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
@@ -183,10 +183,10 @@ JCS R3 Schmitt gate 1.0/0.5 V (the shared `jidai::jcs::Schmitt`, float volts); p
 
 ### testWaveBypass
 
-§4.6 WAVE 0 with trims/SYM/SHAPE 0 is a true bypass (bit-identical).  Tolerance: exact.
+§4.6 WAVE 0 with trims/SYM/SHAPE 0 (the default patch) is a true bypass (bit-identical). Any SYM at amount 0 is covered by testWaveAmt0AnySym.  Tolerance: exact.
 
 ```
-WAVE 0, trims/SYM/SHAPE 0: bypassed 1, output bit-identical 1, level gain untouched 1.0
+WAVE 0, trims/SYM/SHAPE 0 (default patch): bypassed 1, output bit-identical 1, level gain untouched 1.0
 ```
 
 ### testWaveMigration
@@ -217,24 +217,35 @@ max |s(0)| 0; SYM +1 triangle: H1 -240.0 H3 -240.0 H4 -14.0 dB re 2F; saw: H2 -1
 
 ### testWaveAudioRateVc
 
-§4.6 audio-rate VC alias (verify −58.4/−115.3/−50.8 dB) and unsmoothed VC sidebands (+1.0 dB).  Tolerance: 0.1 dB.
+§4.6 audio-rate VC alias (verify −58.4/−113.7/−50.8 dB) and unsmoothed VC sidebands (+1.0 dB).  Tolerance: 0.1 dB. VC → SYM moved from −115.3 to −113.7 dB with jidai-common 1.1.2: at WAVE 0.5 stage 3 sits at a = 0, so it is now a wire at any SYM; under 1.1.1 it ran ADAA on the identity, whose half-sample average also took 1.6 dB off the alias. The verify figure is `verify_folder.py` rerun (in scratch) with the 1.1.2 skip rule, a = 0 only; it gives −113.7 dB, the engine's number.
 
 ```
 body 257.8 Hz, VC 1353.5 Hz, VC -> AMT depth 0.5: 2x ADAA alias -58.4 dB (verify -58.4)
-body 257.8 Hz, VC 1353.5 Hz, VC -> SYM depth 0.5: 2x ADAA alias -115.3 dB (verify -115.3)
+body 257.8 Hz, VC 1353.5 Hz, VC -> SYM depth 0.5: 2x ADAA alias -113.7 dB (verify -113.7)
 body 257.8 Hz, VC 1353.5 Hz, VC -> AMT + SYM depth 0.5: 2x ADAA alias -50.8 dB (verify -50.8)
 VC sideband energy re harmonics 1.0 dB (unsmoothed reference +1.0, a 5 ms smoother gives -35.8)
 ```
 
 ### testWavePlanBlock
 
-jidai-common 1.1.1 per-block stage skipping (§4.6, `TripleShaper::planBlock`). With WAVE 0.25 (stage 1 live, stages 2 and 3 at a = b = 0), a steady block makes stages 2 and 3 wires. A moving block (ramp or modulation) skips nothing. A live VC with depth on stage 3 keeps it; the same depth with VC not live does not. A moving block keeps the ADAA half-sample delay on its (0, 0) stages instead of switching to the wire.  Tolerance: exact.
+jidai-common 1.1.2 per-block stage skipping (§4.6, `TripleShaper::planBlock`), the "amount 0, any SYM" rule: a stage is a wire for a block when its amount a is 0 for the whole block, whatever its SYM. With WAVE 0.25 (stage 1 live, stages 2 and 3 at a = 0) and SYM 2 0.6 and VC → SYM 3 0.5 set, a steady block makes stages 2 and 3 wires (SYM and VC → SYM never keep a stage). A moving block (ramp or modulation on an amount control) skips nothing. A live VC with AMT depth on stage 3 keeps it; the same depth with VC not live does not. A moving block keeps the ADAA half-sample delay on its a = 0 stages instead of switching to the wire (here with SYM 2 0.25 on the a = 0 stage; the steady twin makes that stage a wire).  Tolerance: exact.
 
 ```
-wires (stage 1 2 3) steady 011, moving 000; VC depth on 3: live 010, not live 011; moving block vs wire max diff 1.464e-01 (ADAA half-sample delay kept)
+SYM 2 0.6, VC>SYM 3 0.5: wires (stage 1 2 3) steady 011, moving 000; VC>AMT on 3: live 010, not live 011; moving block vs wire max diff 3.897e-01 (ADAA half-sample delay kept)
 ```
 
-In the engine the block is one base sample (SHOGUN reads its parameters once per base sample). `WaveSlot::control` calls it steady when the 13 stage controls (WAVE, WAVE 1 to 3, SYM 1 to 3, VC→AMT 1 to 3, VC→SYM 1 to 3) equal the previous base sample's and none is ramping (smoother) or modulated (matrix row, CV jack); VC is live when the voice's VC LEVEL is above 0.
+In the engine the block is one base sample (SHOGUN reads its parameters once per base sample). `WaveSlot::control` calls it steady when the 7 amount controls (WAVE, WAVE 1 to 3, VC→AMT 1 to 3) equal the previous base sample's and none is ramping (smoother) or modulated (matrix row, CV jack); SYM 1 to 3 and VC→SYM 1 to 3 may move. VC is live when the voice's VC LEVEL is above 0. Before 1.1.2 the plan read all 13 stage controls and a stage needed a = b = 0.
+
+### testWaveAmt0AnySym
+
+§4.6 bypass, "amount 0, any SYM" (jidai-common 1.1.2 `ShaperControls::isBypass` ignores SYM, matrix SYM and VC → SYM). Block level: WAVE 0 with the trims at 0, five SYM 1 to 3 sets and five VC → SYM sets, SYM moving every 64 samples (steady and moving blocks), a live audio-rate VC, LEVEL COMP on and off, a VC → AMT depth with no live VC, at 48, 96 and 192 kHz (1×/2×/4×): every case is bypassed and every sample is bit-identical to the input and to the default bypass; LEVEL COMP is never touched (gain stays exactly 1). A live VC → AMT depth or a WAVE 3 trim of 0.01 is not a bypass. Engine level (tests/voices.cpp): BD1, BD2 and LTC at WAVE 0 with SYM 1 to 3 and VC → SYM 1 to 3 off centre, VC LEVEL 1 and a matrix row LFO 1 → SYM 2 render 9600 samples bit for bit like the default patch at 1×, 2× and 4×.  Tolerance: exact.
+
+```
+WAVE 0, trims 0, SYM / VC>SYM / idle VC>AMT set: 60/60 cases bypassed, output bit-identical to input and to default bypass 1, level gain untouched 1; live VC>AMT bypass 0, trim 3 0.01 bypass 0
+BD1/BD2/LTC at WAVE 0, SYM 1-3 / VC>SYM 1-3 off centre, live VC, LFO 1 -> SYM 2: 9/9 renders bit-identical to the default patch (1x/2x/4x)
+```
+
+Before 1.1.2 a SYM other than 0 at amount 0 ran ADAA on a straight line (a two-sample average: half a sample late, duller treble) and then LEVEL COMP. Now the stages are wires (their histories kept), the 8 Hz detector DC block is not fed and `LevelComp::track()` is not called, because §4.6 skips LEVEL COMP in bypass.
 
 ### testWaveLevelComp
 
@@ -540,11 +551,12 @@ TUNE +100 c, A4 442: NOTE OUT +1.0000 V, audible f 278.4426 Hz (law 278.4426, un
 
 ### testLin55Migration
 
-§12.3 BASS:HZ/V → BASS:NOTE with V' = log2 V − 1.25 (2.0 V → 110.000000 Hz); TOM:PITCH fans out to 3 toms at CV AMT 1/12.  Tolerance: 1e-6.
+§12.3 BASS:HZ/V → BASS:NOTE with V' = log2(max(V, 1e-3)) − 1.25 (2.0 V → 110.000000 Hz; 0 V and below read the 1 mV floor, −11.215784 V, since jidai-common 1.1.2); TOM:PITCH fans out to 3 toms at CV AMT 1/12.  Tolerance: 1e-6 (floor 1e-12, exact for V ≤ 1 mV).
 
 ```
 BASS:HZ/V -> BASS:NOTE, law 1
 2.0 V plays 110.000000 Hz (0.00000 cents from 110)
+lin55 0 V -> -11.215784 V, -2 V -> -11.215784 V, 1 mV -> -11.215784 V (floor log2(1e-3) - 1.25)
 ```
 
 ### testJackIdsAndTypes
@@ -565,7 +577,7 @@ alias-table ids 25, R6 ids round trip 22, legacy non-R6 names matched whole 3: [
 shared AliasTable 6 renames (BASS:HZ/V -> BASS:NOTE, Lin55ToVoct(2.0 V) = -0.25 V); shim: fan-out 2 (shared add of a 2nd target refused 1), legacy names 3 (shared add refused 1)
 ```
 
-Since jidai-common 1.1.1 the one-to-one renames (LEAD/BASS:HZ/V → :NOTE with `AliasLaw::Lin55ToVoct`, LEAD/BASS:HZ/V OUT → :NOTE OUT, SD:SNAPPY → SD:TONE, LFO:OUT → MOD:LFO 1) are rows of the shared `jidai::jcs::AliasTable`, resolved with its `resolve()`; the engine applies the returned `AliasConversion`. The test also shows why the rest stays in a SHOGUN shim: the shared table refuses a second target for one old id (HAT:DECAY, TOM:PITCH fan out) and refuses ids with no SECTION: (MIX L, MIX R, LFO OUT).
+Since jidai-common 1.1.1 (law floored at 1 mV since 1.1.2) the one-to-one renames (LEAD/BASS:HZ/V → :NOTE with `AliasLaw::Lin55ToVoct`, LEAD/BASS:HZ/V OUT → :NOTE OUT, SD:SNAPPY → SD:TONE, LFO:OUT → MOD:LFO 1) are rows of the shared `jidai::jcs::AliasTable`, resolved with its `resolve()`; the engine applies the returned `AliasConversion`. The test also shows why the rest stays in a SHOGUN shim: the shared table refuses a second target for one old id (HAT:DECAY, TOM:PITCH fan out) and refuses ids with no SECTION: (MIX L, MIX R, LFO OUT).
 
 Before this change, no bare id was mis-split. SECTION and LABEL never contain ':', so a first-':' split was right, and the engine matched ids whole. What failed was the prefixed forms:
 - The plugin state loader stripped only `SHOGUN/`, so every `SHOGUN#N/` id failed: 153 ports plus 11 alias names.
@@ -756,14 +768,14 @@ test_page: the web save round trip keeps every field
 
 ## jidai-common (vendored shared headers)
 
-`third_party/jidai-common` is jidai-common **1.1.1**, jidai-collection `redesign/jidai` at **24ee621**, copied verbatim with `git archive` (see `VENDORED.md`; the previous copy was 1.1.0 at 9d6e382).
+`third_party/jidai-common` is jidai-common **1.1.2**, jidai-collection `redesign/jidai` at **8a4b5ae** (8a4b5aecf3d6c2ac8900cc2e88db8feecf8440a8), copied verbatim with `git archive` (see `VENDORED.md`; the previous copies were 1.1.1 at 24ee621 and 1.1.0 at 9d6e382).
 SHOGUN uses these parts of it:
 
 - `jcs::Schmitt` for every trigger, clock, reset, run and gate input;
 - `jcs::pitch` `kC3Hz` (exact 130.8127826502993 Hz; the synth voice pitch), `note`, `voltsForNote`, `clampPitch`, `lin55ToVoct` (through the alias law);
 - `jcs::Role`, `roleInfo` and `roleArgb`;
 - `jcs::parseJackId`, `isValidLocalId` and `AliasTable` with `AliasLaw` / `AliasConversion`;
-- `dsp::TripleShaper` (with `planBlock`), `ShaperControls`, `ShaperStage`, `macroAmounts`, `LevelComp` and `DcBlocker`;
+- `dsp::TripleShaper` (with `planBlock`), `ShaperControls` (with `isBypass`), `ShaperStage`, `macroAmounts`, `LevelComp` and `DcBlocker`;
 - `dsp::Halfband93`, `Downsampler2x` and `Upsampler2x` (decimator and RET upsampler stage 1).
 
 **Removed local copies:** `engine/jidai_local.h` and `engine/jidai/dsp/TripleShaper.h` (at 9d6e382); with 1.1.1 also the per-stage wire workaround in `engine/wave_shaper.h`, the local lin55 formula in `engine/shogun.cpp` and the local alias table in `engine/ports.h`.
@@ -773,7 +785,7 @@ SHOGUN uses these parts of it:
 **Workarounds removed with 1.1.1** (upstream now covers them):
 
 1. **Wire rule.** Was: three shared `TripleShaper` instances (one live stage each) plus an ADAA-at-zero replacement, to keep the spec's whole-render rule against the per-sample skip. Now: the shared `planBlock(ctl, steady, vcLive)` once per block (testWavePlanBlock).
-2. **lin55.** Was: a local `log2(max(V, 1e-3)) − 1.25` because the shared function was 1.9e-7 V low. Now: the shared `lin55ToVoct` (exactly `log2 V − 1.25`) through `AliasLaw::Lin55ToVoct`. 2.0 V still plays 110.000000 Hz (0.00000 cents). Remaining difference from the spec's wording: for V ≤ 0 the shared law gives −5 V (the rail) and for 0 < V < 1e-3 it goes below log2(1e-3) − 1.25 = −11.2 V, where spec §12.3 floors V at 1e-3. Both are below the lowest playable note, so no test number moves.
+2. **lin55.** Was: a local `log2(max(V, 1e-3)) − 1.25` because the shared function was 1.9e-7 V low. Now: the shared `lin55ToVoct` through `AliasLaw::Lin55ToVoct`. 2.0 V still plays 110.000000 Hz (0.00000 cents). With 1.1.2 the shared law is `log2(max(V, 1e-3)) − 1.25`, spec §12.3 word for word: V ≤ 1 mV (0 V and negative volts included) gives −11.215784 V, where 1.1.1 gave −5 V (the rail) for V ≤ 0 and went unbounded below for 0 < V < 1 mV. The 1.1.1 difference listed here is gone (testLin55Migration checks the floor). Both values are below the lowest playable note.
 3. **Alias table.** Was: SHOGUN's own table with fan-out and law codes. Now: the shared `AliasTable` with input laws for every one-to-one rename.
 
 **Still on SHOGUN's side, and why:**
@@ -783,6 +795,8 @@ SHOGUN uses these parts of it:
 3. **Detector input type.** `jcs::Schmitt` takes float volts; SHOGUN casts its double jack volts. Only matters within 6e-8 V of the 1.0 V and 0.5 V thresholds.
 4. **Halfband stage 2.** The shared header has no 4× stage, so stage 2 (25 taps) stays SHOGUN's. Latency 0/23/26.
 5. **Umbrella header.** The engine includes single headers; the freestanding wasm build has small `<string>`, `<string_view>`, `<optional>` and `<vector>` shims for `JackId.h` (load time only). The plugin and tests include `jidai/CableStandard.h`.
+
+**jidai-common 1.1.2 (output changes).** (1) A WAVE stage at amount 0 is a wire at any SYM, and WAVE 0 with any SYM is the full bypass: stages, detector DC block and LEVEL COMP skipped (`engine/wave_shaper.h`); `WaveSlot::control` calls a block steady from the amount controls only (`engine/voices/common.h`). (2) HZ/V → NOTE is floored at 1 mV. Tests changed: testWavePlanBlock (to the new law; SYM on a = 0 stages stays a wire), testWaveAudioRateVc (VC → SYM −115.3 → −113.7 dB, stage 3 now a wire), testWaveBypass (label only), testLin55Migration (floor check added), and the new testWaveAmt0AnySym (block and engine). Every other printed number in the suite is unchanged (the full log against 1d7826f differs only in those lines). SHOGUN does not call `LevelComp::track()` in bypass or report `groupDelay()` to the host.
 
 **Bit-identity of the wave tests.** A scratch dump program renders every sample the eight wave tests compute.
 - 1.1.1 vs the 9d6e382 build (54ff487): all eight are byte-identical, with g++ and with clang++. The per-block plan gives the same wire decisions as the old static rule for these renders, and the shared AdaaStage computes the same ADAA values on (0, 0) samples.
@@ -794,9 +808,9 @@ SHOGUN uses these parts of it:
 
 **Argument-evaluation-order audit** (jidai-common test bug fixed upstream in 7eaa5ec). No SHOGUN site needs rewriting: the hits are const getters, ternary branches, short-circuit chains or nested calls, which are sequenced. The g++ and clang++ suites print identical output.
 
-**jidai-common's own tests at 24ee621**, with the upstream CMake flags plus -O2, g++ and clang++ (identical output):
-- `CommonTests.cpp`: 189 checks, 0 failed (`-std=c++17 -O2 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion -Werror`).
-- `DspTests.cpp`: 38 checks, 0 failed, at -O2 and -O0 -g (`-std=c++17 -O2 -Wall -Wextra -Wpedantic -Wshadow -Werror`). 2× ADAA alias −121.8 dB; skip per block: worst sample-to-sample step 0.00398 (per-sample skip 0.00585, sine slope 0.00393).
+**jidai-common's own tests at 8a4b5ae**, with the upstream CMake flags plus -O2, g++ and clang++ (identical output):
+- `CommonTests.cpp`: 190 checks, 0 failed (`-std=c++17 -O2 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion -Werror`).
+- `DspTests.cpp`: 55 checks, 0 failed, at -O2 and -O0 -g (`-std=c++17 -O2 -Wall -Wextra -Wpedantic -Wshadow -Werror`). 2× ADAA alias −121.8 dB; skip per block: worst sample-to-sample step 0.00398 (per-sample skip 0.00585, sine slope 0.00393); group delay 0.5/1.0/1.5 samples for 1/2/3 running stages (measured 0.5000/1.0000/1.5000).
 - `HeaderHygiene.cpp`: passes (strict set above).
 
 ## Not run on this box
