@@ -53,7 +53,7 @@ SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every
 
 ## Install and build
 
-SHOGUN builds from source. You need CMake, a C++17 compiler and JUCE 8.0.4. Set `JUCE_SRC` to your JUCE checkout if it isn't in the default place.
+SHOGUN builds from source. You need CMake, a C++17 compiler and JUCE 8.0.4. Put JUCE 8.0.4 next to this repository (`../JUCE`) or set `JUCE_DIR` to your JUCE checkout (`make plugin-linux JUCE_DIR=/path/to/JUCE`; `JUCE_DIR=fetch` downloads it).
 
 | Command | What it does |
 | --- | --- |

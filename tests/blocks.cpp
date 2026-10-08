@@ -1,4 +1,4 @@
-// Block tests (spec §15.4, step 1): each reproduces a number from /workspace/shogun-redesign/verify/.
+// Block tests (spec §15.4, step 1): each reproduces a number from the redesign spec's verification figures.
 #include "dsp.h"
 #include "wave_shaper.h"
 #include "testutil.h"

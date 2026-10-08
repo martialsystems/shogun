@@ -4,9 +4,13 @@ This tree builds the voice engine, the design-pack PDF, and a placeholder VST3. 
 
 ## This tree
 
-The voice engine is `engine/`. Panel art is unpainted. The editor in `plugin/` is a placeholder plate for listening in a host. JIDAI RACK is not changed by this repository. The equations in [SCHEMATICS.md](SCHEMATICS.md) are the voice contract. `make test` builds `build/shogun_tests`, runs the checks in [TESTPLAN.md](TESTPLAN.md), and runs the clock-switch law. That law test imports GraphForge from `~/graphforge/src`.
+The voice engine is `engine/`. Panel art is unpainted. The editor in `plugin/` is a placeholder plate for listening in a host. JIDAI RACK is not changed by this repository. The equations in [SCHEMATICS.md](SCHEMATICS.md) are the voice contract. `make test` builds `build/shogun_tests`, runs the checks in [TESTPLAN.md](TESTPLAN.md), and runs the clock-switch law. That law test imports GraphForge from `GRAPHFORGE_SRC` (default `../graphforge/src`, next to this repository); `make law` stops with a message saying where it looked if it is missing.
 
-`make strict` compiles the engine, the tests, the web facade and the plugin sources with the warning flags JIDAI RACK uses (JUCE's recommended set plus `-Wfloat-equal -Wimplicit-int-float-conversion -Wshadow -Wconversion -Wdouble-promotion -Werror`) under clang++ and g++. It needs the JUCE checkout at `JUCE_LINUX` (default `/workspace/JUCE`) for the plugin headers.
+`make strict` compiles the engine, the tests, the web facade and the plugin sources with the warning flags JIDAI RACK uses (JUCE's recommended set plus `-Wfloat-equal -Wimplicit-int-float-conversion -Wshadow -Wconversion -Wdouble-promotion -Werror`) under clang++ and g++. It needs a JUCE 8.0.4 checkout at `JUCE_DIR` for the plugin headers.
+
+**JUCE location.** Every JUCE target (`plugin`, `plugin-linux`, `probe-linux`, `strict`) reads `JUCE_DIR`, default `../JUCE` (a JUCE 8.0.4 checkout next to this repository: `git clone -b 8.0.4 --depth 1 https://github.com/juce-framework/JUCE.git ../JUCE`). Override it on the command line or in the environment (`make plugin-linux JUCE_DIR=/path/to/JUCE`; the older names `JUCE_SRC` and `JUCE_LINUX` still work). `JUCE_DIR=fetch` lets CMake download 8.0.4 itself. If the checkout is missing, make stops with a message naming the path it tried and these three options. `make install-vst` links into `VST3_INSTALL_DIR` (default: the per-user macOS VST3 folder).
+
+**Floating-point contraction.** Every compile (Makefile `FP_FLAGS`, and `plugin/CMakeLists.txt` for the engine, plugin and probe targets) uses `-ffp-contract=off` (MSVC: `/fp:precise`, clang-cl adds `-ffp-contract=off`), so FMA hardware cannot change the rendered samples. `FP_FLAGS` comes after `CXXFLAGS`, so it wins over a `-ffp-contract=fast` passed in.
 
 ## Factory bank
 
@@ -65,7 +69,7 @@ Live knobs apply in both modes. Pattern step on, flam, accent, and step bend app
 
 ## Placeholder plate (2026-10-06)
 
-`make plugin` configures `plugin/` against the JUCE 8.0.4 tree already on this machine, then builds a universal (arm64 and x86_64) VST3 and a console probe. The deployment target is 11.0. Standalone is not a target on this machine: Command Line Tools do not include ibtool.
+`make plugin` configures `plugin/` against the JUCE 8.0.4 checkout at `JUCE_DIR`, then builds a universal (arm64 and x86_64) VST3 and a console probe. The deployment target is 11.0. Standalone is not a target on this machine: Command Line Tools do not include ibtool.
 
 ```
 make plugin
@@ -78,7 +82,7 @@ The plate is flat greys and stock sliders. Each voice is one row: name, TRIG, le
 
 The wrapper resamples the engine's 48 kHz stream to the host rate. Trig jacks stay unwired, so a note cannot act as a cable that forces EXT. Saved state is the parameter tree plus 16 step masks.
 
-`make plugin` runs `ShogunProbe`, then ad-hoc signs the bundle so the module info stays inside the signature. The probe checks INT sound, EXT silence, MIDI and TRIG while EXT stays EXT, a bass note and its release, a 44.1 kHz host rate, a quiet tail after the steps are cleared, a restored step mask and clock, and that the plate paints. It writes `/tmp/shogun-plate.png` when given that path.
+`make plugin` runs `ShogunProbe`, then ad-hoc signs the bundle so the module info stays inside the signature. The probe checks INT sound, EXT silence, MIDI and TRIG while EXT stays EXT, a bass note and its release, a 44.1 kHz host rate, a quiet tail after the steps are cleared, a restored step mask and clock, and that the plate paints. It writes the plate PNG to the path it is given.
 
 ## Panel
 

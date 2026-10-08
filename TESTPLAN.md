@@ -742,7 +742,7 @@ PASS alias load  cables 4 (1 + 3 toms) = 4, BASS:NOTE law 1, MTC:PITCH CV AMT 0.
 PASS old HZ/V plays  BASS:HZ/V cable at 2.0 V -> 110.000000 Hz (0.00000 cents from 110), law 1
 PASS removed jacks  old FILL IN / LANE A cables dropped 2 (removed 2), kept 1; report: SHOGUN: dropped 2 saved cable(s) (2 on removed jacks CLOCK:FILL IN / MOD:LANE A): SHOGUN/CLOCK:CLK OUT -> SHOGUN#1/CLOCK:FILL IN, SHOGUN/MOD:LANE A -> SHOGUN/BD1:DECAY
 PASS editor  1200x672, bay jacks 151/151, ops 2550
-PASS tab renders  8 PNGs in /workspace/shogun/build/plugin-linux/tabs
+PASS tab renders  8 PNGs in build/plugin-linux/tabs
 PASS matrix 32 rows  pages 0 10 20 22 12 2 0; 32/32 reached by wheel, 32 edited (CURVE/ON/DEPTH), 32 removed with X; 11 rows scroll to 2
 PASS KIT/PATTERN arrows  352 steps over 22 programs on 8 tabs, both arrow pairs wrap INIT <-> Lo-Fi Tape Wobble, ▶▶ = program 2 state
 PASS SRC key  SRC INT > SRC EXT > SRC HOST > SRC INT, right-click SRC EXT > SRC INT; engine tempo 120.0 / 120.0 / 100.0 / 120.0 BPM (host 100, knob 120.0)

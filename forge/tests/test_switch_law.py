@@ -2,7 +2,7 @@
 """Refuse a Trig cable that forces EXT. Allow the switch to choose.
 
 Run:
-  PYTHONPATH=~/graphforge/src python3 forge/tests/test_switch_law.py
+  make law GRAPHFORGE_SRC=/path/to/graphforge/src   (default ../graphforge/src)
 
 The printed 48 kHz rows stay in tests/voices.cpp. This file checks that
 those coefficients are absent from the law, and that require_law allows

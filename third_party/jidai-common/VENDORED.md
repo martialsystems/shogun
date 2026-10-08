@@ -2,13 +2,13 @@
 
 | | |
 | --- | --- |
-| Source repo | https://github.com/martialsystems/jidai-collection (local clone `/workspace/jidai-collection`) |
+| Source repo | https://github.com/martialsystems/jidai-collection |
 | Path | `jidai-common/` (the whole folder) |
 | Branch | `redesign/jidai` |
 | Version | **1.1.2** (`project(JidaiCommon VERSION 1.1.2)`) |
 | Commit | **8a4b5ae** (8a4b5aecf3d6c2ac8900cc2e88db8feecf8440a8), "jidai-common 1.1.2: AMT 0 transparent, group delay API, lin55 floor (re-vendor this commit)" |
 | `jidai-common` tree | 2464d9767032da0eab742650caf8d426df8c1420 |
-| Copied with | `git -C /workspace/jidai-collection archive 8a4b5ae jidai-common \| tar -x -C third_party` |
+| Copied with | `git -C <jidai-collection clone> archive 8a4b5ae jidai-common \| tar -x -C third_party` |
 
 The folder was replaced whole from that commit; this file is the only SHOGUN-side addition. The previous vendoring was
 1.1.1 at 24ee621 (and 1.1.0 at 9d6e382 before it). 1.1.2 changes, as used here:
