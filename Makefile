@@ -50,7 +50,7 @@ install-vst: plugin
 ENGINE_DEPS = engine/shogun.cpp $(wildcard engine/*.h engine/*.inc engine/voices/*.h) \
 	$(wildcard $(JIDAI_COMMON)/jidai/*.h $(JIDAI_COMMON)/jidai/jcs/*.h $(JIDAI_COMMON)/jidai/dsp/*.h)
 TEST_SRCS = tests/main.cpp tests/blocks.cpp tests/voices.cpp tests/engine.cpp tests/mod.cpp tests/factory.cpp
-TEST_DEPS = $(TEST_SRCS) tests/testutil.h tests/rig.h tests/data/levelcomp_cases.h
+TEST_DEPS = $(TEST_SRCS) tests/testutil.h tests/rig.h tests/data/levelcomp_cases.h plugin/Source/PanelLayout.inc
 
 build/shogun_tests: $(ENGINE_DEPS) $(TEST_DEPS)
 	mkdir -p build

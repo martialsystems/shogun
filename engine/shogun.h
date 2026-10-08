@@ -1,6 +1,6 @@
 #pragma once
 // SHOGUN engine v2 (spec v2.2). Host rate, one oversampled domain (M = 1/2/4) with one decimator per audio output,
-// latency 0/23/26, control outputs at zero latency. 16 voices, sequencer, mod matrix, mixer, 153-port jack table.
+// latency 0/23/26, control outputs at zero latency. 16 voices, sequencer, mod matrix, mixer, 151-port jack table.
 //
 // Allocation happens only in prepare(). processSample() is the per-sample contract shared by jidai-rack
 // (ShogunDevice, §13.4), the plugin and the web build.

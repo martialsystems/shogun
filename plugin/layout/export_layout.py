@@ -479,7 +479,7 @@ def bind_route(ops):
     colw = 948 / 16.0
     for o in ops:
         k, t, x, y = o["kind"], o.get("text", ""), o.get("x", 0), o.get("y", 0)
-        if k == "JACK" and t in ("FILL IN", "LANE A"):
+        if k == "JACK" and t in ("FILL IN", "LANE A"):  # mockup jacks that are not SHOGUN ports (engine/ports.h)
             o["hide"] = True
             continue
         if k == "JACK" and x > 960 and abs(y - 292) < 1 and t in ("LD GATE", "BS GATE"):
@@ -493,10 +493,10 @@ def bind_route(ops):
                 v = VOICES[int((x - 10) // colw)]
                 o["bind"] = "jack:%s:%s" % (v, t)
             else:
-                pid = {"CLK IN": "CLOCK:CLK IN", "RST IN": "CLOCK:RST IN", "RUN IN": "CLOCK:RUN IN", "FILL IN": "CLOCK:FILL IN",
+                pid = {"CLK IN": "CLOCK:CLK IN", "RST IN": "CLOCK:RST IN", "RUN IN": "CLOCK:RUN IN",
                        "CLK OUT": "CLOCK:CLK OUT", "RST OUT": "CLOCK:RST OUT", "RUN OUT": "CLOCK:RUN OUT", "ACC OUT": "CLOCK:ACC OUT",
                        "LFO 1": "MOD:LFO 1", "LFO 2": "MOD:LFO 2", "LFO 3": "MOD:LFO 3", "LFO 4": "MOD:LFO 4", "RND": "MOD:RND",
-                       "LANE A": "MOD:LANE A", "LD GATE": "MOD:LD GATE", "BS GATE": "MOD:BS GATE", "MIX L": "MIX:L", "MIX R": "MIX:R"}[t]
+                       "LD GATE": "MOD:LD GATE", "BS GATE": "MOD:BS GATE", "MIX L": "MIX:L", "MIX R": "MIX:R"}[t]
                 o["bind"] = "jack:" + pid
         elif k in ("PATH",) and "Q" in o.get("text", ""):
             o["hide"] = True  # illustrative cables; the editor draws the engine's cables

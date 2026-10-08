@@ -282,25 +282,42 @@ int main(int argc, char** argv) {
     check(eng.inputLaw(notePort) == 1 && std::fabs(cents) < 0.01, "old HZ/V plays",
           "BASS:HZ/V cable at 2.0 V -> " + juce::String(hz, 6) + " Hz (" + juce::String(cents, 5) + " cents from 110), law " +
               juce::String(eng.inputLaw(notePort)));
+
+    // An old state with cables on the removed CLOCK:FILL IN and MOD:LANE A loads: those cables are dropped and
+    // reported (loadReport), the good cable stays, the state saves without them and the processor runs.
+    juce::String oldJson = R"({"format":"shogun-patch","version":2,"params":{},"cables":[["SHOGUN/CLOCK:CLK OUT","SHOGUN#1/CLOCK:FILL IN"],["SHOGUN/MOD:LANE A","SHOGUN/BD1:DECAY"],["SHOGUN/MOD:LFO 1","SHOGUN/BD1:PITCH"]]})";
+    juce::XmlElement x4("SHOGUN");
+    x4.setAttribute("version", 2);
+    x4.addTextElement(oldJson);
+    juce::MemoryBlock mb4, mb5;
+    juce::AudioProcessor::copyXmlToBinary(x4, mb4);
+    auto o = fresh();
+    o->setStateInformation(mb4.getData(), static_cast<int>(mb4.getSize()));
+    juce::AudioBuffer<float> blk(o->getTotalNumOutputChannels(), 256);
+    o->processBlock(blk, none);
+    o->getStateInformation(mb5);
+    auto x5 = juce::AudioProcessor::getXmlFromBinary(mb5.getData(), static_cast<int>(mb5.getSize()));
+    const juce::String saved = x5 ? x5->getAllSubText() : juce::String();
+    check(o->cableCount() == 1 && o->droppedCables() == 2 && o->droppedRemovedCables() == 2 && o->loadReport().contains("FILL IN") &&
+              !saved.contains("FILL IN") && !saved.contains("LANE A") && saved.contains("BD1:PITCH"),
+          "removed jacks", "old FILL IN / LANE A cables dropped " + juce::String(o->droppedCables()) + " (removed " +
+              juce::String(o->droppedRemovedCables()) + "), kept " + juce::String(o->cableCount()) + "; report: " + o->loadReport());
   }
 
-  // ---- editor: 1200 x 672, 8 tabs, 153 bay jacks; render each tab to PNG
+  // ---- editor: 1200 x 672, 8 tabs, 151 bay jacks (every port); render each tab to PNG
   {
     auto p = fresh();
     std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
     auto* se = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get());
-    // Every port has a jack on the ROUTE tab except FILL IN and LANE A: the engine neither reads FILL IN nor drives
-    // LANE A (no fill, no lanes), so the panel does not offer them (scripts/check_panel_bindings.py).
+    // Every port has a jack on the ROUTE tab (CLOCK:FILL IN and MOD:LANE A are no longer ports, engine/ports.h).
     int jacks = 0;
     for (int i = 0; i < kPorts; ++i) {
       juce::Point<float> pt;
       jacks += se->panel().jackPosition(i, pt) ? 1 : 0;
     }
-    juce::Point<float> pt;
-    const bool hidden = !se->panel().jackPosition(findPort("CLOCK:FILL IN"), pt) && !se->panel().jackPosition(findPort("MOD:LANE A"), pt);
-    check(ed->getWidth() == 1200 && ed->getHeight() == 672 && jacks == kPorts - 2 && hidden, "editor",
+    check(ed->getWidth() == 1200 && ed->getHeight() == 672 && jacks == kPorts && kPorts == 151, "editor",
           juce::String(ed->getWidth()) + "x" + juce::String(ed->getHeight()) + ", bay jacks " + juce::String(jacks) + "/" +
-              juce::String(kPorts) + " (FILL IN, LANE A not offered), ops " + juce::String(ShogunPanel::opCount()));
+              juce::String(kPorts) + ", ops " + juce::String(ShogunPanel::opCount()));
     static const char* const names[8] = {"main", "voice", "grid", "mod", "route", "fxmix", "seqmidi", "global"};
     int written = 0;
     for (int t = 0; t < 8; ++t) {

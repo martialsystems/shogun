@@ -67,6 +67,8 @@ const char* sg_state_json(int full);
 int sg_state_json_len();
 char* sg_doc_buf(int n);
 int sg_patch_load(int n);
+int sg_patch_dropped();
+int sg_patch_dropped_removed();
 int sg_param_steps(int i);
 const char* sg_param_choices(int i);
 void sg_rotate(double rot);

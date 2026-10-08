@@ -55,6 +55,11 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   bool addCable(int from, int to);
   void removeCablesAt(int port);
   int cableCount() const { return uiCableCount_; }
+  // Load report of the last state / program load: saved cables dropped (an end on a removed port such as
+  // CLOCK:FILL IN or MOD:LANE A, or an unknown id), those on a removed port, and a one-line text (empty if none).
+  int droppedCables() const { return droppedCables_; }
+  int droppedRemovedCables() const { return droppedRemoved_; }
+  const juce::String& loadReport() const { return loadReport_; }
   std::pair<int, int> cable(int i) const { return {uiCables_[static_cast<size_t>(i)].first, uiCables_[static_cast<size_t>(i)].second}; }
   double cvAmt(int port) const { return uiCvAmt_[static_cast<size_t>(port)]; }
   void setCvAmt(int port, double amt);
@@ -157,6 +162,8 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::AsyncUpd
   static constexpr int kMaxCables = 64;
   std::array<std::pair<int, int>, kMaxCables> uiCables_{};
   int uiCableCount_ = 0;
+  int droppedCables_ = 0, droppedRemoved_ = 0;
+  juce::String loadReport_;
   std::array<double, shogun::kPorts> uiCvAmt_{};
   std::array<std::uint8_t, shogun::kPorts> uiLaw_{};
 

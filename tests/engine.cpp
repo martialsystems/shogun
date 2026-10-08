@@ -1,9 +1,12 @@
 // SHOGUN engine named tests: sequencer and clock switch, mixer rules, latency, pitch law, jacks (TESTPLAN.md, §15.4).
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <jidai/CableStandard.h>
 #include <string>
 #include <vector>
 
+#include "patch.h"
 #include "rig.h"
 
 using namespace shogun;
@@ -566,7 +569,7 @@ void testJackIdsJcsShared() {
               "refused %d; params %d/%d valid R6 ids; PITCH colour #%06x\n",
               T, aliasIds, aliasOk, legacyOk, legacy.c_str(), refused ? 1 : 0, paramsOk, kParamCount,
               static_cast<unsigned>(vel));
-  truth(T, "153 port ids round trip whole", portsOk == kPorts);
+  truth(T, "151 port ids round trip whole", portsOk == kPorts);
   truth(T, "alias R6 ids round trip whole", aliasOk + legacyOk == aliasIds);
   truth(T, "legacy names are exactly MIX L, MIX R, LFO OUT", legacy == " [MIX L] [MIX R] [LFO OUT]" && legacyOk == 3);
   truth(T, "foreign prefix refused", refused);
@@ -583,9 +586,8 @@ void testJackIdsAndTypes() {
   for (const char* v : {"LEAD", "BASS"})
     for (const char* j : {"GATE", "VEL", "NOTE", "V/OCT", "CUTOFF", "RET", "OUT", "NOTE OUT"})
       ids.push_back(std::string(v) + ":" + j);
-  for (const char* g : {"MOD:LD GATE", "MOD:BS GATE", "CLOCK:CLK IN", "CLOCK:RST IN", "CLOCK:RUN IN", "CLOCK:FILL IN",
-                        "CLOCK:CLK OUT", "CLOCK:RST OUT", "CLOCK:RUN OUT", "CLOCK:ACC OUT", "MOD:LFO 1", "MOD:LFO 2",
-                        "MOD:LFO 3", "MOD:LFO 4", "MOD:RND", "MOD:LANE A", "MIX:L", "MIX:R", "BD1:WAVE", "BD2:WAVE",
+  for (const char* g : {"MOD:LD GATE", "MOD:BS GATE", "CLOCK:CLK IN", "CLOCK:RST IN", "CLOCK:RUN IN", "CLOCK:CLK OUT", "CLOCK:RST OUT", "CLOCK:RUN OUT", "CLOCK:ACC OUT", "MOD:LFO 1", "MOD:LFO 2",
+                        "MOD:LFO 3", "MOD:LFO 4", "MOD:RND", "MIX:L", "MIX:R", "BD1:WAVE", "BD2:WAVE",
                         "BD1:FOLD VC", "BD2:FOLD VC", "LTC:FOLD VC", "MTC:FOLD VC", "HTC:FOLD VC"})
     ids.push_back(g);
   bool same = static_cast<int>(ids.size()) == kPorts;
@@ -605,7 +607,7 @@ void testJackIdsAndTypes() {
     if (lab == "PITCH" || lab == "NOTE" || lab == "V/OCT" || lab == "NOTE OUT") role = Role::VOct;
     else if (lab == "RET" || lab == "OUT" || id.rfind("MIX:", 0) == 0) role = Role::Audio;
     else if (lab == "TRIG" || lab == "GATE" || lab.find("CLK") == 0 || lab.find("RST") == 0 || lab.find("RUN") == 0 ||
-             lab == "FILL IN" || lab == "LD GATE" || lab == "BS GATE")
+             lab == "LD GATE" || lab == "BS GATE")
       role = Role::GateClk;
     if (d.type != want || d.role != role) {
       ++typeErr;
@@ -615,9 +617,9 @@ void testJackIdsAndTypes() {
   bool unique = true;
   for (int i = 0; i < kPorts; ++i)
     for (int j = i + 1; j < kPorts; ++j) unique = unique && std::strcmp(kPortTable[i].id, kPortTable[j].id) != 0;
-  std::printf("%s: %d ports, ids exactly as 13.2: %d, unique %d, type/role errors %d, plainVoltGates %d\n", T, kPorts,
+  std::printf("%s: %d ports, ids exactly as 13.2 (less FILL IN / LANE A): %d, unique %d, type/role errors %d, plainVoltGates %d\n", T, kPorts,
               same ? 1 : 0, unique ? 1 : 0, typeErr, kPlainVoltGates ? 1 : 0);
-  truth(T, "153 ports", kPorts == 153);
+  truth(T, "151 ports", kPorts == 151);
   truth(T, "ids", same);
   truth(T, "unique", unique);
   truth(T, "types and roles", typeErr == 0);
@@ -658,6 +660,84 @@ void testHostLock() {
   near(T, "step 29", static_cast<double>(s1), 29.0, 0.0);
   truth(T, "re-sync within one block", synced >= 0);
   truth(T, "step 0 fires after the jump", !hl.hits.empty() && hl.hits[0] == 0);
+}
+
+// The panel layout the plugin editor draws (plugin/Source/PanelLayout.inc, generated), read with the editor's row shape.
+struct BayOp {
+  int kind, tab, flags;
+  float x, y, w, h, r, z, v;
+  std::uint32_t fill, stroke;
+  float sw, opacity;
+  const char* text;
+  const char* text2;
+  const char* bind;
+  int steps, ticks;
+};
+const BayOp kBayOps[] = {
+#include "../plugin/Source/PanelLayout.inc"
+};
+
+// Every port in kPortTable has a "jack:" bind on the ROUTE bay of PanelLayout.inc, and every bay jack is in
+// kPortTable (the declared table matches the panel; CLOCK:FILL IN and MOD:LANE A are no longer ports).
+void testBayMatchesPortTable() {
+  const char* T = "testBayMatchesPortTable";
+  bool seen[kPorts] = {};
+  int bay = 0, unknown = 0, dups = 0;
+  for (const BayOp& op : kBayOps) {
+    if (op.kind != 9 || std::strncmp(op.bind, "jack:", 5) != 0) continue;  // 9 = JACK
+    const int port = findPort(op.bind + 5);
+    if (port < 0) {
+      ++unknown;
+      std::printf("%s: bay jack not in kPortTable: %s\n", T, op.bind + 5);
+      continue;
+    }
+    if (seen[port]) ++dups;
+    seen[port] = true;
+    ++bay;
+  }
+  int missing = 0;
+  for (int i = 0; i < kPorts; ++i)
+    if (!seen[i]) {
+      ++missing;
+      std::printf("%s: port not on the bay: %s\n", T, kPortTable[i].id);
+    }
+  std::printf("%s: bay %d jacks, ports %d, missing %d, unknown %d, dups %d\n", T, bay, kPorts, missing, unknown, dups);
+  truth(T, "bay equals the table", bay == kPorts && missing == 0 && unknown == 0 && dups == 0 && kPorts == 151);
+}
+
+// An old document with cables on the removed CLOCK:FILL IN and MOD:LANE A loads: those cables are dropped and
+// reported (Patch::droppedCables / droppedRemoved / droppedIds), the good cable is kept, applyPatch does not crash
+// and the voice still plays. Global forms SHOGUN/ and SHOGUN#N/ are accepted and dropped the same way.
+void testRemovedPortCablesDropped() {
+  const char* T = "testRemovedPortCablesDropped";
+  const char* docs[3] = {
+      R"({"name":"OLD","cables":[["CLOCK:CLK OUT","CLOCK:FILL IN"],["MOD:LANE A","BD1:DECAY"],["MOD:LFO 1","BD1:PITCH"]]})",
+      R"({"name":"OLD","cables":[["SHOGUN/CLOCK:CLK OUT","SHOGUN/CLOCK:FILL IN"],["SHOGUN/MOD:LANE A","SHOGUN/BD1:DECAY"],["SHOGUN/MOD:LFO 1","SHOGUN/BD1:PITCH"]]})",
+      R"({"name":"OLD","cables":[["SHOGUN#1/CLOCK:CLK OUT","SHOGUN#1/CLOCK:FILL IN"],["SHOGUN#1/MOD:LANE A","SHOGUN#1/BD1:DECAY"],["SHOGUN#1/MOD:LFO 1","SHOGUN#1/BD1:PITCH"]]})",
+  };
+  int ok = 0;
+  for (const char* doc : docs) {
+    Patch p;
+    const bool read = parsePatch(doc, p);
+    auto e = make();
+    applyPatch(p, *e);
+    e->trigger(BD1);
+    double peak = 0.0;
+    for (long n = 0; n < 4800; ++n) {
+      e->processSample();
+      peak = std::fmax(peak, std::fabs(e->mainL()) + std::fabs(e->mainR()));
+    }
+    const bool good = read && p.nCables == 1 && p.cableFrom[0] == findPort("MOD:LFO 1") &&
+                      p.cableTo[0] == findPort("BD1:PITCH") && p.droppedCables == 2 && p.droppedRemoved == 2 &&
+                      std::strstr(p.droppedIds[0], "FILL IN") != nullptr &&
+                      std::strstr(p.droppedIds[1], "LANE A") != nullptr && peak > 0.01;
+    ok += good ? 1 : 0;
+  }
+  truth(T, "removed ports are known", isRemovedPort("CLOCK:FILL IN") && isRemovedPort("SHOGUN#3/MOD:LANE A") &&
+                                           !isRemovedPort("CLOCK:CLK IN") && !isRemovedPort("RONIN#1/CLOCK:FILL IN"));
+  std::printf("%s: 3 forms (bare, SHOGUN/, SHOGUN#1/): %d/3 load, drop FILL IN + LANE A, keep LFO 1 -> BD1:PITCH, play\n",
+              T, ok);
+  truth(T, "old FILL IN / LANE A cables drop and play", ok == 3);
 }
 
 }  // namespace
@@ -710,6 +790,8 @@ void runEngineTests() {
   testTuningIsNotTheVoltLaw();
   testLin55Migration();
   testJackIdsAndTypes();
+  testBayMatchesPortTable();
+  testRemovedPortCablesDropped();
   testJackIdsJcsShared();
   testHostLock();
   testAccOutFollowsPattern();

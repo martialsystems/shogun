@@ -11,7 +11,7 @@ function shogunHost(bytes,rate,post){
   return{
     run(calls){for(const c of calls){if(c[0]=="knob"){const i=K[c[1]];if(i!=null)x.sg_set_knob(i,c[2])}else if(c[0]=="doc")this.doc(c[1]);else if(typeof x[c[0]]=="function")x[c[0]](...c.slice(1))}},
     // ["doc", text]: a saved pattern's whole document (engine/patch.h), loaded like a factory program
-    doc(t){const b=unescape(encodeURIComponent(t)),p=x.sg_doc_buf(b.length),m=new Uint8Array(x.memory.buffer,p,b.length);for(let i=0;i<b.length;i++)m[i]=b.charCodeAt(i);return x.sg_patch_load(b.length)},
+    doc(t){const b=unescape(encodeURIComponent(t)),p=x.sg_doc_buf(b.length),m=new Uint8Array(x.memory.buffer,p,b.length);for(let i=0;i<b.length;i++)m[i]=b.charCodeAt(i);const r=x.sg_patch_load(b.length),d=r&&x.sg_patch_dropped?x.sg_patch_dropped():0;if(d)console.warn('SHOGUN: '+d+' saved cable(s) dropped ('+x.sg_patch_dropped_removed()+' on removed jacks CLOCK:FILL IN / MOD:LANE A)');return r},
     // the engine's whole state as a document (the page's tests compare it with what was saved)
     json(){const p=x.sg_state_json(1),n=x.sg_state_json_len(),m=new Uint8Array(x.memory.buffer,p,n);let b="";for(let i=0;i<n;i++)b+=String.fromCharCode(m[i]);try{return decodeURIComponent(escape(b))}catch(e){return b}},
     render(L,R,n){

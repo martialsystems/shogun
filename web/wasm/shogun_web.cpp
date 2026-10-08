@@ -575,6 +575,10 @@ EXPORT(sg_patch_load) int sg_patch_load(int n) {
   for (int k = 0; k < kOldInputs; ++k) gPatch[k] = 0;
   return 1;
 }
+// Load report of the last sg_patch_load: saved cables dropped (an end on a removed port such as CLOCK:FILL IN or
+// MOD:LANE A, or an unknown id), and of those, the ones on a removed port.
+EXPORT(sg_patch_dropped) int sg_patch_dropped() { return gLoad.droppedCables; }
+EXPORT(sg_patch_dropped_removed) int sg_patch_dropped_removed() { return gLoad.droppedRemoved; }
 EXPORT(sg_param_steps) int sg_param_steps(int i) { return i >= 0 && i < kParamCount ? kParams[i].steps : 0; }
 EXPORT(sg_param_choices) const char* sg_param_choices(int i) { return i >= 0 && i < kParamCount ? kParams[i].choices : ""; }
 

@@ -43,12 +43,19 @@ struct Patch {
   double cvAmt[kPorts] = {};
   std::uint8_t inLaw[kPorts] = {};
   Pattern pattern;
+  // Load report: saved cables that could not be placed (an end on a removed port, kRemovedPorts, or an unknown id).
+  // droppedRemoved counts those on a removed port; droppedIds keeps the first kDropIds cables as "from -> to".
+  static constexpr int kDropIds = 4;
+  int droppedCables = 0, droppedRemoved = 0;
+  char droppedIds[kDropIds][136] = {};
   Patch() { clear(); }
   void clear() {  // INIT: noon defaults, no rows, no cables, CV AMT 1, empty '001 INIT' pattern
     std::strcpy(name, "001 INIT");
     for (int i = 0; i < kParamCount; ++i) u[i] = static_cast<double>(kParams[i].def);
     for (auto& r : rows) r = mod::Row();
     nCables = 0;
+    droppedCables = droppedRemoved = 0;
+    for (auto& d : droppedIds) d[0] = 0;
     for (int i = 0; i < kPorts; ++i) {
       cvAmt[i] = 1.0;
       inLaw[i] = 0;
@@ -344,7 +351,8 @@ inline void readMod(Reader& r, Patch& out, int& nRows) {
 }  // namespace patchjson
 
 // Parses a patch document into out, starting from INIT (so a sparse document is complete). Unknown keys and ids are
-// skipped. Jack ids resolve like the plugin's state load (engine/ports.h resolvePort). False on a syntax error.
+// skipped; a cable with an end that does not resolve (a removed port such as CLOCK:FILL IN or MOD:LANE A, or an unknown
+// id) is dropped and counted in out.droppedCables / droppedRemoved / droppedIds. Jack ids resolve like the plugin's state load (engine/ports.h resolvePort). False on a syntax error.
 inline bool parsePatch(const char* json, Patch& out) {
   using namespace patchjson;
   out.clear();
@@ -373,7 +381,19 @@ inline bool parsePatch(const char* json, Patch& out) {
         });
         int from[3], to[3], lf = 0, lt = 0;
         const int nf = resolvePort(a, from, &lf), nt = resolvePort(b, to, &lt);
-        if (nf < 1) return;
+        if (nf < 1 || nt < 1) {  // dropped and reported, never an error (old FILL IN / LANE A cables)
+          if (out.droppedCables < Patch::kDropIds) {
+            char* d = out.droppedIds[out.droppedCables];
+            int n = 0;
+            const char* parts[3] = {a, " -> ", b};
+            for (const char* q : parts)
+              for (; *q && n < 135; ++q) d[n++] = *q;
+            d[n] = 0;
+          }
+          ++out.droppedCables;
+          if (isRemovedPort(a) || isRemovedPort(b)) ++out.droppedRemoved;
+          return;
+        }
         for (int j = 0; j < nt && out.nCables < Engine::kMaxCables; ++j) {
           if (to[j] < 0) continue;
           out.cableFrom[out.nCables] = from[0];

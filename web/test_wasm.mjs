@@ -116,14 +116,14 @@ async function lfoRun(cpb, shape, amount, n, start) {
   law.push(["LFO sample and hold moves only in the 5 ms after each cycle start (" + stray + " stray changes)", stray === 0]);
 }
 {
-  // v2 facade at a 44.1 kHz AudioContext: coefficients at that rate, latency 23, 454 params, 153 ports, INIT silent.
+  // v2 facade at a 44.1 kHz AudioContext: coefficients at that rate, latency 23, 454 params, 151 ports, INIT silent.
   const y = await fresh();
   y.sg_init(44100);
   y.sg_set_running(1);
   let peak = 0;
   for (let n = 0; n < 44100; n += 1024) { y.sg_process(1024); for (const v of new Float32Array(y.memory.buffer, y.sg_out_l(), 1024)) peak = Math.max(peak, Math.abs(v)); }
   law.push(["44.1 kHz: rate " + y.sg_sample_rate() + ", latency " + y.sg_latency() + ", params " + y.sg_param_count() + ", ports " + y.sg_port_count() + ", INIT peak " + peak,
-    y.sg_sample_rate() === 44100 && y.sg_latency() === 23 && y.sg_param_count() === 454 && y.sg_port_count() === 153 && peak === 0]);
+    y.sg_sample_rate() === 44100 && y.sg_latency() === 23 && y.sg_param_count() === 454 && y.sg_port_count() === 151 && peak === 0]);
   y.sg_hit(0, 5, 0, 3);
   let hit = 0;
   for (let n = 0; n < 22050; n += 1024) { y.sg_process(1024); for (const v of new Float32Array(y.memory.buffer, y.sg_out_l(), 1024)) hit = Math.max(hit, Math.abs(v)); }
@@ -141,8 +141,8 @@ async function lfoRun(cpb, shape, amount, n, start) {
     if (find(s) === i && find("SHOGUN/" + s) === i && find("SHOGUN#1/" + s) === i) ++ok;
   }
   const legacy = find("MIX L") >= 0 && find("LFO OUT") >= 0, foreign = find("RONIN#1/BD1:TRIG") === -1;
-  law.push(["jack ids: " + ok + "/153 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT " + find("SHOGUN#1/LEAD:V/OCT") + "); legacy names " + (legacy ? "ok" : "MISSING") + "; foreign prefix refused " + foreign,
-    ok === 153 && legacy && foreign]);
+  law.push(["jack ids: " + ok + "/151 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT " + find("SHOGUN#1/LEAD:V/OCT") + "); legacy names " + (legacy ? "ok" : "MISSING") + "; foreign prefix refused " + foreign,
+    ok === 151 && legacy && foreign]);
 }
 async function bd1With(patch) {
   const y = await fresh();
@@ -207,6 +207,12 @@ async function bd1With(patch) {
   }
   law.push(["documents: " + same + "/" + nat.length + " programs write the native bytes (" + bytes + " bytes), " + again + " reload to the same text and state",
     nat.length === y.sg_factory_count() && same === nat.length && again === nat.length]);
+  // An old document with cables on the removed CLOCK:FILL IN and MOD:LANE A loads: those cables are dropped and
+  // reported (sg_patch_dropped), the good cable is kept, and the engine plays.
+  const old = '{"name":"OLD","cables":[["CLOCK:CLK OUT","SHOGUN#1/CLOCK:FILL IN"],["MOD:LANE A","BD1:DECAY"],["MOD:LFO 1","BD1:PITCH"]]}';
+  const okOld = load(old), dropped = y.sg_patch_dropped(), removed = y.sg_patch_dropped_removed(), saved = doc(), kept = /"SHOGUN\/MOD:LFO 1", ?"SHOGUN\/BD1:PITCH"/.test(saved) && !saved.includes("FILL IN") && !saved.includes("LANE A");
+  law.push(["old FILL IN / LANE A cables: load " + okOld + ", dropped " + dropped + " (on removed jacks " + removed + "), LFO 1 -> BD1:PITCH kept " + kept,
+    okOld === 1 && dropped === 2 && removed === 2 && kept]);
 }
 for (const [name, pass] of law) console.log((pass ? "ok   " : "FAIL ") + name);
 process.exit(ok && law.every((l) => l[1]) ? 0 : 1);

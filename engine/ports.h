@@ -1,5 +1,5 @@
 #pragma once
-// SHOGUN jack table (spec v2.2 §13.2): 153 ports, ids exactly as specified, types as §13.1 (plain-volt device:
+// SHOGUN jack table (spec v2.2 §13.2 less CLOCK:FILL IN and MOD:LANE A, see kRemovedPorts): 151 ports, ids exactly as specified, types as §13.1 (plain-volt device:
 // inputs CV except RET = Audio; OUT/MIX Audio; ENV/NOTE OUT/MOD/ACC OUT CV; CLK/RST/RUN OUT and LD/BS GATE Gate).
 // Global form: SHOGUN#N/<id>.
 
@@ -40,7 +40,6 @@ enum GlobalPort : int {
   PORT_CLK_IN,
   PORT_RST_IN,
   PORT_RUN_IN,
-  PORT_FILL_IN,
   PORT_CLK_OUT,
   PORT_RST_OUT,
   PORT_RUN_OUT,
@@ -50,9 +49,8 @@ enum GlobalPort : int {
   PORT_LFO3,
   PORT_LFO4,
   PORT_RND,
-  PORT_LANE_A,
   PORT_MIX_L,
-  PORT_MIX_R,  // 145
+  PORT_MIX_R,  // 143
   PORT_BD1_WAVE,
   PORT_BD2_WAVE,
   PORT_FOLD_VC_BD1,
@@ -60,9 +58,9 @@ enum GlobalPort : int {
   PORT_FOLD_VC_LTC,
   PORT_FOLD_VC_MTC,
   PORT_FOLD_VC_HTC,
-  kPorts  // 153
+  kPorts  // 151
 };
-static_assert(kPorts == 153, "§13.2: 153 ports");
+static_assert(kPorts == 151, "§13.2: 151 ports (the panel bay)");
 
 #define SG_DRUM(V)                                                     \
   {V ":TRIG", PortDir::In, PortType::CV, 0.f, Role::GateClk},            \
@@ -92,7 +90,6 @@ inline const PortDesc kPortTable[kPorts] = {
     {"CLOCK:CLK IN", PortDir::In, PortType::CV, 0.f, Role::GateClk},
     {"CLOCK:RST IN", PortDir::In, PortType::CV, 0.f, Role::GateClk},
     {"CLOCK:RUN IN", PortDir::In, PortType::CV, 0.f, Role::GateClk},
-    {"CLOCK:FILL IN", PortDir::In, PortType::CV, 0.f, Role::GateClk},
     {"CLOCK:CLK OUT", PortDir::Out, PortType::Gate, 0.f, Role::GateClk},
     {"CLOCK:RST OUT", PortDir::Out, PortType::Gate, 0.f, Role::GateClk},
     {"CLOCK:RUN OUT", PortDir::Out, PortType::Gate, 0.f, Role::GateClk},
@@ -102,7 +99,6 @@ inline const PortDesc kPortTable[kPorts] = {
     {"MOD:LFO 3", PortDir::Out, PortType::CV, 0.f, Role::CV},
     {"MOD:LFO 4", PortDir::Out, PortType::CV, 0.f, Role::CV},
     {"MOD:RND", PortDir::Out, PortType::CV, 0.f, Role::CV},
-    {"MOD:LANE A", PortDir::Out, PortType::CV, 0.f, Role::CV},
     {"MIX:L", PortDir::Out, PortType::Audio, 0.f, Role::Audio},
     {"MIX:R", PortDir::Out, PortType::Audio, 0.f, Role::Audio},
     {"BD1:WAVE", PortDir::In, PortType::CV, 0.f, Role::CV},
@@ -115,6 +111,12 @@ inline const PortDesc kPortTable[kPorts] = {
 };
 #undef SG_DRUM
 #undef SG_SYNTH
+
+// Ports §13.2 listed that SHOGUN never had behind them: FILL IN was never read and LANE A was a constant 0 V (no fill,
+// no lanes in this pass), and the panel bay never offered them. They are not ports any more, so the table is exactly
+// the bay (testBayMatchesPortTable). A saved cable on one of them (any R6 form) is dropped at load and reported
+// (Patch::droppedCables / droppedIds, the plugin's load report, sg_patch_dropped on the web), never an error.
+inline const char* const kRemovedPorts[] = {"CLOCK:FILL IN", "MOD:LANE A"};
 
 // Shogun is a plain-volt device (§13.1, BushidoDevice.cpp L44).
 constexpr bool kPlainVoltGates = true;
@@ -244,6 +246,20 @@ inline int resolvePort(const char* text, int out[3], int* law) {
     return 1;
   }
   return 0;
+}
+
+// True for a saved id that names a removed port (kRemovedPorts) in any R6 form (bare, SHOGUN/, SHOGUN#N/).
+inline bool isRemovedPort(const char* text) {
+  std::string local;
+  if (const auto j = jidai::jcs::parseJackId(text)) {
+    if (!j->prefix.empty() && !(j->prefix == "SHOGUN")) return false;
+    local = j->local();
+  } else {
+    local = text;
+  }
+  for (const char* r : kRemovedPorts)
+    if (sameText(r, local.c_str())) return true;
+  return false;
 }
 
 // One port for a jack id in any R6 form (first target of a fan-out alias), or −1.

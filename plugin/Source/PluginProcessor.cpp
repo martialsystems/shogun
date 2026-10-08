@@ -632,13 +632,21 @@ void ShogunAudioProcessor::patchFromJson(const juce::var& v) {
   // resolvePort parses every form (SHOGUN#N/…, SHOGUN/…, bare) with the shared JCS R6 parseJackId (engine/ports.h).
   auto resolve = [](const juce::String& full, int out[3], int* law) { return resolvePort(full.toRawUTF8(), out, law); };
   uiCableCount_ = 0;
+  droppedCables_ = droppedRemoved_ = 0;
+  loadReport_ = {};
+  juce::StringArray dropped;
   if (auto* cables = v["cables"].getArray())
     for (const auto& c : *cables) {
       if (!c.isArray() || c.size() < 2) continue;
       int from[3], to[3], lf = 0, lt = 0;
       const int nf = resolve(c[0].toString(), from, &lf);
       const int nt = resolve(c[1].toString(), to, &lt);
-      if (nf < 1) continue;
+      if (nf < 1 || nt < 1) {  // dropped and reported, never an error (old CLOCK:FILL IN / MOD:LANE A cables)
+        ++droppedCables_;
+        if (isRemovedPort(c[0].toString().toRawUTF8()) || isRemovedPort(c[1].toString().toRawUTF8())) ++droppedRemoved_;
+        dropped.add(c[0].toString() + " -> " + c[1].toString());
+        continue;
+      }
       for (int k = 0; k < nt && uiCableCount_ < kMaxCables; ++k) {
         if (to[k] < 0) continue;
         uiCables_[static_cast<size_t>(uiCableCount_++)] = {from[0], to[k]};
@@ -646,6 +654,11 @@ void ShogunAudioProcessor::patchFromJson(const juce::var& v) {
         if (lt == 2) uiCvAmt_[static_cast<size_t>(to[k])] = 1.0 / 12.0;
       }
     }
+  if (droppedCables_ > 0) {
+    loadReport_ = "SHOGUN: dropped " + juce::String(droppedCables_) + " saved cable(s) (" + juce::String(droppedRemoved_) +
+                  " on removed jacks CLOCK:FILL IN / MOD:LANE A): " + dropped.joinIntoString(", ");
+    juce::Logger::writeToLog(loadReport_);
+  }
   if (auto* cv = v["cvAmt"].getDynamicObject())
     for (const auto& kv : cv->getProperties()) {
       int p[3], law = 0;

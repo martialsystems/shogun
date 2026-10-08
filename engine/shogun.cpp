@@ -1138,7 +1138,6 @@ void Engine::writeControlOutputs(float* out) {
   out[PORT_ACC_OUT] = run ? static_cast<float>(accOut_) : 0.0f;
   for (int i = 0; i < 4; ++i) out[PORT_LFO1 + i] = static_cast<float>(mod_.lfo[i].jackVolts());
   out[PORT_RND] = static_cast<float>(5.0 * rnd_);
-  out[PORT_LANE_A] = 0.0f;  // LANE A/B deferred past the first pass (§15.0); data format reserved
 }
 
 }  // namespace shogun
