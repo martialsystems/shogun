@@ -4,7 +4,7 @@ The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and t
 
 Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 0 V = C3 = note 48; accent volts 2.353/3.706/5.0 V; voice end at −90 dB (kQuiet 3.162e-5); OS 2× unless a row says otherwise (latency 23 base samples).
 
-Result of the last run: **all 326 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
+Result of the last run: **all 330 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
 
 §15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
@@ -636,7 +636,7 @@ SLEW 1 at 1/4, 120 BPM: tau 125 ms, 63 % at 125.021 ms
 
 ## Factory bank (tests/factory.cpp)
 
-The bank in `engine/factory.h` (INIT, then 21 kits with their patterns; BUILD_GUIDE.md "Factory bank"). 17 named checks.
+The bank in `engine/factory.h` (INIT, then 21 kits with their patterns; BUILD_GUIDE.md "Factory bank"). 21 named checks.
 
 ### testFactoryPresetsLoad
 
@@ -652,6 +652,14 @@ The bank text is the canonical writer's output (`patchToJson(parsePatch(text), f
 
 ```
 22 programs saved (317396 bytes of state), reloaded and saved again
+```
+
+### testPatchWriterNoLibc
+
+The libc-free writer (`writePatchJson` on `patchjson::BufOut`, which the wasm page saves with) against the libc one: `fmtG` gives the bytes of `snprintf("%.*g")` at every precision 1 to 17, `shortestNum` and `shortestFloat` give the text `putNum` and `putFloat` choose with `snprintf` and `strtod` (doubles from random bits, [0, 1), k/127, every power of two from 2^-1074 to 2^1023, subnormals, signed zero; floats from random bits), and every program's document is byte-identical to `patchToJson`, sparse and full.  Tolerance: exact.
+
+```
+442510 %.*g texts, 182206 doubles and 182206+ floats, 22 programs x 2 documents
 ```
 
 ### testFactoryRenderLevels
@@ -672,7 +680,7 @@ Names are unique (case-insensitive), fit the pattern name, and carry none of 50 
 
 ## Plugin shell (ShogunProbe, `make probe-linux`)
 
-The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. Last run, all PASS:
+The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. The panel checks press the real keys through the editor's binds (`pressBind`): the KIT and PATTERN arrows step every program with wraparound on all 8 tabs, SRC cycles CLOCK:SOURCE and the engine follows the host tempo only on HOST, A/B recalls two full snapshots exactly and copies either onto the other, undo/redo restores kit loads, knob gestures and step edits (a no-op click keeps redo; 64 levels), the MOD ◉ keys arm a source and a knob click adds the row, UI SCALE resizes, the OS keys and offline 4× set their parameters, RE-ROLL UNIT changes the unit serial in the engine and the saved state, and VELOCITY CURVE shapes MIDI velocity. 26 checks, last run all PASS:
 
 ```
 PASS params  count 454 (table 454), float 0..1 SECTION:LABEL ids, mismatches 0
@@ -690,19 +698,34 @@ PASS program state  21/21 programs save and reload to the same state
 PASS state round trip  XML <SHOGUN version=2> JSON 11564 chars; params/pattern/lock/mod/cable restored
 PASS alias load  cables 4 (1 + 3 toms) = 4, BASS:NOTE law 1, MTC:PITCH CV AMT 0.083333
 PASS old HZ/V plays  BASS:HZ/V cable at 2.0 V -> 110.000000 Hz (0.00000 cents from 110), law 1
-PASS editor  1200x672, bay jacks 153/153, ops 2622
+PASS editor  1200x672, bay jacks 151/153 (FILL IN, LANE A not offered), ops 2550
 PASS tab renders  8 PNGs in /workspace/shogun/build/plugin-linux/tabs
+PASS KIT/PATTERN arrows  352 steps over 22 programs on 8 tabs, both arrow pairs wrap INIT <-> Lo-Fi Tape Wobble, ▶▶ = program 2 state
+PASS SRC key  SRC INT > SRC EXT > SRC HOST > SRC INT, right-click SRC EXT > SRC INT; engine tempo 120.0 / 120.0 / 100.0 / 120.0 BPM (host 100, knob 120.0)
+PASS A/B compare  B = copy on first visit, A/B recall exact (BD1:DECAY 0.774 / 0.900, SD step 4), copy A>B and B>A
+PASS undo/redo  kit load + knob gesture + step edit undone and redone exactly; no-op click keeps redo; 64 levels after 70 edits
+PASS ASSIGN keys  LFO 1 > BD1:DECAY +50 % in slot 1, AT > BD2:TUNE in slot 2, second press cancels
+PASS UI scale keys  150% = 1800 px, 75% = 900x504, 100% = 1200
+PASS OS keys  badge 2x > 4x, right-click back; offline 4x sets OFFLINE (OS stays 2x)
+PASS RE-ROLL UNIT  0x5A31C0DE > 0x74C37F51, engine + saved state follow (SN 0x74C3-7F51)
+PASS VELOCITY CURVE  velocity 40 peaks HARD 0.035 < LINEAR 0.063 < SOFT 0.094 <= FIXED 0.150
 ShogunProbe: all checks passed
 ```
 
-Tab renders: `build/plugin-linux/tabs/tab_<i>_<name>.png` (1200 × 672) next to the spec mockups; mean absolute pixel difference per tab (0 to 255): MAIN 4.7, VOICE 5.8, GRID 12.4, MOD 7.5, ROUTE 8.6, FX/MIX 6.0, SEQ/MIDI 5.0, GLOBAL 4.3. The differences are the mockups' illustrative data (fake pattern, matrix rows, cables, meter levels), which the plugin replaces with live state (INIT: empty), plus font rasterisation.
+**Panel bindings (`make panel-check`, `scripts/check_panel_bindings.py`).** Reads `plugin/Source/PanelLayout.inc` and the editor's bind table: every interactive op (KEY, KNOB, LCD, toggle, jack, grid cell) on every tab must carry a bind, and every bind prefix must be one the editor handles. Runs in `make test`, `make plugin` and `make probe-linux`.
+
+```
+check_panel_bindings: 860 interactive ops, 0 dead
+```
+
+Tab renders: `build/plugin-linux/tabs/tab_<i>_<name>.png` (1200 × 672) next to the spec mockups; mean absolute pixel difference per tab (0 to 255): MAIN 4.7, VOICE 5.8, GRID 12.4, MOD 7.5, ROUTE 8.6, FX/MIX 6.0, SEQ/MIDI 5.0, GLOBAL 4.3. The differences are the mockups' illustrative data (fake pattern, matrix rows, cables, meter levels), which the plugin replaces with live state (INIT: empty), plus font rasterisation, and the keys this pass removed or rebound (FILL, ROLL, MUTE GRP, SCENE, LEARN, LOCK RND, lane editor, NOISE FLOOR, TRANSPOSE, SAVE AS DEFAULT).
 
 ## Web build (`make web`)
 
 `build/shogun.wasm` is the same engine (freestanding, `-DSHOGUN_NO_FORMAT`), run at the AudioContext rate. `web/test_wasm.mjs` runs `web/parity_scenario.txt` through wasm and the native build of the same facade (`build/web_parity`) and compares every sample, then checks the bay and LFO laws, the jack-id forms and the factory bank. The scenario ends by loading every factory program (and one rotated for a chain, and INIT): after each load the wasm state hash (parameters as floats, mod rows, pattern) must equal the native one exactly, which checks the freestanding number reader against `strtod`. After the switch to the shared exact-halfband stage 1, the largest wasm/native difference went from 9.68e-10 to 3.74e-9, and with jidai-common 1.1.1 (exact C3 in the synth pitch) to 3.77e-9 (float32 output, same code on both sides; the wasm build imports JS Math):
 
 ```
-200608 samples, peak 0.341, largest wasm/native difference 3.77e-9 at 92575; 23/23 loaded-state hashes equal (factory programs)
+200608 samples, peak 0.341, largest wasm/native difference 5.00e-10 at 188022; 23/23 loaded-state hashes equal (factory programs)
 wasm matches the native engine
 ok   CLK OUT into BD1 Trig, INT: silent
 ok   CLK OUT into BD1 Trig, EXT: fires
@@ -719,6 +742,16 @@ ok   44.1 kHz: BD1 hit peak 0.1498
 ok   jack ids: 153/153 resolve in bare, SHOGUN/ and SHOGUN#1/ forms (e.g. LEAD:V/OCT 115); legacy names ok; foreign prefix refused true
 ok   LFO OUT into BD1 PITCH changes the kick
 ok   factory bank: 22 programs (INIT + 21), unique names 22, 42 renders peak -10.47 .. -8.00 dBFS
+ok   documents: 22/22 programs write the native bytes (317396 bytes), 22 reload to the same text and state
+```
+
+The page setters now leave a value alone when it equals what the panel reads back (a knob's CC, a level, a track's shuffle and shift, a step's bend, the clock steps), so re-sending a panel keeps the engine's finer value; the scenario's largest difference moved from 3.77e-9 to 5.00e-10 with that (still float32 output of the same code on both sides). The new `documents` law checks the wasm `sg_state_json` against the native writer for every program.
+
+**Page save round trip (`web/test_page.mjs`, headless Chrome).** `web/shogun.html` with a test appended, in a real browser. For every program (INIT and the 21 kits): load it, edit one visible control (a knob, a step on/off, an accent, TEMPO, a track LENGTH, a LEVEL, LFO AMOUNT or LFO DIVISION), SAVE, load the saved pattern again. The saved document must differ from the factory document only in the edited field; the reloaded panel must show the edit; the saved text must be a fixed point of load and save; the engine the page plays from (before and after the reload) must hold the saved document, apart from what the page owns (master, solo, INT/EXT, cables); a second SAVE without edits must give the same text. The LFO knobs must be the kit's LFO 1 and the LFO tab must list all four LFOs.
+
+```
+test_page: 22 programs: 22 saves change only the edited field, 22 reload showing the edit, 22 saved texts are fixed points, 22 playing engines hold the saved document, 22 re-saves identical; hidden detail carried: 12 mod rows, 35 steps with probability, 22 micro-timed, 12 ratchets, 15 with p-locks
+test_page: the web save round trip keeps every field
 ```
 
 ## jidai-common (vendored shared headers)
@@ -769,4 +802,4 @@ SHOGUN uses these parts of it:
 ## Not run on this box
 
 - `forge/tests/test_switch_law.py` (`make law`) needs graphforge (`GRAPHFORGE_SRC`), which is not installed here; the same switch law is checked natively by `testExtBypassIgnoresPattern` and `testIntIgnoresTrigJacks`.
-- The web page itself (`web/shogun.html`) was rebuilt but not opened in a browser; its panel still uses the old page API through the compat layer.
+- The web page runs in headless Chrome for `web/test_page.mjs` only; its audio path (AudioWorklet) is not exercised there.
