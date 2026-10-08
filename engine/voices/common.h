@@ -3,14 +3,12 @@
 // applies DC block → VCA (g_vel · g_level · calib) → OUT tap → RET → choke → PAN → bus around it.
 
 #include "../dsp.h"
-#include "../jidai/dsp/TripleShaper.h"
 #include "../params.h"
+#include "../wave_shaper.h"
 
 namespace shogun {
 
 using namespace dsp;
-using jidai::dsp::TripleShaper;
-using jidai::dsp::TripleShaperParams;
 
 // Per base sample: everything a voice reads, already summed (knob/automation smoothed + p-lock + mod + CV, §8.4).
 struct VoiceCtx {
@@ -59,7 +57,7 @@ struct Voice {
 
 // The WAVE block of a WAVE voice: parameters read from ue each base sample (§4.6).
 struct WaveSlot {
-  TripleShaper ts;
+  WaveShaper ts;
   WaveParams id{};
   bool preVca = false;
   double shape = 0.0;

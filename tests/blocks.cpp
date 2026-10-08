@@ -1,8 +1,11 @@
 // Block tests (spec §15.4, step 1): each reproduces a number from /workspace/shogun-redesign/verify/.
 #include "dsp.h"
-#include "jidai/dsp/TripleShaper.h"
-#include "jidai_local.h"
+#include "wave_shaper.h"
 #include "testutil.h"
+
+#include <jidai/dsp/Halfband.h>
+#include <jidai/jcs/Detect.h>
+#include <jidai/jcs/Pitch.h>
 #include "data/levelcomp_cases.h"
 
 #include <cmath>
@@ -10,8 +13,10 @@
 #include <vector>
 
 using namespace shogun::dsp;
-using jidai::dsp::TripleShaper;
-using jidai::dsp::TripleShaperParams;
+// The wave tests are unchanged from the local-shaper build: TripleShaper here is the SHOGUN wrapper on the shared
+// jidai::dsp::TripleShaper (engine/wave_shaper.h).
+using TripleShaper = shogun::WaveShaper;
+using shogun::TripleShaperParams;
 
 namespace {
 
@@ -239,11 +244,19 @@ void stopRipple(const double* h, int n, double fp, double fsb, double& stop, dou
 
 void testHalfbandSpec() {
   const char* t = "testHalfbandSpec";
+  // Stage 1 is the shared exact halfband (jidai/dsp/Halfband.h): h[46] = 0.5, h[46 ± (2j+1)] = odd[j], else 0.
+  double h1[jidai::dsp::Halfband93::kTaps] = {};
+  h1[46] = 0.5;
+  for (int j = 0; j < jidai::dsp::Halfband93::kSide; ++j) h1[46 - (2 * j + 1)] = h1[46 + (2 * j + 1)] = jidai::dsp::Halfband93::odd()[j];
+  int zeros = 0;
+  for (int k = 0; k < jidai::dsp::Halfband93::kTaps; ++k) zeros += (k != 46 && (k - 46) % 2 == 0 && h1[k] == 0.0) ? 1 : 0;
   double s1, r1, s2, r2;
-  stopRipple(shogun::hb::kStage1, shogun::hb::kStage1Taps, 0.2125, 0.2875, s1, r1);
+  stopRipple(h1, jidai::dsp::Halfband93::kTaps, 0.2125, 0.2875, s1, r1);
   stopRipple(shogun::hb::kStage2, shogun::hb::kStage2Taps, 0.10625, 0.39375, s2, r2);
-  std::printf("%s: stage 1 (93 taps) stopband %.2f dB ripple %.2e dB; stage 2 (25 taps) stopband %.2f dB\n", t, s1, r1,
-              s2);
+  std::printf("%s: stage 1 (shared exact halfband, 93 taps, %d even-offset zeros) stopband %.2f dB ripple %.2e dB; stage 2 (25 taps) stopband %.2f dB\n",
+              t, zeros, s1, r1, s2);
+  tu::near(t, "stage 1 exact halfband zeros", zeros, 46, 0);
+  tu::near(t, "stage 1 latency per direction", jidai::dsp::Halfband93::kLatencyPerDirection, 23, 0);
   tu::atLeast(t, "stage 1 stopband", s1, 111.5);
   tu::atMost(t, "stage 1 ripple", r1, 1e-4);
   tu::atLeast(t, "stage 2 stopband", s2, 123.0);
@@ -354,19 +367,19 @@ void testLevelLawAndCentrePan() {
 
 void testGateHysteresis() {
   const char* t = "testGateHysteresis";
-  shogun::jcs::TriggerDetector d;
+  jidai::jcs::Schmitt d;  // the shared JCS R3 detector (float volts)
   const double seq[6] = {0.0, 0.9, 1.1, 0.7, 0.4, 1.1};
   const bool edge[6] = {false, false, true, false, false, true};
   const bool high[6] = {false, false, true, true, false, true};
   for (int i = 0; i < 6; ++i) {
-    const bool e = d.process(seq[i]);
+    const bool e = d.rising(static_cast<float>(seq[i]));
     std::printf("%s: %.1f V -> edge %d high %d\n", t, seq[i], e ? 1 : 0, d.high ? 1 : 0);
     tu::truth(t, "edge", e == edge[i]);
     tu::truth(t, "state", d.high == high[i]);
   }
-  shogun::jcs::TriggerDetector g;
+  jidai::jcs::Schmitt g;
   int edges = 0;
-  for (int i = 0; i < 4800; ++i) edges += g.process((i % 1200) < 600 ? 5.0 : 0.0) ? 1 : 0;
+  for (int i = 0; i < 4800; ++i) edges += g.rising((i % 1200) < 600 ? 5.0f : 0.0f) ? 1 : 0;
   std::printf("%s: 0/5 V logic gate, 4 gates -> %d edges\n", t, edges);
   tu::near(t, "edges", edges, 4, 0);
 }

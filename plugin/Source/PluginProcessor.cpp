@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
 
+#include <jidai/CableStandard.h>
+
 #include <cmath>
 #include <cstring>
 
@@ -477,11 +479,16 @@ void ShogunAudioProcessor::patchFromJson(const juce::var& v) {
     uiLaw_[static_cast<size_t>(i)] = 0;
   }
   // Saved jack ids resolve through the alias table (§12.3): HZ/V → NOTE (lin55), TOM:PITCH → 3 toms (AMT 1/12).
+  // Global (SHOGUN#N/…) and first-instance (SHOGUN/…) forms parse with the shared JCS R6 parser; legacy ids that
+  // are not valid R6 ids (MIX L, LFO OUT) keep their raw text and resolve through the alias table.
   auto resolve = [](const juce::String& full, int out[3], int* law) {
-    const juce::String id = full.fromFirstOccurrenceOf("/", false, false).isNotEmpty() && full.startsWith("SHOGUN/")
-                                ? full.fromFirstOccurrenceOf("/", false, false)
-                                : full;
-    return resolvePort(id.toRawUTF8(), out, law);
+    std::string id = full.toStdString();
+    if (const auto j = jidai::jcs::parseJackId(id)) {
+      if (j->prefix.empty() || j->prefix == "SHOGUN") id = j->local();
+    } else if (full.startsWith("SHOGUN")) {
+      id = full.fromFirstOccurrenceOf("/", false, false).toStdString();
+    }
+    return resolvePort(id.c_str(), out, law);
   };
   uiCableCount_ = 0;
   if (auto* cables = v["cables"].getArray())

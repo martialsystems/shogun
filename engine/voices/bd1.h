@@ -74,8 +74,8 @@ struct Bd1Voice : Voice {
     const double nz = noise * nzf.lp * eb.e;
     double x = b;
     if (wave.active()) {
-      if (wave.shape > 0.0) x = TripleShaper::shapeMorph(body.lp(), body.bp(), body.svf.R, wave.shape, f / fsE_);
-      if (wave.preVca) x = TripleShaper::preVcaInput(x, TripleShaper::quadAmp(body.lp(), body.bp(), body.svf.R), eb.e);
+      if (wave.shape > 0.0) x = WaveShaper::shapeMorph(body.lp(), body.bp(), body.svf.R, wave.shape, f / fsE_);
+      if (wave.preVca) x = WaveShaper::preVcaInput(x, WaveShaper::quadAmp(body.lp(), body.bp(), body.svf.R), eb.e);
       x = wave.ts.process(x, vc);
     }
     last = b;

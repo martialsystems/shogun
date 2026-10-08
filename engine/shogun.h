@@ -8,8 +8,9 @@
 #include <cstdint>
 #include <memory>
 
+#include <jidai/jcs/Detect.h>
+
 #include "dsp.h"
-#include "jidai_local.h"
 #include "mix.h"
 #include "mod.h"
 #include "params.h"
@@ -236,8 +237,8 @@ class Engine {
   double vcPrev_[5] = {}, vcCur_[5] = {};
   double coreOut_[kVoices] = {};
   VoiceCtx ctx_[kVoices];
-  jcs::TriggerDetector trigDet_[kVoices];
-  jcs::TriggerDetector clkDet_, rstDet_, runDet_, gateDet_[2];
+  jidai::jcs::Schmitt trigDet_[kVoices];  // JCS R3 (shared detector), fed float volts
+  jidai::jcs::Schmitt clkDet_, rstDet_, runDet_, gateDet_[2];
   bool synthGateJack_[2] = {};
   double synthSeqNote_[2] = {48.0, 48.0};
 

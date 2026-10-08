@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+#include <jidai/CableStandard.h>
+
 #include <cmath>
 #include <cstring>
 
@@ -230,7 +232,7 @@ juce::String paramDisplay(int id, float u) {
   return u8(buf);
 }
 
-juce::Colour roleColour(int port) { return juce::Colour(0xFF000000u | jcs::roleStyle(kPortTable[port].role).rgb); }
+juce::Colour roleColour(int port) { return juce::Colour(jidai::jcs::roleArgb(kPortTable[port].role)); }  // JCS R14
 
 }  // namespace
 

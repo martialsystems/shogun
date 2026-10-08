@@ -1,11 +1,22 @@
 #include "shogun.h"
 
+#include <jidai/jcs/Pitch.h>
+
 #include <algorithm>
 #include <cstring>
 
 namespace shogun {
 
 namespace {
+
+// JCS R4 (shared Pitch.h): V/OCT note for a jack's volts, 0 V = C3 = note 48.
+inline double voctNote(double v) { return jidai::jcs::pitch::note(jidai::jcs::pitch::Law::VOct, v); }
+// lin55 migration (§12.3): V' = log2(max(V, 1e-3)) − 1.25, with log2(130.8128/55) = 1.25 EXACTLY (C3 = 55·2^1.25 Hz).
+// Kept local on purpose. jidai::jcs::pitch::lin55ToVoct (jidai-common 9d6e382) differs from the spec in two ways:
+// it uses the rounded constant kC3Hz = 130.8128, so V' is 1.9e-7 V low (2.0 V plays 109.999985 Hz, −0.00023 cents,
+// against the spec's "exact"); and it has no 1e-3 floor (it gives −5 V for V <= 0, and below −11.2 V for
+// 0 < V < 1e-3). See TESTPLAN "jidai-common".
+inline double lin55(double v) { return std::log2(v > 1e-3 ? v : 1e-3) - 1.25; }
 
 // Calibration measured on this engine (tools/measure_calib, §15.5): KEPT target peak / noon peak at g_vel = g_level = 1.
 // Re-measure whenever a voice body changes (TESTPLAN "calibration").
@@ -375,16 +386,16 @@ void Engine::clockSample(const float* in, const bool* con) {
 
   // RUN IN toggles run (edge), RST IN restarts; START/RESET absorb a coincident clock edge (JCS R5).
   bool absorbClock = false;
-  if (con && con[PORT_RUN_IN] && runDet_.process(in[PORT_RUN_IN])) {
+  if (con && con[PORT_RUN_IN] && runDet_.rising(static_cast<float>(in[PORT_RUN_IN]))) {
     setRunning(!running_);
     absorbClock = true;
   }
-  if (con && con[PORT_RST_IN] && rstDet_.process(in[PORT_RST_IN])) {
+  if (con && con[PORT_RST_IN] && rstDet_.rising(static_cast<float>(in[PORT_RST_IN]))) {
     restart();
     absorbClock = true;
   }
   bool clkEdge = false;
-  if (con && con[PORT_CLK_IN]) clkEdge = clkDet_.process(in[PORT_CLK_IN]);
+  if (con && con[PORT_CLK_IN]) clkEdge = clkDet_.rising(static_cast<float>(in[PORT_CLK_IN]));
   if (clkEdge && (absorbClock || sample_ - startSample_ <= 2) && src == SRC_EXT && extCount_ > 0) clkEdge = false;
 
   bool run = running_;
@@ -709,7 +720,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
   for (int v = 0; v < kDrumVoices; ++v) {
     const int tp = drumPort(v, DJ_TRIG);
     if (!(con && con[tp])) continue;
-    const bool edge = trigDet_[v].process(in[tp]);
+    const bool edge = trigDet_[v].rising(static_cast<float>(in[tp]));
     if (!edge) continue;
     if (!ext && stepIndex(target_[vparams_[v].trigMerge], 2) == 0) continue;
     Pending& p = pending_[v];
@@ -730,7 +741,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     const int gp = synthPort(s, SJ_GATE), np = synthPort(s, SJ_NOTE), vo = synthPort(s, SJ_VOCT), cp = synthPort(s, SJ_CUTOFF);
     auto pitchIn = [&](int port) {
       const double x = in[port];
-      return inLaw_[port] == 1 ? jcs::lin55ToVoct(x) : x;  // lin55: old HZ/V cable (§12.3)
+      return inLaw_[port] == 1 ? lin55(x) : x;  // lin55: old HZ/V cable (§12.3)
     };
     sv.vOct = (con && con[vo]) ? cvAmt_[vo] * pitchIn(vo) : 0.0;
     sv.cutoffOct = (con && con[cp]) ? cvAmt_[cp] * in[cp] : 0.0;
@@ -738,16 +749,16 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     const bool noteJack = con && con[np];
     // A patched NOTE jack is a continuous pitch: it moves the held note at once (slew is the patch's job; GLIDE is for
     // tied steps and legato notes).
-    if (noteJack && sv.gate) sv.noteTarget = sv.noteGlided = jcs::voltsToNote(pitchIn(np)) + 12.0 * sv.oct;
+    if (noteJack && sv.gate) sv.noteTarget = sv.noteGlided = voctNote(pitchIn(np)) + 12.0 * sv.oct;
     if (con && con[gp]) {
       const bool wasHigh = gateDet_[s].high;
-      const bool edge = gateDet_[s].process(in[gp]);
+      const bool edge = gateDet_[s].rising(static_cast<float>(in[gp]));
       const bool use = ext || stepIndex(target_[vparams_[v].trigMerge], 2) == 1;
       if (use && edge) {
         Pending& p = pending_[v];
         p.on = true;
         p.kind = 1;
-        p.note = noteJack ? jcs::voltsToNote(pitchIn(np)) : synthSeqNote_[s];
+        p.note = noteJack ? voctNote(pitchIn(np)) : synthSeqNote_[s];
         const int vp = synthPort(s, SJ_VEL);
         p.velVolts = con[vp] ? in[vp] : 5.0;
         p.velPatched = con[vp];
@@ -811,7 +822,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
       SynthVoice& sv = synth(v);
       const int np = synthPort(v - LEAD, SJ_NOTE);
       if (con && con[np])  // NOTE jack overrides the sequencer note
-        h.note = jcs::voltsToNote(inLaw_[np] == 1 ? jcs::lin55ToVoct(in[np]) : in[np]);
+        h.note = voctNote(inLaw_[np] == 1 ? lin55(in[np]) : in[np]);
       const bool legato = h.tie && sv.gate;
       sv.noteOn(c, h.note, h.acc * ue_[sv.pAcc] > 0.0 ? h.acc : 0.0, h.tie);
       if (!legato) hitGain_[v] = h.gVel;

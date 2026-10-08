@@ -94,8 +94,8 @@ struct TomVoice : Voice {
     }
     double x = y0;
     if (wave.active()) {
-      if (wave.shape > 0.0) x = TripleShaper::shapeMorph(r1.lp(), r1.bp(), R1, wave.shape, f / fsE_);
-      if (wave.preVca) x = TripleShaper::preVcaInput(x, TripleShaper::quadAmp(r1.lp(), r1.bp(), R1), e.e);
+      if (wave.shape > 0.0) x = WaveShaper::shapeMorph(r1.lp(), r1.bp(), R1, wave.shape, f / fsE_);
+      if (wave.preVca) x = WaveShaper::preVcaInput(x, WaveShaper::quadAmp(r1.lp(), r1.bp(), R1), e.e);
       x = wave.ts.process(x, vc);
     }
     last = y0;

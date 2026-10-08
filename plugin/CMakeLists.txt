@@ -12,9 +12,11 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 
 set(ENGINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../engine)
+# Shared Jidai headers (JCS + jidai::dsp), vendored: third_party/jidai-common/VENDORED.md.
+set(JIDAI_COMMON_INC ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/jidai-common/include)
 
 add_library(shogun_engine STATIC ${ENGINE_DIR}/shogun.cpp)
-target_include_directories(shogun_engine PUBLIC ${ENGINE_DIR})
+target_include_directories(shogun_engine PUBLIC ${ENGINE_DIR} ${JIDAI_COMMON_INC})
 target_compile_options(shogun_engine PRIVATE -Wall -Wextra -Werror)
 set_target_properties(shogun_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

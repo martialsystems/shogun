@@ -1,6 +1,7 @@
 #pragma once
 // LEAD (OTA SVF) and BASS (ZDF ladder): PolyBLEP saw/square, glide in log2, filter env, RC VCA, accent (§7).
-#include "../jidai_local.h"
+#include <jidai/jcs/Pitch.h>
+
 #include "common.h"
 
 namespace shogun {
@@ -118,7 +119,8 @@ struct SynthVoice : Voice {
   // NOTE OUT = (note_glided − 48)/12 V, hard ±5 V rail; the over-range flag latches until the next note (§13.9).
   double noteOut() {
     bool o = false;
-    const double v = jcs::pitchOut(noteGlided, &o);
+    namespace pitch = jidai::jcs::pitch;
+    const double v = pitch::clampPitch(pitch::voltsForNote(pitch::Law::VOct, noteGlided), o);
     if (o) over = true;
     return v;
   }

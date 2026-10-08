@@ -41,4 +41,6 @@ inline double round(double x) { return x < 0 ? -__builtin_floor(-x + 0.5) : __bu
 inline long lround(double x) { return static_cast<long>(round(x)); }
 inline long long llround(double x) { return static_cast<long long>(round(x)); }
 inline bool isfinite(double x) { return x == x && x - x == 0.0; }
+inline bool isnan(double x) { return x != x; }
+inline double nan(const char*) { return __builtin_nan(""); }
 }  // namespace std

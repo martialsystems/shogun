@@ -77,7 +77,7 @@ struct Bd2Voice : Voice {
     for (auto& in : inst) {
       if (!in.on) continue;
       double s = sineShape(PolyBlepOsc::triAt(in.ph, dt));
-      if (wave.shape > 0.0) s = TripleShaper::morphAt(s, 1.0, in.ph, wave.shape, dt);
+      if (wave.shape > 0.0) s = WaveShaper::morphAt(s, 1.0, in.ph, wave.shape, dt);
       body += in.gain * s;
       in.ph += dt;
       if (in.ph >= 1.0) in.ph -= 1.0;

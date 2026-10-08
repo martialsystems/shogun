@@ -1,5 +1,6 @@
 // SHOGUN engine named tests: sequencer and clock switch, mixer rules, latency, pitch law, jacks (TESTPLAN.md, §15.4).
 #include <cstring>
+#include <jidai/CableStandard.h>
 #include <string>
 
 #include "rig.h"
@@ -465,6 +466,29 @@ void testLin55Migration() {
   truth(T, "TOM:PITCH fans out to 3 toms with AMT 1/12 law", n2 == 3 && law2 == 2);
 }
 
+// JCS R6 / R14 through the shared jidai-common header: every SHOGUN id is a valid local id, its global form
+// SHOGUN#1/<id> parses back to it, alias targets are valid ids, and the R14 role colours are the shared table's.
+void testJackIdsJcsShared() {
+  const char* T = "testJackIdsJcsShared";
+  int bad = 0, roundTrip = 0;
+  for (int i = 0; i < kPorts; ++i) {
+    const std::string id = kPortTable[i].id;
+    if (!jidai::jcs::isValidLocalId(id)) ++bad;
+    const auto j = jidai::jcs::parseJackId("SHOGUN#1/" + id);
+    if (j && j->form == jidai::jcs::JackForm::Global && j->prefix == "SHOGUN" && j->number == 1 && j->local() == id) ++roundTrip;
+  }
+  int badAlias = 0;
+  for (const PortAlias& a : kPortAliases)
+    for (int k = 0; k < 3 && a.to[k]; ++k) badAlias += jidai::jcs::isValidLocalId(a.to[k]) && findPort(a.to[k]) >= 0 ? 0 : 1;
+  const std::uint32_t vel = jidai::jcs::roleInfo(kPortTable[drumPort(0, DJ_PITCH)].role).rgb;
+  std::printf("%s: %d ids, invalid R6 local ids %d, SHOGUN#1/<id> round trips %d, bad alias targets %d, PITCH colour #%06x\n",
+              T, kPorts, bad, roundTrip, badAlias, static_cast<unsigned>(vel));
+  truth(T, "all ids valid R6 local ids", bad == 0);
+  truth(T, "global form round trips", roundTrip == kPorts);
+  truth(T, "alias targets valid", badAlias == 0);
+  truth(T, "V/OCT role colour #6590f3", vel == 0x6590f3u);
+}
+
 void testJackIdsAndTypes() {
   const char* T = "testJackIdsAndTypes";
   std::vector<std::string> ids;
@@ -600,6 +624,7 @@ void runEngineTests() {
   testTuningIsNotTheVoltLaw();
   testLin55Migration();
   testJackIdsAndTypes();
+  testJackIdsJcsShared();
   testHostLock();
   testAccOutFollowsPattern();
 }

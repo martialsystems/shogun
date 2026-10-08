@@ -3,9 +3,11 @@
 // SHOGUN v2.2 DSP blocks (spec SHOGUN_Redesign.md §3–§4). Framework-free, allocation-free, header-only.
 // Every coefficient is computed from seconds or Hz and the block's own rate fsE (§3.1); no constant is in samples.
 // States are double and are flushed below 1e-15 (§3.3, the RONIN rule; WASM has no FTZ).
-// The triple wave shaper (§4.6) is a separate, self-contained header: jidai/dsp/TripleShaper.h.
+// The triple wave shaper (§4.6) is the shared jidai/dsp/TripleShaper.h behind engine/wave_shaper.h.
 
 #include "halfband_coeffs.h"
+
+#include <jidai/dsp/Halfband.h>
 
 #include <cmath>
 #include <cstdint>
@@ -364,6 +366,11 @@ struct FirLine {
 
 inline int osLatency(int M) { return M <= 1 ? 0 : (M == 2 ? 23 : 26); }
 
+// Stage 1 (2fs ↔ fs) is the shared exact halfband (jidai/dsp/Halfband.h, 93 taps, 23 base samples per direction);
+// stage 2 (4fs ↔ 2fs, 25 taps, +3 base samples) is SHOGUN's own (halfband_coeffs.h; the shared header has no 4x stage).
+static_assert(jidai::dsp::Halfband93::kTaps == 93 && jidai::dsp::Halfband93::kLatencyPerDirection == 23,
+              "§3.4 stage 1: 93 taps, 23 base samples");
+
 class Decimator {
  public:
   void prepare(int M) {
@@ -375,10 +382,12 @@ class Decimator {
     s2_.reset();
     phase_ = 0;
     phase2_ = 0;
+    u0_ = 0.0;
     out_ = 0.0;
   }
-  // Push one sample at M·fs. Returns true (and sets out) on the push that completes a base-rate output.
-  // The output is aligned to the FIRST sub-sample of base sample n − latency, so the delay is an integer.
+  // Push one sample at M·fs. Returns true (and sets out) on the push that completes a base-rate output: the last
+  // sub-sample of the base sample. The output is y[n] = Σ h[k]·u[2n−k] (centred on the FIRST sub-sample of base
+  // sample n − latency), so the delay is an integer number of base samples.
   bool push(double x, double& out) {
     if (M_ == 1) {
       out = x;
@@ -391,11 +400,13 @@ class Decimator {
       if (!even4) return false;
       x = s2_.dot(hb::kStage2);
     }
-    s1_.push(x);
     const bool even2 = (phase_ == 0);
     phase_ ^= 1;
-    if (!even2) return false;
-    out_ = s1_.dot(hb::kStage1);
+    if (even2) {
+      u0_ = x;
+      return false;
+    }
+    out_ = s1_.process(u0_, x);
     out = out_;
     return true;
   }
@@ -403,14 +414,15 @@ class Decimator {
 
  private:
   int M_ = 1;
-  FirLine<hb::kStage1Taps> s1_;
+  jidai::dsp::Downsampler2x s1_;
   FirLine<hb::kStage2Taps> s2_;
   int phase_ = 0;
   int phase2_ = 0;
+  double u0_ = 0.0;
   double out_ = 0.0;
 };
 
-// RET-style upsampler: base rate in, M samples out (zero-stuff ×2 per stage, gain 2). +23 (2×) / +26 (4×).
+// RET-style upsampler: base rate in, M samples out. +23 (2×) / +26 (4×).
 class Upsampler {
  public:
   void prepare(int M) {
@@ -427,16 +439,13 @@ class Upsampler {
       return;
     }
     double y2[2];
-    s1_.push(2.0 * x);
-    y2[0] = s1_.dot(hb::kStage1);
-    s1_.push(0.0);
-    y2[1] = s1_.dot(hb::kStage1);
+    s1_.process(x, y2[0], y2[1]);  // even phase = x[n − 23] exactly, odd phase interpolated
     if (M_ == 2) {
       out[0] = y2[0];
       out[1] = y2[1];
       return;
     }
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 2; ++i) {  // stage 2: zero-stuff ×2, gain 2
       s2_.push(2.0 * y2[i]);
       out[2 * i] = s2_.dot(hb::kStage2);
       s2_.push(0.0);
@@ -446,7 +455,7 @@ class Upsampler {
 
  private:
   int M_ = 1;
-  FirLine<hb::kStage1Taps> s1_;
+  jidai::dsp::Upsampler2x s1_;
   FirLine<hb::kStage2Taps> s2_;
 };
 

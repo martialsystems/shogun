@@ -3,13 +3,17 @@
 // inputs CV except RET = Audio; OUT/MIX Audio; ENV/NOTE OUT/MOD/ACC OUT CV; CLK/RST/RUN OUT and LD/BS GATE Gate).
 // Global form: SHOGUN#N/<id>.
 
-#include "jidai_local.h"
+#include <jidai/jcs/Roles.h>
+
+#include <cstdint>
 
 namespace shogun {
 
-using jcs::PortDir;
-using jcs::PortType;
-using jcs::Role;
+// JCS R14 roles, colours and glyphs come from the shared header (jidai::jcs::roleInfo / roleArgb).
+using Role = jidai::jcs::Role;
+// Port types (graph legality, RackGraph kAllowed) and directions: SHOGUN's own table fields.
+enum class PortType : std::uint8_t { Audio, CV, Gate };
+enum class PortDir : std::uint8_t { In, Out };
 
 struct PortDesc {
   const char* id;
