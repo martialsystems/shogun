@@ -473,10 +473,11 @@ inline void capturePatch(const Engine& e, Patch& pt) {
 }
 
 namespace patchjson {
-// Number text without libc (the wasm build writes documents too). fmtG() gives the bytes of snprintf("%.*g") and
-// shortestNum()/shortestFloat() the text putNum()/putFloat() pick with snprintf and strtod: the shortest %.*g that
-// reads back (correctly rounded, ties to even) to the same double, or through double to the same float. Exact
-// arithmetic on the binary value (a small bignum), so no rounding of its own; tests/factory.cpp checks it against libc.
+// Number text without libc (the wasm build writes documents too). fmtG() is correctly rounded %.*g (ties to even);
+// shortestNum()/shortestFloat() are the text putNum()/putFloat() pick with snprintf and strtod: the shortest %.*g that
+// reads back to the same double, or through double to the same float. Exact arithmetic on the binary value (a small
+// bignum). tests/factory.cpp checks fmtG against an embedded correctly-rounded table (not host snprintf: Apple's gdtoa
+// can leave trailing zeros, e.g. 305 at p=2 → "3.0e+02").
 namespace exact {
 struct Big {
   std::uint32_t w[100];
