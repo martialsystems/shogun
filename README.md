@@ -19,6 +19,7 @@ SHOGUN is a drum computer and two note voices, an original Martial Systems desig
 - 2026-10-07: factory patterns and kits cleared for now. The engine, plugin and web page start on INIT, an empty bar, with the INIT kit. New factory content will be written later.
 - 2026-10-07: density pass. Shaped bodies (tanh(k sin)) on BD1, BD2, SD, and the toms, BD2 and tom slow FM, a 1 ms BD1 click, SD noise through a ducked 4-pole, six-square metal stacks with a band-pass on the hats and cymbal, and clap bursts fixed at 3 ms with a delayed filtered tail. STAND-IN values set by ear.
 - 2026-10-07: Wave on BD1, BD2, and the three toms: a six-cell wave folder on the body oscillator, CC 0 bypass, default CC 32, g 0.5 to 4. Dist stays after Wave. Hats, clap, cymbal, and maracas have no Wave.
+- 2026-10-08: **redesign v2.2, first pass** (branch `redesign/shogun`, spec `SHOGUN_Redesign.md` v2.2). The engine is rebuilt per §15.0: host-rate DSP blocks with one oversampling domain (1×/2×/4×, latency 0/23/26), the triple wave shaper (`engine/jidai/dsp/TripleShaper.h`), new voices, the mod matrix and 4 LFOs, 454 float parameters with `SECTION:LABEL` ids, and the 153-jack bay (§13.2). The plugin runs the engine at the host rate (resampler removed), locks to the host transport, and draws the 8-tab 1200 × 672 panel with rack ears from the spec mockups. The web build compiles the same engine at the AudioContext rate. Numbers in [TESTPLAN.md](TESTPLAN.md). Not yet: room reverb, LANE A/B editor, factory content.
 
 ## What this is
 
@@ -42,9 +43,9 @@ The instrument this pack describes:
 | TESTPLAN.md | Named tests and the numbers they lock |
 | REPO_SETUP.md | Tree, git, and the collection link |
 | engine/ | Voice engine, clock, pattern, and outs. No JUCE |
-| tests/voices.cpp | The named checks, compiled by the Makefile |
-| plugin/ | Placeholder VST3. JUCE wraps the engine. The plate is stock controls |
-| Makefile | `make test` builds the engine checks and runs the clock-switch law. `make plugin` builds the VST3 |
+| tests/ | The named checks (`blocks.cpp`, `voices.cpp`, `engine.cpp`, `mod.cpp`), compiled by the Makefile |
+| plugin/ | The VST3 (JUCE 8.0.4). `plugin/layout/` exports the spec mockups to the editor's op table (`plugin/Source/PanelLayout.inc`); `ShogunProbe` checks the shell and renders the 8 tabs |
+| Makefile | `make test` / `make asan` run the engine checks (and the clock-switch law). `make plugin` builds the macOS VST3, `make probe-linux` the Linux VST3 + probe against `/workspace/JUCE`, `make web` the wasm page |
 | forge/ | GraphForge pin for the clock switch. Printed sample rows stay in `tests/voices.cpp` |
 | docs/SHOGUN_Design_Pack.pdf | The same documents in one PDF |
 | BUGS.md | Engine bugs fixed, engine notes, and open questions on the pack |
