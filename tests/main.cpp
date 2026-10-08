@@ -11,6 +11,7 @@ int main() {
   runVoiceTests();
   runEngineTests();
   runModTests();
+  runFactoryTests();
   if (tu::gFails != 0) {
     std::printf("%d of %d checks failed\n", tu::gFails, tu::gChecks);
     return 1;

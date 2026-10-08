@@ -157,3 +157,4 @@ void runBlockTests();
 void runVoiceTests();
 void runEngineTests();
 void runModTests();
+void runFactoryTests();

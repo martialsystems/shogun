@@ -8,7 +8,7 @@ JIDAI_INC = -I$(JIDAI_COMMON)
 GRAPHFORGE_SRC ?= $(HOME)/graphforge/src
 JUCE_SRC ?= $(HOME)/jidai-collection/jidai-rack/build/fl-release/_deps/juce-src
 
-.PHONY: test clean asan law calib plugin plugin-linux probe-linux install-vst web web-levels strict strict-clang strict-gcc
+.PHONY: test clean asan law calib plugin plugin-linux probe-linux install-vst web web-levels strict strict-clang strict-gcc factory
 
 test: build/shogun_tests law
 	./build/shogun_tests
@@ -45,7 +45,7 @@ install-vst: plugin
 
 ENGINE_DEPS = engine/shogun.cpp $(wildcard engine/*.h engine/*.inc engine/voices/*.h) \
 	$(wildcard $(JIDAI_COMMON)/jidai/*.h $(JIDAI_COMMON)/jidai/jcs/*.h $(JIDAI_COMMON)/jidai/dsp/*.h)
-TEST_SRCS = tests/main.cpp tests/blocks.cpp tests/voices.cpp tests/engine.cpp tests/mod.cpp
+TEST_SRCS = tests/main.cpp tests/blocks.cpp tests/voices.cpp tests/engine.cpp tests/mod.cpp tests/factory.cpp
 TEST_DEPS = $(TEST_SRCS) tests/testutil.h tests/rig.h tests/data/levelcomp_cases.h
 
 build/shogun_tests: $(ENGINE_DEPS) $(TEST_DEPS)
@@ -57,6 +57,15 @@ asan: $(ENGINE_DEPS) $(TEST_DEPS)
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iengine $(JIDAI_INC) -Itests \
 		-o build/shogun_tests_asan engine/shogun.cpp $(TEST_SRCS)
 	./build/shogun_tests_asan
+
+# The factory bank (engine/factory_bank.inc) from scripts/make_factory.py: builds the documents, trims each kit's
+# levels to its peak target with tools/factory_fmt (native renders at 44.1 and 48 kHz) and writes the canonical text.
+build/factory_fmt: $(ENGINE_DEPS) tools/factory_fmt.cpp
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) $(JIDAI_INC) -o $@ tools/factory_fmt.cpp engine/shogun.cpp
+
+factory: build/factory_fmt
+	python3 scripts/make_factory.py
 
 # Calibration probe (§9.5, §15.5 step 1): prints calib = target peak / measured noon peak per voice.
 # `make calib` rewrites engine/calib_table.inc from a calib = 1 build.
@@ -110,7 +119,7 @@ STRICT_GCC = $(JUCE_WARN_GCC) $(STRICT_SET)
 STRICT_JUCE = -isystem $(JUCE_LINUX)/modules -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_STANDALONE_APPLICATION=1 \
 	-DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_VST3_CAN_REPLACE_VST2=0 -DNDEBUG=1 \
 	$(foreach m,audio_basics audio_devices audio_formats audio_processors audio_utils core data_structures events graphics gui_basics gui_extra,-DJUCE_MODULE_AVAILABLE_juce_$(m)=1)
-STRICT_SRCS = engine/shogun.cpp $(TEST_SRCS) web/wasm/shogun_web.cpp tests/web_parity.cpp tools/measure_calib.cpp
+STRICT_SRCS = engine/shogun.cpp $(TEST_SRCS) web/wasm/shogun_web.cpp tests/web_parity.cpp tools/measure_calib.cpp tools/factory_fmt.cpp
 PLUGIN_SRCS = plugin/Source/PluginProcessor.cpp plugin/Source/PluginEditor.cpp plugin/Source/Probe.cpp
 
 strict: strict-clang strict-gcc

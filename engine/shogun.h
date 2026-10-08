@@ -111,10 +111,15 @@ class Engine {
   const float* portValues() const { return values_; }  // the internal port buffer (web bay, probes)
 
   // Internal bay: cables between Shogun's own jacks (web/plugin ROUTE tab). One sample delay, like a rack cable.
+  static constexpr int kMaxCables = 64;
   bool addCable(int fromPort, int toPort);
   void removeCable(int fromPort, int toPort);
   void clearCables();
   int cableCount() const { return nCables_; }
+  void cable(int i, int& from, int& to) const {
+    from = cableFrom_[i];
+    to = cableTo_[i];
+  }
   void setExternalInput(int port, float volts, bool connected) {
     extValue_[port] = volts;
     extConnected_[port] = connected;
@@ -170,7 +175,6 @@ class Engine {
     double trigVolts = 5.0, velNorm = 1.0, accNorm = 0.5;
   };
   static constexpr int kMaxEvents = 512;
-  static constexpr int kMaxCables = 64;
 
   void buildTables();
   void drawTolerances();
