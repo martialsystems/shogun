@@ -40,7 +40,7 @@ make plugin
 make install-vst
 ```
 
-`make install-vst` symlinks `~/Library/Audio/Plug-Ins/VST3/SHOGUN.vst3` to the Release artefact. Some hosts need a plugin rescan after that link exists. The binary is an instrument, MIDI input is on, and the editor is fixed at 980 by 640.
+`make install-vst` symlinks `~/Library/Audio/Plug-Ins/VST3/SHOGUN.vst3` to the Release artefact. FL Studio 2024 needs a plugin rescan after that link exists. The binary is an instrument, MIDI input is on, and the editor is fixed at 980 by 640.
 
 The plate is flat greys and stock sliders. Each voice is one row: name, TRIG, level, and that voice's knobs. The name selects which voice the 16 step buttons edit. INT is the default and plays a beat: BD1 and bass on steps 1 and 9, snare on steps 5 and 13, hats on the eighths. EXT stays silent until TRIG or a MIDI note. MIDI notes 36 to 51 play BD1 through bass, in voice order. The clock parameter is the only writer of INT and EXT. TRIG and MIDI call the engine trigger path and leave the switch where it is.
 
