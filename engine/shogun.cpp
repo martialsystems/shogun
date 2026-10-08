@@ -559,7 +559,13 @@ void Engine::fireDue(const float* in, const bool* con) {
       continue;
     }
     e.live = false;  // <= so an event can never be stranded
-    if (e.pattern && ext) continue;  // EXT ignores the pattern (KEPT switch law, forge-pinned)
+    if (e.pattern && ext) {  // EXT ignores the pattern for the voices (KEPT switch law, forge-pinned) ...
+      if (e.kind == 0 && isDrum(e.voice)) {  // ... but ACC OUT still carries the step's accent volts (§13.2)
+        accOut_ = std::max(accOut_, kAccentVolts[e.acc - 1]);
+        accStep_ = gStep_;
+      }
+      continue;
+    }
     fireEvent(e, in, con);
   }
   nEvents_ = top;

@@ -552,6 +552,40 @@ void testHostLock() {
 
 }  // namespace
 
+// ACC OUT (§13.2: "the step's accent volts while the step is on") follows the pattern in INT and in EXT; in EXT the
+// voice itself stays silent (forge pin). Steps: 0 acc 3, 4 acc 1, step 8 off.
+void testAccOutFollowsPattern() {
+  const char* T = "testAccOutFollowsPattern";
+  for (int ext = 0; ext < 2; ++ext) {
+    auto e = make();
+    e->setParamNow(P_CLOCK_SOURCE, stepU(SRC_INT, 3));
+    e->setParamNow(P_CLOCK_MODE, stepU(ext, 2));
+    e->pattern().tracks[BD2].steps[0].on = true;
+    e->pattern().tracks[BD2].steps[0].acc = 3;
+    e->pattern().tracks[BD2].steps[4].on = true;
+    e->pattern().tracks[BD2].steps[4].acc = 1;
+    Graph g;
+    e->setRunning(true);
+    const long P = static_cast<long>(std::lround(e->periodSamples()));
+    double a0 = 0, a4 = 0, a8 = 0;
+    bool voice = false;
+    for (long n = 0; n < 9 * P; ++n) {
+      g.step(*e);
+      const double v = g.vals[PORT_ACC_OUT];
+      if (n == P / 2) a0 = v;
+      if (n == 4 * P + P / 2) a4 = v;
+      if (n == 8 * P + P / 2) a8 = v;
+      voice = voice || e->voiceActive(BD2);
+    }
+    std::printf("%s: %s: ACC OUT step 0 %.3f V, step 4 %.3f V, step 8 (off) %.3f V; BD2 played %d\n", T, ext ? "EXT" : "INT",
+                a0, a4, a8, voice ? 1 : 0);
+    near(T, ext ? "EXT acc 3 = 5.0 V" : "INT acc 3 = 5.0 V", a0, 5.0, 1e-6);
+    near(T, ext ? "EXT acc 1 = 2.353 V" : "INT acc 1 = 2.353 V", a4, kAccentVolts[0], 1e-6);
+    near(T, ext ? "EXT off step = 0 V" : "INT off step = 0 V", a8, 0.0, 1e-12);
+    truth(T, ext ? "EXT: the voice stays silent" : "INT: the voice plays", ext ? !voice : voice);
+  }
+}
+
 void runEngineTests() {
   testExtBypassIgnoresPattern();
   testIntIgnoresTrigJacks();
@@ -567,4 +601,5 @@ void runEngineTests() {
   testLin55Migration();
   testJackIdsAndTypes();
   testHostLock();
+  testAccOutFollowsPattern();
 }

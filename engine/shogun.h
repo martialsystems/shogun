@@ -137,6 +137,7 @@ class Engine {
   void setCalib(int v, double c) { calib_[v] = c; }
   bool overRange(int synthVoice) const { return synthVoice == LEAD ? lead_->over : bass_->over; }
   bool clipOver() const { return clip_.over; }
+  double busGain(int b) const { return bus_[b].lastGain; }  // compressor gain of bus A–D (1 = no reduction)
 
  private:
   struct Event {

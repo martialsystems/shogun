@@ -76,7 +76,9 @@ inline WaveParams waveParams(int v) {
   return w;
 }
 
-// Display text for a parameter value (LCD, tooltip, host automation lane).
+// Display text for a parameter value (LCD, tooltip, host automation lane). Left out of the freestanding wasm build
+// (no printf there); the web page formats values itself.
+#ifndef SHOGUN_NO_FORMAT
 inline void formatParam(int p, double u, char* out, int n) {
   const ParamInfo& pi = kParams[p];
   if (pi.kind == ParamKind::Stepped || pi.kind == ParamKind::Toggle) {
@@ -162,6 +164,7 @@ inline void formatParam(int p, double u, char* out, int n) {
     std::snprintf(out, n, "%.0f %%", 100.0 * u);
   }
 }
+#endif
 
 // Laws used by the engine.
 inline double tempoBpm(double u) { return 40.0 + 160.0 * u; }

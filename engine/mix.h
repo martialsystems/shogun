@@ -2,6 +2,8 @@
 // Mixer, buses A–D, master and output stage (§9). Everything here runs in the oversampled domain (fsE) except the
 // delay, which runs at the base rate on a decimated send (see Engine).
 
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 
 #include "dsp.h"
