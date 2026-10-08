@@ -40,7 +40,7 @@ make plugin
 make install-vst
 ```
 
-`make install-vst` symlinks `~/Library/Audio/Plug-Ins/VST3/SHOGUN.vst3` to the Release artefact. FL Studio 2024 needs a plugin rescan after that link exists. The binary is an instrument, MIDI input is on, and the editor is fixed at 980 by 640.
+`make install-vst` symlinks `~/Library/Audio/Plug-Ins/VST3/SHOGUN.vst3` to the Release artefact. Some hosts need a plugin rescan after that link exists. The binary is an instrument, MIDI input is on, and the editor is fixed at 980 by 640.
 
 The plate is flat greys and stock sliders. Each voice is one row: name, TRIG, level, and that voice's knobs. The name selects which voice the 16 step buttons edit. INT is the default and plays a beat: BD1 and bass on steps 1 and 9, snare on steps 5 and 13, hats on the eighths. EXT stays silent until TRIG or a MIDI note. MIDI notes 36 to 51 play BD1 through bass, in voice order. The clock parameter is the only writer of INT and EXT. TRIG and MIDI call the engine trigger path and leave the switch where it is.
 
@@ -50,9 +50,9 @@ The wrapper resamples the engine's 48 kHz stream to the host rate. Trig jacks st
 
 ## Panel
 
-The jobs may match the instrument chapter: the same knob names, the same 14 drums, the two note tracks, the INT/EXT switch, and a Trig jack on each voice. The face must not be a trace of the hardware panel. No MFB logo. No dancing-bear mark. Draw a new plate. Level and master stay off the pattern, as in both manuals.
+The jobs may match the instrument chapter: the same knob names, the same 14 drums, the two note tracks, the INT/EXT switch, and a Trig jack on each voice. The face must not be a trace of the hardware panel. No maker's logo or mascot from the source instrument. Draw a new plate. Level and master stay off the pattern, as in both manuals.
 
-The INT/EXT switch is a SHOGUN control. Putting it on the plate does not make it a copy of a Tanzbär control, because that machine does not have this switch.
+The INT/EXT switch is a SHOGUN control. Putting it on the plate does not make it a copy of a control on the source instrument, because that machine does not have this switch.
 
 ## Outputs
 

@@ -34,7 +34,7 @@ This tree contains:
 
 The voice engine is framework-free C++ under `engine/`. `process()` does not allocate. There is no panel SVG. JUCE is the wrapper in `plugin/` only.
 
-The MFB manuals are not in the tree. The German PDF that was read for the quotations stays outside the repository. The pack cites it. It does not redistribute it.
+The source manuals are not in the tree. The German PDF that was read for the quotations stays outside the repository. The pack cites it. It does not redistribute it.
 
 ## PDF
 

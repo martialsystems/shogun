@@ -2,7 +2,7 @@
 
 **Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack, voice engine, a GraphForge pin for the clock switch, and a placeholder plate.**
 
-SHOGUN is a drum computer and two note voices, an original Martial Systems design inspired by classic analog drum machines. The jobs of the voices follow the design pack (its sources are cited in `METHODOLOGY.md`) and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in FL Studio.
+SHOGUN is a drum computer and two note voices, an original Martial Systems design inspired by classic analog drum machines. The jobs of the voices follow the design pack (its sources are cited in `METHODOLOGY.md`) and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in a DAW.
 
 ## Revisions
 

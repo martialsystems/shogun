@@ -6,7 +6,7 @@ Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 
 
 Result of the last run: **all 303 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
 
-§15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and `testInitKitIs909Steps` (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
+§15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
 ## DSP blocks (tests/blocks.cpp)
 
@@ -52,7 +52,7 @@ tau with the BD1 pitch sweep 136.1958 ms
 
 ### testResonatorPeak
 
-§4.2 resonator impulse peak stays bounded across 35 Hz–3 kHz.  Tolerance: printed.
+§4.2 resonator impulse peak stays bounded across 35 Hz to 3 kHz.  Tolerance: printed.
 
 ```
 peak at 35 Hz 0.8700
@@ -371,7 +371,7 @@ burst centre at s = 15: 9244.2 Hz; 0.45·fs at 44.1 k = 19845.0 Hz
 
 ### testNoonIsADrumMachine
 
-§6.0 noon kit: BD1 f(100 ms) 89.931 Hz (spec says 70 ±3 % but its own PITCH/τ pins give 89.93: deviation), SD noise share 0.279 ≥ 0.25, tone peak 228.5 Hz (measured 100–400 ms: deviation).  Tolerance: printed.
+§6.0 noon kit: BD1 f(100 ms) 89.931 Hz (spec says 70 ±3 % but its own PITCH/τ pins give 89.93: deviation), SD noise share 0.279 ≥ 0.25, tone peak 228.5 Hz (measured 100 to 400 ms: deviation).  Tolerance: printed.
 
 ```
 BD1 noon f(100 ms) 89.931 Hz, -60 dB time 524.3 ms, SOUND 0 WAVE 0.00 DRIVE 0.00
@@ -469,7 +469,7 @@ delay 2000 samples; hits: 0 8000 12000 20000 24000 32000
 
 ### testInitKitAndEmptyPattern
 
-§14.1 INIT kit + empty 16-step pattern "001 INIT" (replaces testInitKitIs909Steps). Test beat peak −16.05 dBFS.  Tolerance: 1e-4.
+§14.1 INIT kit + empty 16-step pattern "001 INIT" (replaces the v2.1 INIT-kit test). Test beat peak −16.05 dBFS.  Tolerance: 1e-4.
 
 ```
 pattern '001 INIT', every track 16 long: 1, empty: 1, params at INIT: 1, one bar silent: 1
@@ -642,7 +642,7 @@ PASS tab renders  8 PNGs in /workspace/shogun/build/plugin-linux/tabs
 ShogunProbe: all checks passed
 ```
 
-Tab renders: `build/plugin-linux/tabs/tab_<i>_<name>.png` (1200 × 672) next to the spec mockups; mean absolute pixel difference per tab (0–255): MAIN 4.7, VOICE 5.8, GRID 12.4, MOD 7.5, ROUTE 8.6, FX/MIX 6.0, SEQ/MIDI 5.0, GLOBAL 4.3. The differences are the mockups' illustrative data (fake pattern, matrix rows, cables, meter levels), which the plugin replaces with live state (INIT: empty), plus font rasterisation.
+Tab renders: `build/plugin-linux/tabs/tab_<i>_<name>.png` (1200 × 672) next to the spec mockups; mean absolute pixel difference per tab (0 to 255): MAIN 4.7, VOICE 5.8, GRID 12.4, MOD 7.5, ROUTE 8.6, FX/MIX 6.0, SEQ/MIDI 5.0, GLOBAL 4.3. The differences are the mockups' illustrative data (fake pattern, matrix rows, cables, meter levels), which the plugin replaces with live state (INIT: empty), plus font rasterisation.
 
 ## Web build (`make web`)
 

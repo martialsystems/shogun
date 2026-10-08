@@ -10,13 +10,15 @@ No service schematic was found in public, and none is invented here. A block dia
 
 Read on 2026-10-06.
 
-1. German primary. *MFB Tanzbär Bedienungsanleitung*, 17 PDF pages, two printed pages on most sheets, printed page numbers through 31. PDF metadata: CreationDate D:20131024121806+02'00, Creator Adobe InDesign CS5 (7.0), Producer Adobe PDF Library 9.9. Text extracted from the file published at `https://media.djmania.net/manuales/pdf/Manual_MFB_Tanzbar.pdf`. The MIDI appendix is printed page 31 of this file. That appendix is the control-change list used below.
-2. English primary. *MFB Tanzbär User Manual*, the 17-page English edition with the same contents list (overview through MIDI implementation). Printed pages quoted below were read from `https://www.manualshelf.com/manual/mfb/tanzb-ar/user-manual-english/page-3.html` and the neighbouring pages of that edition (pages 4, 6, 8, 9, 11). A separate English PDF file was not downloaded. The contents list and the instrument chapter match the German edition's structure.
-3. Published control-change republication. `https://midi.guide/d/mfb/tanzbar-1/`, last update 12 September 2024, 64 parameters. This is the list identified by BD1 Attack on CC 2, Decay on 64, Pitch on 65, Tune on 3, Noise on 4, Filter on 5, Dist on 6, and Trigger on 66. Where it disagrees with the 2013 appendix, the appendix wins and the row is marked.
+SHOGUN is inspired by classic analog drum machines. The sources are published owner's documentation for that class of instrument. They are described here by role only. No product, maker, or download location is named.
 
-A secondary web conversion at `https://manuals.plus/mfb/mfb-tanzbar-analog-drum-machine-manual` was read only for the Data-versus-Sound conflict named in the brief. It is not a primary.
+1. German primary. The German owner's manual: 17 PDF pages, two printed pages on most sheets, printed page numbers through 31, dated 2013 in its PDF metadata. The MIDI appendix is printed page 31 of this file. That appendix is the control-change list used below.
+2. English primary. The 17-page English edition of the same manual, with the same contents list (overview through MIDI implementation). Printed pages 3, 4, 6, 8, 9, and 11 were read from an online copy. A separate English PDF file was not downloaded. The contents list and the instrument chapter match the German edition's structure.
+3. Published control-change republication on midi.guide, last update 12 September 2024, 64 parameters. This is the list identified by BD1 Attack on CC 2, Decay on 64, Pitch on 65, Tune on 3, Noise on 4, Filter on 5, Dist on 6, and Trigger on 66. Where it disagrees with the 2013 appendix, the appendix wins and the row is marked.
 
-Tanzbär 2, Tanzmaus, and Tanzbär Lite were not used.
+A secondary web conversion of the manual was read only for the Data-versus-Sound conflict named in the brief. It is not a primary.
+
+Later and smaller models of the same family were not used.
 
 ## Marks
 
@@ -128,7 +130,7 @@ CHOICE: controller 0 with values 0, 1, and 2, and the name Track Delay HH for 97
 
 ## Clock bypass
 
-INT and EXT are SHOGUN. They are not a switch in the Tanzbär manuals. Those manuals have MIDI clock, an analog sync jack that can be an input or an output, and a manual-trigger mode. None of those is this switch.
+INT and EXT are SHOGUN. They are not a switch in the source manuals. Those manuals have MIDI clock, an analog sync jack that can be an input or an output, and a manual-trigger mode. None of those is this switch.
 
 The switch is the only control that selects the master.
 
@@ -178,4 +180,4 @@ CHOICE: SHOGUN's internal tempo uses those endpoints as exact bounds, default 12
 
 A Trig jack is a rising edge through 1.0 V on a gate that rests at 0 V and is high at 5 V. That 1 V threshold is the collection's existing gate rule between RONIN and BUSHIDO. Velocity, when the sender has one, is an integer 0 to 127 riding with the edge. A plain gate with no velocity uses 127.
 
-ASSUMED: the plain-gate default of 127. The Tanzbär manuals say drum notes carry velocity. They do not define a jack that has no velocity byte.
+ASSUMED: the plain-gate default of 127. The source manuals say drum notes carry velocity. They do not define a jack that has no velocity byte.

@@ -13,7 +13,7 @@
 the same as the branch tip at copy time (2e1cef5), so the headers match the current head. The earlier commit
 829ebd2 has the JCS headers only, with no `include/jidai/dsp/` (no `TripleShaper.h`, no `Halfband.h`). Compared with
 829ebd2, 9d6e382 adds `dsp/TripleShaper.h`, `dsp/Halfband.h`, `tests/DspTests.cpp` and `tests/TestFft.h`, and it
-changes one R16 comment and enum name in `jcs/Volts.h` (`Serge2V5` → `Level2V5`).
+changes one R16 comment and enum name in `jcs/Volts.h` (the old R16 enum name → `Level2V5`).
 
 **Do not edit these files.** Fix them upstream in jidai-collection and re-vendor. SHOGUN works around the differences
 in its own code (`engine/wave_shaper.h`, `engine/ports.h`, `engine/shogun.cpp`). The differences are listed in

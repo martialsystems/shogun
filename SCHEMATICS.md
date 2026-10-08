@@ -167,7 +167,7 @@ Index 0 is samples 0 and 180. Index 15 is 0, 720, 1,440, 2,160, and 2,880. Each 
 
 ## Wave
 
-BD1, BD2, LTC, MTC, and HTC each have a Wave knob. Hats, clap, cymbal, and maracas do not. Wave is the Serge middle-section folder: six identical cells in series, ported from martialsystems/serge_middle (the cell, its Lambert W solver, and its drive peak table), not a second waveshaper.
+BD1, BD2, LTC, MTC, and HTC each have a Wave knob. Hats, clap, cymbal, and maracas do not. Wave is the west-coast triple wave folder: six identical cells in series, ported from martialsystems/serge_middle (the cell, its Lambert W solver, and its drive peak table), not a second waveshaper.
 
 Each cell, for v not 0, with VT = 0.02585, Is = 2.52e-9, eta = 1.68, R = 33,000:
 
