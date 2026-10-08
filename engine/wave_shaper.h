@@ -7,14 +7,19 @@
 //   - PRE-VCA input normalisation (preVcaInput);
 //   - the exact v2.1 single-stage migration (migrateV21, v21Law).
 //
-// Stage skipping is the shared per-block plan (jidai-common 1.1.1 TripleShaper::planBlock): a stage is a wire for a
-// block only when the block is steady (no smoothing ramp, no modulation, no control change), its a and b are exactly
-// 0, and no live VC has depth on it. A stage whose (a, b) merely passes through 0 (VC, a ramp, a matrix row) keeps its
-// ADAA, so the half-sample delay never toggles at audio rate (spec §4.6 / verify_folder.py: skip only if 0 over the
-// whole render). SHOGUN reads its parameters once per base sample, so its block is one base sample (M samples at
-// fsEff): setParams() plans it. The caller says whether the block is steady and whether a VC source is live.
-// Bypass: WAVE 0 with every trim, SYM, SHAPE and live VC depth at 0 returns the input bit for bit, keeps the stage
-// histories (every stage a wire), and skips LEVEL COMP (LevelComp::track() is not called: §4.6 "LEVEL COMP skipped").
+// Stage skipping is the shared per-block plan (jidai-common 1.1.2 TripleShaper::planBlock): a stage is a wire for a
+// block when its amount is 0 for the whole block, at ANY SYM (the stage law is y = x at a = 0 for every b): the block's
+// amount controls (WAVE macro, WAVE 1-3 trims, VC > AMT depths) are steady (no smoothing ramp, no modulation, no
+// control change), its a is exactly 0, and no live VC has AMT depth on it. SYM and VC > SYM never keep a stage running.
+// A stage whose a merely passes through 0 (VC, a ramp, a matrix row) keeps its ADAA, so the half-sample delay never
+// toggles at audio rate (spec §4.6 / verify_folder.py: skip only if 0 over the whole render). SHOGUN reads its
+// parameters once per base sample, so its block is one base sample (M samples at fsEff): setParams() plans it. The
+// caller says whether the amount controls are steady and whether a VC source is live.
+// Bypass (amount 0, any SYM): WAVE 0 with the WAVE 1-3 trims at 0, no live VC > AMT depth and SHAPE at 0 returns the
+// input bit for bit at any SYM, SYM matrix row or VC > SYM depth. Every stage is a wire (histories kept), and the
+// LEVEL COMP block is skipped whole: its 8 Hz detector DC block is not fed and LevelComp::track() is not called
+// (§4.6 "LEVEL COMP skipped"), so nothing after the stages can colour a bypassed voice. Before 1.1.2 a SYM other than
+// 0 at amount 0 ran ADAA on a straight line plus LEVEL COMP: half a sample late and duller treble.
 // LEVEL COMP is the shared LevelComp fed by a shared 8 Hz DcBlocker on the wet path. Its detector floor is 1e-30 on
 // both powers (documented upstream); the pre-1.1 local copy floored only the wet power, at 1e-12.
 
@@ -53,8 +58,9 @@ class WaveShaper {
   }
 
   // Parameters for the next block (one base sample in the engine) and that block's plan.
-  // steady: nothing moved since the previous block and no ramp or modulation is active on these parameters (a static
-  //         render, e.g. every test that sets the parameters once, is steady).
+  // steady: the amount controls (macro, trims, VC > AMT depths) did not move since the previous block and none is
+  //         ramping or modulated; SYM may move (a static render, e.g. every test that sets the parameters once, is
+  //         steady).
   // vcLive: a VC source contributes (FOLD VC jack or internal source at a non-zero level).
   void setParams(const TripleShaperParams& p, bool steady = true, bool vcLive = true) {
     p_ = p;
@@ -68,6 +74,8 @@ class WaveShaper {
       ctl_.vcToAmt[i] = p.vcAmt[i];
       ctl_.vcToSym[i] = p.vcSym[i];
     }
+    // Amount 0, any SYM (jidai-common 1.1.2 isBypass ignores SYM, matrix SYM and VC > SYM): the stages, the detector
+    // DC block and LEVEL COMP are all skipped. SHAPE > 0 changes the body before the stages, so it is never a bypass.
     bypass_ = !(p.shape > 0.0) && ctl_.isBypass(vcLive);
     plan();
   }

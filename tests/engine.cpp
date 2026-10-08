@@ -465,6 +465,12 @@ void testLin55Migration() {
   int law2 = -1;
   const int n2 = resolvePort("TOM:PITCH", tp, &law2);
   truth(T, "TOM:PITCH fans out to 3 toms with AMT 1/12 law", n2 == 3 && law2 == 2);
+  // jidai-common 1.1.2 lin55 floor (spec §12.3): log2(max(V, 1 mV)) − 1.25, so 0 V and negative volts read as 1 mV.
+  const double v0 = jidai::jcs::pitch::lin55ToVoct(0.0), vNeg = jidai::jcs::pitch::lin55ToVoct(-2.0),
+               v1m = jidai::jcs::pitch::lin55ToVoct(1e-3);
+  std::printf("%s: lin55 0 V -> %.6f V, -2 V -> %.6f V, 1 mV -> %.6f V (floor log2(1e-3) - 1.25)\n", T, v0, vNeg, v1m);
+  near(T, "0 V reads the 1 mV floor", v0, std::log2(1e-3) - 1.25, 1e-12);
+  truth(T, "negative volts read the floor", tu::same(vNeg, v0) && tu::same(v1m, v0));
 }
 
 // JCS R6 / R14 through the shared jidai-common header. Every SHOGUN port id and every alias-table id goes through

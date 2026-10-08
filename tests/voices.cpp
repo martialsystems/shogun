@@ -535,6 +535,51 @@ void testVelNormal() {
 
 }  // namespace
 
+// Amount 0, any SYM through the engine (jidai-common 1.1.2, §4.6): BD1, BD2 and LTC at WAVE 0 with SYM 1-3 and
+// VC > SYM 1-3 off centre, a live internal VC and a matrix row moving SYM 2 (LFO 1) render bit for bit like the default
+// patch, at 1x/2x/4x.
+void testWaveAmt0AnySymVoice() {
+  const char* T = "testWaveAmt0AnySym";
+  struct V {
+    int v, sym1, vcSym1, vcLevel;
+    const char* name;
+  } vs[3] = {{BD1, P_BD1_SYM_1, P_BD1_VC_TO_SYM_1, P_BD1_VC_LEVEL, "BD1"},
+             {BD2, P_BD2_SYM_1, P_BD2_VC_TO_SYM_1, P_BD2_VC_LEVEL, "BD2"},
+             {LTC, P_LTC_SYM_1, P_LTC_VC_TO_SYM_1, P_LTC_VC_LEVEL, "LTC"}};
+  const float symU[3] = {0.0f, 0.83f, 1.0f}, vcSymU[3] = {1.0f, 0.2f, 0.65f};
+  int identical = 0, total = 0;
+  for (const auto& x : vs) {
+    for (int os : {1, 2, 4}) {
+      auto a = make(48000.0, os), b = make(48000.0, os);
+      for (int i = 0; i < 3; ++i) {
+        b->setParamNow(x.sym1 + i, symU[i]);
+        b->setParamNow(x.vcSym1 + i, vcSymU[i]);
+      }
+      a->setParamNow(x.vcLevel, 1.0);
+      b->setParamNow(x.vcLevel, 1.0);
+      mod::Row r;
+      r.src = mod::SRC_LFO1;
+      r.dst = x.sym1 + 1;
+      r.depth = 0.8;
+      b->modulation().addRow(r);
+      a->trigger(x.v);
+      b->trigger(x.v);
+      bool same = true;
+      for (long n = 0; n < 9600; ++n) {
+        a->processSample();
+        b->processSample();
+        same = same && tu::same(a->mainL(), b->mainL()) && tu::same(a->mainR(), b->mainR());
+      }
+      identical += same ? 1 : 0;
+      ++total;
+    }
+  }
+  std::printf("%s: BD1/BD2/LTC at WAVE 0, SYM 1-3 / VC>SYM 1-3 off centre, live VC, LFO 1 -> SYM 2: %d/%d renders "
+              "bit-identical to the default patch (1x/2x/4x)\n",
+              T, identical, total);
+  truth(T, "engine renders bit-identical", identical == total && total == 9);
+}
+
 void runVoiceTests() {
   testKickBendDecays();
   testVoiceEndsAtMinus90();
@@ -554,4 +599,5 @@ void runVoiceTests() {
   testIndividualOutStaysInMix();
   testRetNormal();
   testVelNormal();
+  testWaveAmt0AnySymVoice();
 }

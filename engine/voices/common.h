@@ -58,12 +58,12 @@ struct Voice {
 };
 
 // The WAVE block of a WAVE voice: parameters read from ue each base sample (§4.6).
-inline bool sameStage(const TripleShaperParams& a, const TripleShaperParams& b) {
+// The plan's "steady" covers only the amount controls (jidai-common 1.1.2): WAVE macro, WAVE 1-3 trims and VC > AMT.
+// SYM and VC > SYM have no effect on a stage whose amount is 0, so they never keep it running.
+inline bool sameAmounts(const TripleShaperParams& a, const TripleShaperParams& b) {
   if (!(dsp::exactEq(a.macro, b.macro))) return false;
   for (int i = 0; i < 3; ++i)
-    if (!(dsp::exactEq(a.trim[i], b.trim[i]) && dsp::exactEq(a.sym[i], b.sym[i]) && dsp::exactEq(a.vcAmt[i], b.vcAmt[i]) &&
-        dsp::exactEq(a.vcSym[i], b.vcSym[i])))
-      return false;
+    if (!(dsp::exactEq(a.trim[i], b.trim[i]) && dsp::exactEq(a.vcAmt[i], b.vcAmt[i]))) return false;
   return true;
 }
 
@@ -92,10 +92,9 @@ struct WaveSlot {
     p.levelComp = stepIndex(ue[id.levelComp], 2) == 1;
     preVca = p.preVca;
     shape = p.shape;
-    // Steady: same stage controls as the previous block (or the first block) and none ramping or modulated.
-    bool steady = !havePrev || sameStage(p, prev);
-    const int ids[] = {id.macro, id.trim[0], id.trim[1], id.trim[2], id.sym[0], id.sym[1], id.sym[2], id.vcAmt[0],
-                       id.vcAmt[1], id.vcAmt[2], id.vcSym[0], id.vcSym[1], id.vcSym[2]};
+    // Steady: the same amount controls as the previous block (or the first block), none ramping or modulated.
+    bool steady = !havePrev || sameAmounts(p, prev);
+    const int ids[] = {id.macro, id.trim[0], id.trim[1], id.trim[2], id.vcAmt[0], id.vcAmt[1], id.vcAmt[2]};
     for (int k : ids)
       if ((c.moving && c.moving[k]) || (c.modulated && c.modulated[k])) steady = false;
     prev = p;

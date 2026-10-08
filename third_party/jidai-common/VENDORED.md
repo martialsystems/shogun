@@ -1,23 +1,29 @@
-# Vendored: jidai-common 1.1.1
+# Vendored: jidai-common 1.1.2
 
 | | |
 | --- | --- |
 | Source repo | https://github.com/martialsystems/jidai-collection (local clone `/workspace/jidai-collection`) |
 | Path | `jidai-common/` (the whole folder) |
 | Branch | `redesign/jidai` |
-| Version | **1.1.1** (`project(JidaiCommon VERSION 1.1.1)`) |
-| Commit | **24ee621** (24ee62135a824e09e81f823b1eb277d9e0cc87b7), "jidai-common 1.1.1: SHOGUN + RONIN fix batch (re-vendor this commit)" |
-| `jidai-common` tree | a3eefc0a7d2bbd22451e2c4f2a889c7e0eb04472 |
-| Copied with | `git -C /workspace/jidai-collection archive 24ee621 jidai-common \| tar -x -C third_party` |
+| Version | **1.1.2** (`project(JidaiCommon VERSION 1.1.2)`) |
+| Commit | **8a4b5ae** (8a4b5aecf3d6c2ac8900cc2e88db8feecf8440a8), "jidai-common 1.1.2: AMT 0 transparent, group delay API, lin55 floor (re-vendor this commit)" |
+| `jidai-common` tree | 2464d9767032da0eab742650caf8d426df8c1420 |
+| Copied with | `git -C /workspace/jidai-collection archive 8a4b5ae jidai-common \| tar -x -C third_party` |
 
-Copied from the local clone at exactly that commit; the commit was not yet pushed upstream at copy time. The previous
-vendoring was 1.1.0 at 9d6e382. 1.1.1 changes, as used here:
+The folder was replaced whole from that commit; this file is the only SHOGUN-side addition. The previous vendoring was
+1.1.1 at 24ee621 (and 1.1.0 at 9d6e382 before it). 1.1.2 changes, as used here:
 
-- `pitch::kC3Hz` is exactly 130.8127826502993 Hz; `pitch::lin55ToVoct(V)` is exactly `log2 V − 1.25`.
-- `TripleShaper` skips stages per block only (`planBlock(ctl, steady, vcLive)`); without a plan no stage is skipped.
-- `AliasTable` carries an input law per alias (`AliasLaw`, `resolve(id)` → id + `conversion.convert(V)`).
-- Headers are clean under `-Wfloat-equal`, `-Wconversion` and `-Wdouble-promotion` (upstream `headers` test).
-- The `LevelComp` 1e-30 detector floor is documented; the R16 level and the test prefixes use neutral names.
+- `TripleShaper`: a stage is a wire for a block when its amount `a` is 0 for the whole block, whatever its symmetry
+  (the stage law is `y = x` at `a = 0` for any `b`). Before, `a = 0` with `b != 0` ran ADAA on a straight line, a
+  two-sample average: half a sample late and about -6 dB at 10 kHz for three such stages at 48 kHz.
+- `ShaperControls::isBypass(vcLive)` ignores symmetry (SYM, matrix SYM, VC > SYM): WAVE 0 with the amount trims at 0
+  and no VC > AMT depth on a live source is the bit-exact bypass at any SYM.
+- `planBlock(ctl, steady, vcLive)`: `steady` covers only the amount inputs; only VC > AMT depth on a live VC keeps a
+  zero-amount stage running.
+- `runningStages()` and `groupDelay()` report the ADAA's half sample per running stage (not host latency; SHOGUN does
+  not report it).
+- `pitch::lin55ToVoct(V) = log2(max(V, 1e-3)) - 1.25`: old HZ/V cables are floored at 1 mV (0 V and below give
+  -11.216 V, was -5 V), so the lowest values no longer run unbounded below 1 mV.
 
 **Do not edit these files.** Fix them upstream in jidai-collection and re-vendor. What SHOGUN still keeps on its side
 is listed in `TESTPLAN.md` under "jidai-common" (the alias fan-out and legacy-name shim in `engine/ports.h`).

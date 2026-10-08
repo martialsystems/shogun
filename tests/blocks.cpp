@@ -411,7 +411,7 @@ void testWaveBypass() {
     const double x = 0.6 * std::sin(0.01 * n) * std::exp(-n / 3000.0);
     same = same && tu::same(s.process(x), x);
   }
-  std::printf("%s: WAVE 0, trims/SYM/SHAPE 0: bypassed %d, output bit-identical %d, level gain untouched %.1f\n", t,
+  std::printf("%s: WAVE 0, trims/SYM/SHAPE 0 (default patch): bypassed %d, output bit-identical %d, level gain untouched %.1f\n", t,
               s.bypassed() ? 1 : 0, same ? 1 : 0, s.levelGain());
   tu::truth(t, "bypassed", s.bypassed());
   tu::truth(t, "bit-identical", same);
@@ -499,14 +499,17 @@ void testWaveAliasStatic() {
   }
 }
 
-// jidai-common 1.1.1 per-block plan (§4.6): a stage is a wire for a block only when the block is steady, its a and b
-// are exactly 0 and no live VC has depth on it. A moving block or a live VC keeps the stage's ADAA.
+// jidai-common 1.1.2 per-block plan (§4.6): a stage is a wire for a block when its amount is 0 for the whole block,
+// at any SYM: the amount controls are steady, a is exactly 0 and no live VC has AMT depth on it. SYM and VC > SYM
+// never keep a stage running. A moving block or a live VC > AMT keeps the stage's ADAA.
 void testWavePlanBlock() {
   const char* t = "testWavePlanBlock";
   TripleShaper s;
   s.prepare(96000.0);
   TripleShaperParams p;
-  p.macro = 0.25;  // c = (0.5, 0, 0): stage 1 live, stages 2 and 3 at a = b = 0
+  p.macro = 0.25;  // c = (0.5, 0, 0): stage 1 live, stages 2 and 3 at a = 0
+  p.sym[1] = 0.6;  // SYM on the a = 0 stages: still wires (1.1.2)
+  p.vcSym[2] = 0.5;
   auto wires = [&s] { return (s.stageIsWire(0) ? 4 : 0) + (s.stageIsWire(1) ? 2 : 0) + (s.stageIsWire(2) ? 1 : 0); };
   s.setParams(p, true, true);
   const int steady = wires();
@@ -517,39 +520,109 @@ void testWavePlanBlock() {
   const int vcLive = wires();
   s.setParams(p, true, false);
   const int vcOff = wires();
-  // A moving block whose stage 2 sits at (0, 0) runs ADAA on it: one sample of the identity's ADAA is the mean of
-  // x[n] and x[n-1] (half-sample delay), never a mid-stream switch to the wire.
+  // A moving block whose stage 2 sits at a = 0 (SYM 0.25) runs ADAA on it: one sample of the identity's ADAA is the
+  // mean of x[n] and x[n-1] (half-sample delay), never a mid-stream switch to the wire. The steady block wires it.
   TripleShaperParams q;
   q.levelComp = false;
-  q.sym[0] = 0.25;  // stage 1 live through SYM only; stages 2 and 3 at (0, 0)
+  q.macro = 0.25;   // stage 1 live
+  q.sym[1] = 0.25;  // stage 2 at a = 0 with SYM: a wire only when steady
   TripleShaper w, m;
   w.prepare(96000.0);
   m.prepare(96000.0);
   w.setParams(q, true, false);
   m.setParams(q, false, false);
+  const bool wWire = w.stageIsWire(1) && w.stageIsWire(2) && !w.stageIsWire(0);
   double maxWire = 0.0;
   for (int n = 0; n < 64; ++n) {
     const double x = 0.5 * std::sin(0.3 * n);
     const double yw = w.process(x), ym = m.process(x);
     maxWire = std::max(maxWire, std::fabs(yw - ym));
   }
-  std::printf("%s: wires (stage 1 2 3) steady %d%d%d, moving %d%d%d; VC depth on 3: live %d%d%d, not live %d%d%d; "
-              "moving block vs wire max diff %.3e (ADAA half-sample delay kept)\n",
+  std::printf("%s: SYM 2 0.6, VC>SYM 3 0.5: wires (stage 1 2 3) steady %d%d%d, moving %d%d%d; VC>AMT on 3: live %d%d%d, "
+              "not live %d%d%d; moving block vs wire max diff %.3e (ADAA half-sample delay kept)\n",
               t, steady >> 2 & 1, steady >> 1 & 1, steady & 1, moving >> 2 & 1, moving >> 1 & 1, moving & 1,
               vcLive >> 2 & 1, vcLive >> 1 & 1, vcLive & 1, vcOff >> 2 & 1, vcOff >> 1 & 1, vcOff & 1, maxWire);
-  tu::truth(t, "steady block: zero stages are wires", steady == 3);
+  tu::truth(t, "steady block: a = 0 stages are wires at any SYM / VC>SYM", steady == 3);
   tu::truth(t, "moving block: no stage skipped", moving == 0);
-  tu::truth(t, "live VC with depth keeps the stage", vcLive == 2 && vcOff == 3);
-  tu::truth(t, "moving block keeps ADAA on (0, 0) stages", maxWire > 1e-3);
+  tu::truth(t, "live VC with AMT depth keeps the stage", vcLive == 2 && vcOff == 3);
+  tu::truth(t, "steady SYM-only stage is a wire", wWire);
+  tu::truth(t, "moving block keeps ADAA on a = 0 stages", maxWire > 1e-3);
+}
+
+// Amount 0, any SYM (jidai-common 1.1.2): WAVE 0 with the trims and live VC > AMT at 0 is a full bypass whatever SYM 1-3
+// and VC > SYM 1-3 are, steady or not, LEVEL COMP on or off, at 1x/2x/4x: bit-identical to the input and to the
+// default bypass, LEVEL COMP never touched. A VC > AMT depth with no live VC is still a bypass.
+void testWaveAmt0AnySym() {
+  const char* t = "testWaveAmt0AnySym";
+  const double syms[5][3] = {{1.0, -1.0, 0.5}, {-0.37, 0.0, 0.81}, {0.0, 0.0, 1e-9}, {-1.0, -1.0, -1.0}, {0.25, 0.6, -0.9}};
+  int cases = 0, bypassAll = 0;
+  bool same = true, gainOne = true;
+  for (double fs : {48000.0, 96000.0, 192000.0}) {
+    for (int k = 0; k < 5; ++k) {
+      for (int mode = 0; mode < 4; ++mode) {
+        TripleShaper ref, s;
+        ref.prepare(fs);
+        s.prepare(fs);
+        TripleShaperParams p;  // default: WAVE 0, every trim / SYM / depth 0
+        p.levelComp = (mode & 1) == 0;
+        ref.setParams(p);
+        for (int i = 0; i < 3; ++i) {
+          p.sym[i] = syms[k][i];
+          p.vcSym[i] = syms[(k + 2) % 5][i];
+        }
+        if (mode >= 2) p.vcAmt[1] = 0.7;  // AMT depth with no live VC
+        const bool vcLive = mode < 2;
+        bool b = true;
+        for (int n = 0; n < 4800; ++n) {
+          // SYM moves every 64 samples (a non-steady block for SYM only); VC is a live audio-rate signal.
+          if (n % 64 == 0) {
+            for (int i = 0; i < 3; ++i) p.sym[i] = -p.sym[i] * 0.97;
+            s.setParams(p, (n / 64) % 2 == 0, vcLive);
+            b = b && s.bypassed();
+          }
+          const double x = 0.8 * std::sin(0.013 * n * 48000.0 / fs) * std::exp(-n / 2000.0);
+          const double vc = std::sin(0.21 * n);
+          const double y = s.process(x, vc), yr = ref.process(x, vc);
+          same = same && tu::same(y, x) && tu::same(y, yr);
+        }
+        gainOne = gainOne && tu::same(s.levelGain(), 1.0);
+        bypassAll += b ? 1 : 0;
+        ++cases;
+      }
+    }
+  }
+  // The edge: a live VC with AMT depth, or any trim, is not a bypass.
+  TripleShaper e;
+  e.prepare(96000.0);
+  TripleShaperParams p;
+  p.sym[0] = 0.5;
+  p.vcAmt[0] = 0.1;
+  e.setParams(p, true, true);
+  const bool vcAmtLive = !e.bypassed();
+  p.vcAmt[0] = 0.0;
+  p.trim[2] = 0.01;
+  e.setParams(p, true, true);
+  const bool trimLive = !e.bypassed();
+  std::printf("%s: WAVE 0, trims 0, SYM / VC>SYM / idle VC>AMT set: %d/%d cases bypassed, output bit-identical to input "
+              "and to default bypass %d, level gain untouched %d; live VC>AMT bypass %d, trim 3 0.01 bypass %d\n",
+              t, bypassAll, cases, same ? 1 : 0, gainOne ? 1 : 0, vcAmtLive ? 0 : 1, trimLive ? 0 : 1);
+  tu::truth(t, "every case bypassed", bypassAll == cases && cases == 60);
+  tu::truth(t, "bit-identical to bypass", same);
+  tu::truth(t, "level comp skipped", gainOne);
+  tu::truth(t, "live VC > AMT is not a bypass", vcAmtLive);
+  tu::truth(t, "a trim is not a bypass", trimLive);
 }
 
 void testWaveAudioRateVc() {
   const char* t = "testWaveAudioRateVc";
   const int q = 44, F1 = 4 * q, F2 = 21 * q;
+  // VC -> SYM at WAVE 0.5: stage 3 sits at a = 0, so under jidai-common 1.1.2 it is a wire at any SYM. Under 1.1.1 it
+  // ran ADAA on the identity, whose half-sample average took the alias to -115.3 dB; verify_folder.py with the 1.1.2
+  // skip rule (a = 0 only) gives -113.7 dB, the figure here.
   struct Row {
     double dA, dB, limit, verify;
     const char* name;
-  } rows[3] = {{0.5, 0.0, -57.4, -58.4, "VC -> AMT"}, {0.0, 0.5, -114.3, -115.3, "VC -> SYM"},
+  } rows[3] = {{0.5, 0.0, -57.4, -58.4, "VC -> AMT"}, {0.0, 0.5, -112.7, -113.7, "VC -> SYM"},
                {0.5, 0.5, -49.8, -50.8, "VC -> AMT + SYM"}};
   for (const auto& r : rows) {
     TripleShaper s;
@@ -732,6 +805,7 @@ void runBlockTests() {
   testWaveAliasStatic();
   testWaveAudioRateVc();
   testWavePlanBlock();
+  testWaveAmt0AnySym();
   testWaveLevelComp();
   testWavePreVca();
   testShapeMorph();

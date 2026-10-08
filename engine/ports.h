@@ -120,8 +120,8 @@ inline const PortDesc kPortTable[kPorts] = {
 constexpr bool kPlainVoltGates = true;
 
 // Load-time aliases (§12.3). Every one-to-one rename between R6 ids is a row of the shared jidai::jcs::AliasTable
-// (jidai-common 1.1.1), which also carries its input law: LEAD/BASS:HZ/V -> :NOTE convert with
-// AliasLaw::Lin55ToVoct (V' = log2 V − 1.25, exactly jcs::pitch::lin55ToVoct). kPortRenames is only the list the table
+// (jidai-common 1.1.2), which also carries its input law: LEAD/BASS:HZ/V -> :NOTE convert with
+// AliasLaw::Lin55ToVoct (V' = log2(max(V, 1 mV)) − 1.25, exactly jcs::pitch::lin55ToVoct, spec §12.3). kPortRenames is only the list the table
 // is built from; resolve() is the shared one.
 struct PortRename {
   const char* from;
