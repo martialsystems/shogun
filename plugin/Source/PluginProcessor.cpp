@@ -21,11 +21,8 @@ int ccOf(const std::atomic<float>* value) {
 ShogunAudioProcessor::ShogunAudioProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "PARAMS", createLayout()) {
-  // Default beat: kick and bass on 1 and 9, snare on 5 and 13, hats on the eighths.
-  stepOn_[static_cast<int>(shogun::Voice::Bd1)].store((1u << 0) | (1u << 8));
-  stepOn_[static_cast<int>(shogun::Voice::Sd)].store((1u << 4) | (1u << 12));
-  stepOn_[static_cast<int>(shogun::Voice::Hh)].store(0x5555u);
-  stepOn_[static_cast<int>(shogun::Voice::Bass)].store((1u << 0) | (1u << 8));
+  // INIT: an empty pattern. Every step starts off.
+  for (auto& bits : stepOn_) bits.store(0u);
 
   knobCount_ = 0;
   for (const auto& voice : shogun_ui::voices()) {

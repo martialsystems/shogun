@@ -56,7 +56,7 @@ function press(c,e){const t=tracks[sel];
   else if(c.id=="PREV"||c.id=="NEXT"){loadPat(bankView,(curPat.b==bankView?curPat.i:c.id=="NEXT"?-1:0)+(c.id=="NEXT"?1:-1));return}
   else if(c.id=="SAVE"){if(DD.naming=="PAT")nameCommit();else if(userIdx()>=0){const p=patList(curPat.b)[curPat.i];savePat(p.n,userIdx())}else nameStart("PAT");return}
   else if(c.id=="COPY"){const p=patList(curPat.b)[curPat.i];nameStart("PAT",p?p.n:"");return}
-  else if(c.id=="KSAVE"){if(DD.naming=="KIT")nameCommit();else nameStart("KIT",curKit.n=="BASIC"?"":curKit.n);return}
+  else if(c.id=="KSAVE"){if(DD.naming=="KIT")nameCommit();else nameStart("KIT",curKit.n=="INIT"?"":curKit.n);return}
   else if(c.id=="UNDO"){undo(e.shiftKey);pressed=c.id;drawAll();return}
   else if(c.id=="BAY")setBay(!bay);
   else if(c.id=="SOLO"){soloV=soloV==sel?null:sel;send([["sg_set_solo",soloV?VI.indexOf(soloV):-1]])}

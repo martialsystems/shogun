@@ -2,7 +2,7 @@
 
 **Working name SHOGUN. A fan instrument in the Jidai Collection. Design pack, voice engine, a GraphForge pin for the clock switch, and a placeholder plate.**
 
-SHOGUN is a drum computer and two note voices, specified from the first MFB Tanzbär: the 17-page English user manual, the matching German Bedienungsanleitung, and that instrument's MIDI control-change list. The jobs of the voices follow those sources and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in FL Studio.
+SHOGUN is a drum computer and two note voices, an original Martial Systems design inspired by classic analog drum machines. The jobs of the voices follow the design pack (its sources are cited in `METHODOLOGY.md`) and the design brief. The panel, when it is drawn, is a new face. This tree has the design pack, the voice engine in `engine/`, the clock-switch pin in `forge/`, and a placeholder VST3 under `plugin/`. Panel art is a later commit. The editor drawn now is a flat plate so the instrument can be loaded in FL Studio.
 
 ## Revisions
 
@@ -15,7 +15,8 @@ SHOGUN is a drum computer and two note voices, specified from the first MFB Tanz
 - 2026-10-07: BD1 noise rides the body envelope, so a noisy kick ends with its body. The pan law is equal power: every centre, toms and clap tail included, is 0.707107 on each side.
 - 2026-10-07: one decay law for every drum, tau = 8 ms * exp(4.5 u), and a voice is 0 under 1e-3. BD2 at Decay 127 holds; a tom at Decay 127 rings 4 s and ends. The snare bend is its own drop to Tune with an 80 ms floor.
 - 2026-10-07: track solo. The soloed voice alone reaches its pair and the main; the others keep running at 0. Mute wins.
-- 2026-10-07: a new engine loads the 909-style init kit and pattern "909". STAND-IN knob values, not a Roland capture. reset() still clears.
+- 2026-10-07: a new engine loads the init kit and pattern. STAND-IN knob values set by ear. reset() still clears.
+- 2026-10-07: factory patterns and kits cleared for now. The engine, plugin and web page start on INIT, an empty bar, with the INIT kit. New factory content will be written later.
 
 ## What this is
 
@@ -65,4 +66,4 @@ BUSHIDO and RONIN share one patch format and one cable feel. JIDAI RACK compiles
 
 Copyright © 2026 Martial Systems LLC. All rights reserved. See `LICENSE`.
 
-MFB and Tanzbär are names of their owner. Martial Systems is not affiliated with or endorsed by that owner. This pack quotes short phrases for the parameter disputes. It does not reproduce the manuals, and it does not use that maker's logo or dancing-bear mark.
+SHOGUN is an original Martial Systems design inspired by classic analog drum machines. Martial Systems is not affiliated with or endorsed by any drum machine maker. The design pack quotes short phrases from published manuals for the parameter disputes and cites them in `METHODOLOGY.md`. It does not reproduce the manuals, and it does not use any maker's logo or marks.

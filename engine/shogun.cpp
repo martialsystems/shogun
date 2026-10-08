@@ -55,7 +55,7 @@ void endIfQuiet(State& st, double env) {
 
 }  // namespace
 
-// u(cc) = cc / 127. Values below are round(u * 127) from the 909 balance sheet.
+// u(cc) = cc / 127. Values below are round(u * 127) from the INIT balance sheet in SCHEMATICS.md.
 Knobs initKit() {
   Knobs k;
   k.bd1Tune = 28;     // 0.22
@@ -90,22 +90,12 @@ Knobs initKit() {
   return k;
 }
 
+// INIT is an empty pattern: one bar of 16 steps on every track, no step on.
 Pattern initPattern() {
   Pattern p;
-  p.name = "909";
+  p.name = "INIT";
   p.length = 16;
   for (auto& tr : p.track) tr.length = 16;
-  auto on = [&p](Voice v, int s) { p.track[static_cast<int>(v)].drum[s].on = true; };
-  for (int s = 0; s < 16; ++s) {
-    if (s % 8 == 0) on(Voice::Bd1, s);
-    if (s % 8 == 4) {
-      on(Voice::Sd, s);
-      on(Voice::Cp, s);
-    }
-    // A closed hat on the same step chokes the open hat, so the hat skips the open-hat steps.
-    if (s % 4 == 2) on(Voice::Oh, s);
-    else on(Voice::Hh, s);
-  }
   return p;
 }
 

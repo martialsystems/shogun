@@ -2,19 +2,8 @@
 // ================= patterns =================
 // Drum strings: o = soft, x = medium, X = loud (the three accent levels), . = off, repeated to fill the track.
 // Note strings: MIDI note numbers 36 to 72, . = rest, - = tie. len: steps per track, L: per-track lengths, tom: T or C per tom.
-const FACT=[
- {n:"HOUSE",bpm:124,sh:2,len:32,tom:"TTT",s:{BD1:"X...X...X...X...",CP:"....X.......X.......X.......X.XX",OH:"..x...x...x...x.",HH:"x.o.x.o.x.o.x.o.",RS:"...........x...................x",MA:".o.o.o.o.o.o.o.o"},nt:{BASS:". . 36 . . . 36 . . . 36 . . . 39 ."}},
- {n:"TECHNO",bpm:132,sh:0,len:16,L:{RS:12,CP:24},tom:"TTT",s:{BD1:"X...X...X...X...",RS:"...x..x....x",HH:"oxXoxoXooxXoxoXo",OH:"..x...x...x...x.",CY:"X...............",CP:"....x.......x...........x"},nt:{BASS:"36 36 . 36 36 . 36 36 . 36 36 . 36 . 36 ."}},
- {n:"ELECTRO",bpm:118,sh:0,len:16,tom:"TTT",s:{BD1:"X......X..X.....",SD:"....X.......X...",HH:"x.o.x.o.x.o.xxx.",CL:"..x..x....x..x..",CB:"...........x..x.",CP:"....X.......X..."},nt:{BASS:"36 . . 36 . . 43 . 36 . . 36 . 46 . 48"}},
- {n:"BREAKBEAT",bpm:136,sh:1,len:16,tom:"TTT",s:{BD1:"X.x.......Xx....",SD:"....X..o.o..X..o",HH:"x.x.x.x.x.x.x.x.",OH:"..............x.",CY:"X..............."}},
- {n:"HIP HOP",bpm:90,sh:7,len:16,tom:"TTT",s:{BD2:"X......x.xX.....",SD:"....X.......X...",HH:"x.o.x.o.x.oxo.x.",OH:".............x..",RS:"..........x....."}},
- {n:"MIAMI BASS",bpm:128,sh:0,len:16,tom:"TTT",s:{BD2:"X.....x...X.....",CP:"....X.......X...",HH:"oxXoxoXooxXoxoXo",CL:"...x..x......x..",CB:"..............x."}},
- {n:"ROBOT POP",bpm:112,sh:0,len:16,tom:"TTT",s:{BD1:"X...X...X...X...",SD:"....X.......X...",HH:"xoxoxoxoxoxoxoxo",LTC:"...........x....",MTC:".............x..",HTC:"..............x.",CL:"x..x..x.........",MA:"o.o.o.o.o.o.o.o."},nt:{LEAD:"60 - 63 . 67 - 70 . 72 . 70 67 63 - 62 .",BASS:"36 . 36 48 36 . 36 48 39 . 39 51 34 . 34 46"}},
- {n:"LATIN",bpm:104,sh:3,len:16,tom:"CCC",s:{BD1:"x..x....x..x....",CL:"x..x...x..x.x...",CB:"x.o.xo.x.o.xo.x.",MA:"oxoxoxoxoxoxoxox",HTC:"..x...xX..x...xX",MTC:"x...x.....x.....",LTC:".......x.....x.."}},
- {n:"DISCO",bpm:120,sh:0,len:16,tom:"TTT",s:{BD1:"X...X...X...X...",SD:"....X.......X...",OH:"..x...x...x...x.",HH:"xo.xox.xox.xox.o",CP:"....x.......x...",CB:"x.......x......."},nt:{BASS:"36 48 36 48 36 48 36 48 41 53 41 53 43 55 43 55"}},
- {n:"MINIMAL",bpm:126,sh:4,len:16,L:{MA:6,CB:10,RS:14,BD2:32},tom:"TTT",s:{BD1:"X...X...X...X...",RS:"......x..x..x.",OH:"..x...x...x...x.",MA:"x.o.xo",CB:"...x....x.",BD2:"...............................x"}},
- {n:"THREE FOUR",bpm:96,sh:0,len:12,tom:"TTT",s:{BD2:"X.....x.....",SD:"....x.....x.",HH:"x.o.x.o.x.o.",CY:"X..........."}},
- {n:"EMPTY",bpm:120,sh:0,len:16,tom:"TTT",s:{}}];
+const FACT=[   // factory patterns cleared for now: INIT is one empty bar
+ {n:"INIT",bpm:120,sh:0,len:16,tom:"TTT",s:{}}];
 const store={get(k){try{return JSON.parse(localStorage.getItem(k)||"null")}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 const blankStep=()=>({on:false,acc:1,flam:-1,bend:null,note:60,tie:false});
 let sel="BD1",page=0,edit=0,dirty=false,tracks={},soloV=null;   // soloV: the soloed track, or null
@@ -31,10 +20,10 @@ function fromFactory(p){const t={};VOICES.forEach(v=>{const len=(p.L&&p.L[v.k])|
     else{const s=p.s[v.k];if(s)for(let i=0;i<len;i++){const c=s[i%s.length];if(c!="."){steps[i].on=true;steps[i].acc=c=="o"?0:c=="x"?1:2}}}
     t[v.k]={len,shuffle:p.sh||0,shift:0,mute:false,steps}});return t}
 // The sound a pattern loads: a saved pattern's own knobs, else its kit (kits.js) with the levels measured for that kit.
-function patKnobs(p){if(p.knobs)return p.knobs;const kit=kitOf(p.n),lv=LEVEL[p.n]||LEVEL.EMPTY,k={};
+function patKnobs(p){if(p.knobs)return p.knobs;const kit=kitOf(p.n),lv=LEVEL[p.n]||LEVEL.INIT,k={};
   for(const id in MAP){const m=MAP[id];if(m.level!=null)k[id]=lv[VI[m.level]];else if(m.f&&kit[m.f]!=null)k[id]=m.tog?(kit[m.f]>=64?1:0):vOf(id,kit[m.f],STEPS[id])}return k}
 function loadPat(b,i,at){const L=patList(b);if(!L.length){info.textContent=`Bank ${b} is empty · SAVE stores the current pattern there`;return}
-  i=(i+L.length)%L.length;curPat={b,i};bankView=b;const p=L[i];if(at!=null)rot0=at;curKit={n:p.kit||(p.n=="EMPTY"?"BASIC":p.n),dirty:false};undoReset();tracks=p.tracks?JSON.parse(JSON.stringify(p.tracks)):fromFactory(p);
+  i=(i+L.length)%L.length;curPat={b,i};bankView=b;const p=L[i];if(at!=null)rot0=at;curKit={n:p.kit||p.n,dirty:false};undoReset();tracks=p.tracks?JSON.parse(JSON.stringify(p.tracks)):fromFactory(p);
   P["CLOCK:TEMPO"]=clamp((p.bpm-60)/120);P["CLOCK:SCALE"]=(p.scale==null?2:p.scale)/3;P["CLOCK:BAR"]=((p.bar||p.len)-1)/31;
   ["LTC","MTC","HTC"].forEach((k,j)=>{P[k+":MODE"]=p.tom&&p.tom[j]=="C"?1:0});
   const kn=patKnobs(p);for(const id in kn)if(MAP[id]&&!MAP[id].master){P[id]=kn[id];DEF[id]=kn[id]}   // double-click returns a knob to the pattern's setting

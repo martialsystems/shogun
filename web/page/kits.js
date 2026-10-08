@@ -1,4 +1,4 @@
-// ================= kits: the knob settings each factory pattern loads =================
+// ================= kits: the knob settings each factory pattern loads (INIT only for now) =================
 // KIT is the base sound, CC values by shogun::Knobs name. STYLE[pattern name] overrides it for that pattern.
 // Decays follow the engine's curve, tau = 8 ms * exp(4.5 u). A played voice that needs a body (kick, snare tone, toms,
 // open hat, cowbell) is not set under CC 40 (33 ms), so no preset is a click. Hats, claves and maracas may be shorter.
@@ -8,19 +8,8 @@ const KIT={bd1Attack:30,bd1Decay:55,bd1Pitch:45,bd1Tune:30,bd1Noise:0,bd1Filter:
   clTune:70,clDecay:25,cyTune:70,cyTone:60,cyDecay:70,ohDecay:35,hhTune:75,hhDecay:25,ltcTune:45,ltcDecay:40,mtcTune:50,mtcDecay:40,htcTune:55,htcDecay:40,
   ltcNoise:0,mtcNoise:0,htcNoise:0,tomNoise:25,cbTune:52,cbDecay:40,maDecay:20,leadTone:70,bassTone:45};
 const STYLE={
- "HOUSE":{bd1Decay:50,bd1Tune:32,bd1Attack:45,cpDecay:35,cpFilter:80,ohDecay:40,hhDecay:20,rsTune:60,maDecay:15,bassTone:55},
- "TECHNO":{bd1Tune:25,bd1Decay:75,bd1Pitch:50,bd1Dist:25,bd1Attack:50,hhTune:85,hhDecay:15,ohDecay:40,rsTune:70,cpDecay:45,cpFilter:60,cyDecay:60,bassTone:35},
- "ELECTRO":{bd1Tune:20,bd1Decay:85,bd1Pitch:70,bd1Attack:20,sdTune:65,sdSnappy:100,sdToneDecay:40,clTune:80,cbTune:50,cbDecay:35,hhTune:90,hhDecay:20,bassTone:60},
- "BREAKBEAT":{bd1Tune:40,bd1Decay:35,bd1Attack:70,bd1Dist:30,bd1Trigger:48,sdTune:75,sdSnappy:110,sdSnDecay:50,sdPitch:40,sdToneDecay:35,hhTune:70,hhDecay:30,ohDecay:40,cyDecay:75},
- "HIP HOP":{bd2Tune:30,bd2Decay:90,bd2Tone:50,sdTune:50,sdSnappy:85,sdSnDecay:55,sdToneDecay:35,hhTune:65,hhDecay:30,ohDecay:40,rsTune:45},
- "MIAMI BASS":{bd2Tune:25,bd2Decay:110,bd2Tone:30,cpDecay:25,cpFilter:85,hhTune:90,hhDecay:18,clTune:75,cbTune:55},
- "ROBOT POP":{bd1Tune:35,bd1Decay:45,sdTune:70,sdSnappy:80,hhDecay:25,ltcTune:40,mtcTune:55,htcTune:70,ltcDecay:35,mtcDecay:35,htcDecay:35,clTune:70,leadTone:80,bassTone:55},
- "LATIN":{bd1Tune:30,bd1Decay:40,ltcTune:50,mtcTune:62,htcTune:74,ltcDecay:40,mtcDecay:40,htcDecay:40,clTune:80,clDecay:20,cbTune:45,cbDecay:45,maDecay:25},
- "DISCO":{bd1Tune:35,bd1Decay:45,bd1Attack:50,sdTune:65,sdSnappy:80,sdSnDecay:45,ohDecay:40,hhTune:80,hhDecay:25,cpDecay:35,cbTune:55,bassTone:60},
- "MINIMAL":{bd1Tune:28,bd1Decay:50,bd1Attack:60,bd1Trigger:32,rsTune:75,ohDecay:40,maDecay:12,cbTune:60,cbDecay:40,bd2Tune:35,bd2Decay:40,bd2Tone:80},
- "THREE FOUR":{bd2Tune:40,bd2Decay:55,bd2Tone:40,sdTune:55,sdSnappy:70,sdToneDecay:40,hhDecay:25,cyDecay:85},
- "EMPTY":{}};
+ "INIT":{}};   // factory kits cleared for now: INIT is the base KIT
 // Peak on the main for one full-accent hit, by role. Kicks loudest, then snare and clap, toms, percussion, cymbals and hats.
 const TARGET={BD1:.6,BD2:.6,SD:.5,CP:.5,LTC:.42,MTC:.42,HTC:.42,RS:.28,CL:.28,CB:.28,HH:.24,OH:.24,CY:.24,MA:.18,LEAD:.3,BASS:.42};
 const kitOf=name=>Object.assign({},KIT,STYLE[name]||{});
-const LEVEL=/*__LEVEL__*/{"HOUSE":{"BD1":0.621,"BD2":0.617,"SD":0.304,"RS":0.288,"CY":0.327,"OH":0.284,"HH":0.301,"CL":0.283,"CP":0.538,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.523,"LEAD":0.757,"BASS":1},"TECHNO":{"BD1":0.601,"BD2":0.617,"SD":0.304,"RS":0.287,"CY":0.327,"OH":0.307,"HH":0.326,"CL":0.283,"CP":0.589,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.518,"LEAD":0.757,"BASS":1},"ELECTRO":{"BD1":0.609,"BD2":0.617,"SD":0.292,"RS":0.289,"CY":0.327,"OH":0.308,"HH":0.325,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.613,"MA":0.518,"LEAD":0.757,"BASS":1},"BREAKBEAT":{"BD1":0.592,"BD2":0.617,"SD":0.276,"RS":0.289,"CY":0.327,"OH":0.303,"HH":0.316,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.518,"LEAD":0.757,"BASS":1},"HIP HOP":{"BD1":0.642,"BD2":0.573,"SD":0.321,"RS":0.29,"CY":0.327,"OH":0.321,"HH":0.322,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.518,"LEAD":0.757,"BASS":1},"MIAMI BASS":{"BD1":0.642,"BD2":0.594,"SD":0.304,"RS":0.289,"CY":0.327,"OH":0.308,"HH":0.328,"CL":0.283,"CP":0.527,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.617,"MA":0.518,"LEAD":0.757,"BASS":1},"ROBOT POP":{"BD1":0.641,"BD2":0.617,"SD":0.318,"RS":0.289,"CY":0.327,"OH":0.287,"HH":0.295,"CL":0.283,"CP":0.559,"LTC":0.475,"MTC":0.629,"HTC":0.448,"CB":0.614,"MA":0.518,"LEAD":0.736,"BASS":1},"LATIN":{"BD1":0.664,"BD2":0.617,"SD":0.304,"RS":0.289,"CY":0.327,"OH":0.287,"HH":0.295,"CL":0.284,"CP":0.559,"LTC":0.465,"MTC":0.622,"HTC":0.445,"CB":0.612,"MA":0.513,"LEAD":0.757,"BASS":1},"DISCO":{"BD1":0.606,"BD2":0.617,"SD":0.32,"RS":0.289,"CY":0.327,"OH":0.306,"HH":0.323,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.617,"MA":0.518,"LEAD":0.757,"BASS":1},"MINIMAL":{"BD1":0.56,"BD2":0.547,"SD":0.304,"RS":0.286,"CY":0.327,"OH":0.284,"HH":0.295,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.624,"MA":0.527,"LEAD":0.757,"BASS":1},"THREE FOUR":{"BD1":0.642,"BD2":0.607,"SD":0.342,"RS":0.289,"CY":0.326,"OH":0.287,"HH":0.295,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.518,"LEAD":0.757,"BASS":1},"EMPTY":{"BD1":0.642,"BD2":0.617,"SD":0.304,"RS":0.289,"CY":0.327,"OH":0.287,"HH":0.295,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.518,"LEAD":0.757,"BASS":1}};
+const LEVEL=/*__LEVEL__*/{"INIT":{"BD1":0.642,"BD2":0.617,"SD":0.304,"RS":0.289,"CY":0.327,"OH":0.287,"HH":0.295,"CL":0.283,"CP":0.559,"LTC":0.466,"MTC":0.624,"HTC":0.447,"CB":0.614,"MA":0.518,"LEAD":0.757,"BASS":1}};
