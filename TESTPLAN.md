@@ -798,6 +798,17 @@ SHOGUN uses these parts of it:
 
 **jidai-common 1.1.2 (output changes).** (1) A WAVE stage at amount 0 is a wire at any SYM, and WAVE 0 with any SYM is the full bypass: stages, detector DC block and LEVEL COMP skipped (`engine/wave_shaper.h`); `WaveSlot::control` calls a block steady from the amount controls only (`engine/voices/common.h`). (2) HZ/V → NOTE is floored at 1 mV. Tests changed: testWavePlanBlock (to the new law; SYM on a = 0 stages stays a wire), testWaveAudioRateVc (VC → SYM −115.3 → −113.7 dB, stage 3 now a wire), testWaveBypass (label only), testLin55Migration (floor check added), and the new testWaveAmt0AnySym (block and engine). Every other printed number in the suite is unchanged (the full log against 1d7826f differs only in those lines). SHOGUN does not call `LevelComp::track()` in bypass or report `groupDelay()` to the host.
 
+**Golden render with 1.1.2.** The scratch busy-patch render described under "Strict build" below (SHA-256 of the raw doubles, first 16 hex digits), against 1d7826f (1.1.1):
+
+| Build | 1.1.1 (1d7826f) | 1.1.2 |
+| --- | --- | --- |
+| g++ 14.2 and clang++ 19.1, `-ffp-contract=off` | 4feda137ff4c35a9 | 4feda137ff4c35a9 |
+| g++ `-mfma -ffp-contract=fast` | 01f7a8f927921fbf | 01f7a8f927921fbf |
+| clang++ `-mfma -ffp-contract=on` | 4fc3e37230bd0a01 | 4fc3e37230bd0a01 |
+| clang++ `-mfma -ffp-contract=fast` | 126f554cd6e62129 | 126f554cd6e62129 |
+
+It does not change: that patch has no WAVE stage at amount 0 with a SYM other than 0 (BD1 SYM 2 is on a live stage, the a = 0 stages have SYM 0) and no HZ/V cable, so neither 1.1.2 output change (the WAVE amount-0 wire, the lin55 1 mV floor) reaches it. The same patch with SYM set on amount-0 stages (BD2 SYM 3 0.9, LTC SYM 3 0.2, MTC SYM 1 0.85 and VC → SYM 2 0.1 at WAVE 0, HTC SYM 2 0.7 at WAVE 0) does change, because of the WAVE amount-0 wire: 1.1.1 e995ecda8606aaa7 (g++ and clang++, contraction off; g++ FMA fast c96ac2668021ac76, clang++ FMA fast 28dfe551bf491b2d) becomes 4feda137ff4c35a9 (FMA fast 01f7a8f927921fbf / 126f554cd6e62129), the busy patch's own hashes: under 1.1.2 those SYM settings have no effect at all, as the rule says. The lin55 floor is below every playable note and is checked by testLin55Migration, not the render. The test log is byte-identical across g++ and clang++ with contraction off, g++ FMA fast and clang++ FMA on; clang++ FMA fast differs in one line (testWaveMigration max error 2.22e-16 instead of 0, the same as under 1.1.1), all 339 checks passing in every build.
+
 **Bit-identity of the wave tests.** A scratch dump program renders every sample the eight wave tests compute.
 - 1.1.1 vs the 9d6e382 build (54ff487): all eight are byte-identical, with g++ and with clang++. The per-block plan gives the same wire decisions as the old static rule for these renders, and the shared AdaaStage computes the same ADAA values on (0, 0) samples.
 - 9d6e382 vs the local shaper (dce82f8): identical except testWaveLevelComp with LEVEL COMP ON (max abs difference 9.86e-7, relative 5.4e-7, from the 1e-30 floor; under 1.5e-7 after 10 ms, 0 after 150 ms). Every printed wave number is unchanged.

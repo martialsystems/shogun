@@ -533,8 +533,6 @@ void testVelNormal() {
   }
 }
 
-}  // namespace
-
 // Amount 0, any SYM through the engine (jidai-common 1.1.2, §4.6): BD1, BD2 and LTC at WAVE 0 with SYM 1-3 and
 // VC > SYM 1-3 off centre, a live internal VC and a matrix row moving SYM 2 (LFO 1) render bit for bit like the default
 // patch, at 1x/2x/4x.
@@ -546,7 +544,7 @@ void testWaveAmt0AnySymVoice() {
   } vs[3] = {{BD1, P_BD1_SYM_1, P_BD1_VC_TO_SYM_1, P_BD1_VC_LEVEL, "BD1"},
              {BD2, P_BD2_SYM_1, P_BD2_VC_TO_SYM_1, P_BD2_VC_LEVEL, "BD2"},
              {LTC, P_LTC_SYM_1, P_LTC_VC_TO_SYM_1, P_LTC_VC_LEVEL, "LTC"}};
-  const float symU[3] = {0.0f, 0.83f, 1.0f}, vcSymU[3] = {1.0f, 0.2f, 0.65f};
+  const double symU[3] = {0.0, 0.83, 1.0}, vcSymU[3] = {1.0, 0.2, 0.65};
   int identical = 0, total = 0;
   for (const auto& x : vs) {
     for (int os : {1, 2, 4}) {
@@ -579,6 +577,8 @@ void testWaveAmt0AnySymVoice() {
               T, identical, total);
   truth(T, "engine renders bit-identical", identical == total && total == 9);
 }
+
+}  // namespace
 
 void runVoiceTests() {
   testKickBendDecays();
