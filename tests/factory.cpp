@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "factory.h"
+#include "fmtg_ref.inc"
 #include "testutil.h"
 
 using namespace shogun;
@@ -238,10 +239,34 @@ void testFactoryNames() {
 }  // namespace
 
 
-// The libc-free writer (the wasm page saves documents with it) against the libc one: the same %.*g bytes, the same
-// shortest round-trip text for doubles and floats, and the same document for every program, sparse and full.
+// The libc-free writer (the wasm page saves documents with it) against a correctly-rounded %.*g table
+// (not host snprintf: Apple's gdtoa leaves trailing zeros on some small integers, e.g. 305 at p=2 → "3.0e+02"
+// instead of "3e+02"), the shortest round-trip text for doubles and floats, and the same document for every
+// program, sparse and full.
 static void testPatchWriterNoLibc() {
   const char* T = "testPatchWriterNoLibc";
+  long refBad = 0, refChecks = 0;
+  char b[64];
+  for (int i = 0; i < kFmtGRefN; ++i) {
+    double v;
+    std::memcpy(&v, &kFmtGRef[i].bits, sizeof v);
+    patchjson::fmtG(b, v, kFmtGRef[i].p);
+    ++refChecks;
+    if (std::strcmp(b, kFmtGRef[i].text) != 0) {
+      ++refBad;
+      if (refBad <= 8)
+        std::printf("%s: fmtG ref mismatch bits=%016llx p=%d want '%s' got '%s'\n", T,
+                    static_cast<unsigned long long>(kFmtGRef[i].bits), kFmtGRef[i].p, kFmtGRef[i].text, b);
+    }
+  }
+  // Exact Apple gdtoa regression: 305 at precision 2 must be "3e+02", not "3.0e+02".
+  {
+    constexpr std::uint64_t k305 = 0x4073100000000000ull;
+    double v305;
+    std::memcpy(&v305, &k305, sizeof v305);
+    patchjson::fmtG(b, v305, 2);
+    truth(T, "305 at p=2 is 3e+02 (not Apple trailing-zero 3.0e+02)", std::strcmp(b, "3e+02") == 0);
+  }
   std::uint64_t x = 0x9e3779b97f4a7c15ull;
   auto rnd = [&x]() {
     x ^= x << 13;
@@ -254,15 +279,15 @@ static void testPatchWriterNoLibc() {
   for (int k = 0; k <= 127; ++k) ds.push_back(k / 127.0);
   for (int k = -1074; k <= 1023; ++k) ds.push_back(std::ldexp(1.0, k));
   for (int i = 0; i < 60000; ++i) {
-    std::uint64_t b = rnd();
+    std::uint64_t bb = rnd();
     double v;
-    std::memcpy(&v, &b, sizeof v);
+    std::memcpy(&v, &bb, sizeof v);
     if (std::isfinite(v)) ds.push_back(v);
     ds.push_back(static_cast<double>(rnd() >> 11) / 9007199254740992.0);  // [0, 1)
     ds.push_back((static_cast<double>(rnd() % 2000001) - 1000000.0) / 1000.0);
   }
-  long gChecks = 0, gBad = 0, nBad = 0, fBad = 0;
-  char a[64], b[64];
+  long gChecks = 0, gLibcDiff = 0, nBad = 0, fBad = 0;
+  char a[64];
   for (std::size_t i = 0; i < ds.size(); ++i) {
     const double v = ds[i];
     if (i % 7 == 0)
@@ -270,7 +295,15 @@ static void testPatchWriterNoLibc() {
         std::snprintf(a, sizeof a, "%.*g", p, v);
         patchjson::fmtG(b, v, p);
         ++gChecks;
-        gBad += std::strcmp(a, b) != 0;
+        if (std::strcmp(a, b) != 0) {
+          ++gLibcDiff;
+          if (gLibcDiff <= 8) {
+            std::uint64_t bits;
+            std::memcpy(&bits, &v, sizeof bits);
+            std::printf("%s: host snprintf differs bits=%016llx p=%d libc='%s' ours='%s'\n", T,
+                        static_cast<unsigned long long>(bits), p, a, b);
+          }
+        }
       }
     std::string ref;
     patchjson::putNum(ref, v);
@@ -309,9 +342,10 @@ static void testPatchWriterNoLibc() {
       docs = docs && o.ok && patchToJson(full ? s : p, full) == buf;
     }
   }
-  std::printf("%s: %ld %%.*g texts, %zu doubles and %zu+ floats, %d programs x 2 documents\n", T, gChecks, ds.size(),
-              ds.size(), factory::kPrograms);
-  truth(T, "%.*g bytes = snprintf", gBad == 0);
+  std::printf("%s: %ld ref texts, %ld %%.*g vs host snprintf (%ld host diffs), %zu doubles and %zu+ floats, %d programs x 2 "
+              "documents\n",
+              T, refChecks, gChecks, gLibcDiff, ds.size(), ds.size(), factory::kPrograms);
+  truth(T, "%.*g bytes = correctly rounded table", refBad == 0);
   truth(T, "shortest double text = putNum", nBad == 0);
   truth(T, "shortest float text = putFloat", fBad == 0);
   truth(T, "documents = patchToJson (sparse and full)", docs);

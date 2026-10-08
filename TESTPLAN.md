@@ -698,10 +698,11 @@ The bank text is the canonical writer's output (`patchToJson(parsePatch(text), f
 
 ### testPatchWriterNoLibc
 
-The libc-free writer (`writePatchJson` on `patchjson::BufOut`, which the wasm page saves with) against the libc one: `fmtG` gives the bytes of `snprintf("%.*g")` at every precision 1 to 17, `shortestNum` and `shortestFloat` give the text `putNum` and `putFloat` choose with `snprintf` and `strtod` (doubles from random bits, [0, 1), k/127, every power of two from 2^-1074 to 2^1023, subnormals, signed zero; floats from random bits), and every program's document is byte-identical to `patchToJson`, sparse and full.  Tolerance: exact.
+The libc-free writer (`writePatchJson` on `patchjson::BufOut`, which the wasm page saves with): `fmtG` against an embedded table of correctly rounded `%.*g` strings (`tests/fmtg_ref.inc`, 4459 entries, ties to even, written by `tools/gen_fmtg_ref.py` and cross-checked with exact Decimal arithmetic), so the check does not depend on the host libc; 305 at precision 2 is pinned to `3e+02` (Apple's gdtoa prints `3.0e+02`: its small-integer path keeps a trailing zero after a round-half-even down, which C forbids for `%g`). The host `snprintf("%.*g")` is still run on 442510 texts and any difference is printed (bits, precision, libc text, ours) but does not fail. `shortestNum` and `shortestFloat` give the text `putNum` and `putFloat` choose with `snprintf` and `strtod` (doubles from random bits, [0, 1), k/127, every power of two from 2^-1074 to 2^1023, subnormals, signed zero; floats from random bits), and every program's document is byte-identical to `patchToJson`, sparse and full.  Tolerance: exact.
 
 ```
-442510 %.*g texts, 182206 doubles and 182206+ floats, 22 programs x 2 documents
+4459 ref texts, 442510 %.*g vs host snprintf (0 host diffs), 182206 doubles and 182206+ floats, 22 programs x 2 documents
+```
 ```
 
 ### testFactoryRenderLevels
