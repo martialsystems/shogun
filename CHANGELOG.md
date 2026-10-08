@@ -1,5 +1,7 @@
 # SHOGUN changelog
 
+- 2026-10-08: **LEAD/BASS CV AMT, MOD matrix to 32 rows, SRC as an instance setting.** The ROUTE CV AMT knob for LEAD and BASS now scales the pitch CV into the voice: NOTE (trigger and held paths, after Lin55ToVoct for an old HZ/V cable) and V/OCT, with 1.0 = exact 1 V/oct (the default, so presets and the golden render stay identical). The MOD tab matrix no longer stops at ten rows: used slots plus "+ add" scroll (mouse wheel = one row, ▲ ▼ = one page of ten) so every row up to all 32 is reachable, editable and removable. The web page has no MOD matrix UI (mod rows pass through the mirror). CLOCK:SOURCE is an instance setting as on the rack: loading a factory program, INIT PATCH and A/B keep HOST / INT / EXT; a preset's CLOCK:SOURCE is ignored; undo and host save/restore still restore it. New tests: `testSynthCvAmtNote` (30 checks, 372 named), probe `matrix 32 rows` and `SRC on program load` (28 probe checks). Manual (24 pages), TESTPLAN and the Design Pack PDF updated. Golden render unchanged (4feda137ff4c35a9).
+
 - 2026-10-06: first pack. Sources, clock bypass, voice equations, sequencer, tests, and the PDF of the same text.
 - 2026-10-06: voice engine. Framework-free C++ in `engine/`, INT and EXT trigger paths, and the named tests in `tests/voices.cpp`.
 - 2026-10-06: clock switch pinned under `forge/`. A Trig cable cannot force EXT. Printed 48 kHz rows stay named tests.

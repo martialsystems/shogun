@@ -4,7 +4,7 @@ The contract for the v2.2 engine (`engine/`), the plugin shell (`plugin/`) and t
 
 Conventions: u ∈ [0, 1] for every parameter (SECTION:LABEL ids); 1 V/oct with 0 V = C3 = note 48; accent volts 2.353/3.706/5.0 V; voice end at −90 dB (kQuiet 3.162e-5); OS 2× unless a row says otherwise (latency 23 base samples).
 
-Result of the last run: **all 342 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output).
+Result of the last run: **all 372 named checks passed** (`make test`, `make asan`; g++ 14.2 and clang++ 19.1 print identical output aside from the long-standing clang++ FMA-fast `testWaveMigration` 2.22e-16 line).
 
 §15.4 tests not in this suite: `testRackLatencyComp` (belongs to jidai-rack, which this pass does not touch) and the v2.1 INIT-kit test (superseded by v2.2 §14.1: INIT ships an empty pattern; `testInitKitAndEmptyPattern` checks that instead).
 
@@ -515,6 +515,20 @@ latencySamples 1x/2x/4x = 0 / 23 / 26
 4x lags main 26, BD1:OUT 26, AUX 1 26; voice + bus + master drive main 25
 ```
 
+### testSynthCvAmtNote
+
+LEAD/BASS CV AMT scales the pitch CV into the voice (NOTE, an old HZ/V cable on NOTE after Lin55ToVoct, and V/OCT): 1.0 = exact 1 V/oct (the default), 0.5 = half tracking around 0 V = C3, 0 = C3, -1 = inverted. V/OCT's own per-jack AMT stays a second factor. Trigger path and held continuous path both scale. 30 named checks.  Tolerance: 1e-9 (pitch 0.01 cents).
+
+```
+LEAD AMT +1.0, NOTE +1.0 V -> note 60.0000 (want 60)
+LEAD AMT +0.5, NOTE +1.0 V -> note 54.0000 (want 54)
+LEAD AMT +0.0, NOTE +1.0 V -> note 48.0000 (want 48)
+LEAD AMT -1.0, NOTE +1.0 V -> note 36.0000 (want 36)
+held LEAD, AMT 0.5, NOTE 0 -> +2 V: note 60.0000
+BASS HZ/V 2.0 V, AMT 1.0 -> note 45.0000; AMT 0.5 -> note 46.5000
+LEAD AMT 0.5, V/OCT +1 V adds 6.000000 semitones
+```
+
 ### testPitchVoct
 
 §7.1 1 V/oct, 0 V = C3 (note 48): NOTE OUT and NOTE IN exact, V/OCT +1 V = 12 st.  Tolerance: 1e-6.
@@ -708,7 +722,7 @@ Names are unique (case-insensitive), fit the pattern name, and carry none of 50 
 
 ## Plugin shell (ShogunProbe, `make probe-linux`)
 
-The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. The panel checks press the real keys through the editor's binds (`pressBind`): the KIT and PATTERN arrows step every program with wraparound on all 8 tabs, SRC cycles CLOCK:SOURCE and the engine follows the host tempo only on HOST, A/B recalls two full snapshots exactly and copies either onto the other, undo/redo restores kit loads, knob gestures and step edits (a no-op click keeps redo; 64 levels), the MOD ◉ keys arm a source and a knob click adds the row, UI SCALE resizes, the OS keys and offline 4× set their parameters, RE-ROLL UNIT changes the unit serial in the engine and the saved state, and VELOCITY CURVE shapes MIDI velocity. 26 checks, last run all PASS:
+The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. The panel checks press the real keys through the editor's binds (`pressBind` / `clickAt` / `wheelAt`): the KIT and PATTERN arrows step every program with wraparound on all 8 tabs, SRC cycles CLOCK:SOURCE and the engine follows the host tempo only on HOST, **SRC on program load** keeps HOST / INT / EXT across every program, INIT PATCH and A/B (undo of the SRC key and host save/restore still restore it), the MOD matrix past ten rows scrolls (▲ ▼ = a page, wheel = a row) so all 32 slots are reachable, editable (CURVE, ON, DEPTH) and removable with ✕, A/B recalls two full snapshots exactly and copies either onto the other, undo/redo restores kit loads, knob gestures and step edits (a no-op click keeps redo; 64 levels), the MOD ◉ keys arm a source and a knob click adds the row, UI SCALE resizes, the OS keys and offline 4× set their parameters, RE-ROLL UNIT changes the unit serial in the engine and the saved state, and VELOCITY CURVE shapes MIDI velocity. 28 checks, last run all PASS:
 
 ```
 PASS params  count 454 (table 454), float 0..1 SECTION:LABEL ids, mismatches 0
@@ -729,8 +743,10 @@ PASS old HZ/V plays  BASS:HZ/V cable at 2.0 V -> 110.000000 Hz (0.00000 cents fr
 PASS removed jacks  old FILL IN / LANE A cables dropped 2 (removed 2), kept 1; report: SHOGUN: dropped 2 saved cable(s) (2 on removed jacks CLOCK:FILL IN / MOD:LANE A): SHOGUN/CLOCK:CLK OUT -> SHOGUN#1/CLOCK:FILL IN, SHOGUN/MOD:LANE A -> SHOGUN/BD1:DECAY
 PASS editor  1200x672, bay jacks 151/151, ops 2550
 PASS tab renders  8 PNGs in /workspace/shogun/build/plugin-linux/tabs
+PASS matrix 32 rows  pages 0 10 20 22 12 2 0; 32/32 reached by wheel, 32 edited (CURVE/ON/DEPTH), 32 removed with X; 11 rows scroll to 2
 PASS KIT/PATTERN arrows  352 steps over 22 programs on 8 tabs, both arrow pairs wrap INIT <-> Lo-Fi Tape Wobble, ▶▶ = program 2 state
 PASS SRC key  SRC INT > SRC EXT > SRC HOST > SRC INT, right-click SRC EXT > SRC INT; engine tempo 120.0 / 120.0 / 100.0 / 120.0 BPM (host 100, knob 120.0)
+PASS SRC on program load  HOST kept, INT kept, EXT kept over 132 program loads (22 programs, host change + KIT arrows, INIT PATCH); A/B keeps yes; undo of SRC key restores yes; saved state restores EXT yes
 PASS A/B compare  B = copy on first visit, A/B recall exact (BD1:DECAY 0.774 / 0.900, SD step 4), copy A>B and B>A
 PASS undo/redo  kit load + knob gesture + step edit undone and redone exactly; no-op click keeps redo; 64 levels after 70 edits
 PASS ASSIGN keys  LFO 1 > BD1:DECAY +50 % in slot 1, AT > BD2:TUNE in slot 2, second press cancels
@@ -825,7 +841,7 @@ SHOGUN uses these parts of it:
 | clang++ `-mfma -ffp-contract=on` | 4fc3e37230bd0a01 | 4fc3e37230bd0a01 |
 | clang++ `-mfma -ffp-contract=fast` | 126f554cd6e62129 | 126f554cd6e62129 |
 
-It does not change: that patch has no WAVE stage at amount 0 with a SYM other than 0 (BD1 SYM 2 is on a live stage, the a = 0 stages have SYM 0) and no HZ/V cable, so neither 1.1.2 output change (the WAVE amount-0 wire, the lin55 1 mV floor) reaches it. The same patch with SYM set on amount-0 stages (BD2 SYM 3 0.9, LTC SYM 3 0.2, MTC SYM 1 0.85 and VC → SYM 2 0.1 at WAVE 0, HTC SYM 2 0.7 at WAVE 0) does change, because of the WAVE amount-0 wire: 1.1.1 e995ecda8606aaa7 (g++ and clang++, contraction off; g++ FMA fast c96ac2668021ac76, clang++ FMA fast 28dfe551bf491b2d) becomes 4feda137ff4c35a9 (FMA fast 01f7a8f927921fbf / 126f554cd6e62129), the busy patch's own hashes: under 1.1.2 those SYM settings have no effect at all, as the rule says. The lin55 floor is below every playable note and is checked by testLin55Migration, not the render. The test log is byte-identical across g++ and clang++ with contraction off, g++ FMA fast and clang++ FMA on; clang++ FMA fast differs in one line (testWaveMigration max error 2.22e-16 instead of 0, the same as under 1.1.1), all checks passing in every build (339 at the re-vendor, 342 after the port change; rerun at 4d6b79f with the same hashes).
+It does not change: that patch has no WAVE stage at amount 0 with a SYM other than 0 (BD1 SYM 2 is on a live stage, the a = 0 stages have SYM 0) and no HZ/V cable, so neither 1.1.2 output change (the WAVE amount-0 wire, the lin55 1 mV floor) reaches it. The same patch with SYM set on amount-0 stages (BD2 SYM 3 0.9, LTC SYM 3 0.2, MTC SYM 1 0.85 and VC → SYM 2 0.1 at WAVE 0, HTC SYM 2 0.7 at WAVE 0) does change, because of the WAVE amount-0 wire: 1.1.1 e995ecda8606aaa7 (g++ and clang++, contraction off; g++ FMA fast c96ac2668021ac76, clang++ FMA fast 28dfe551bf491b2d) becomes 4feda137ff4c35a9 (FMA fast 01f7a8f927921fbf / 126f554cd6e62129), the busy patch's own hashes: under 1.1.2 those SYM settings have no effect at all, as the rule says. The lin55 floor is below every playable note and is checked by testLin55Migration, not the render. The test log is byte-identical across g++ and clang++ with contraction off, g++ FMA fast and clang++ FMA on; clang++ FMA fast differs in one line (testWaveMigration max error 2.22e-16 instead of 0, the same as under 1.1.1), all checks passing in every build (339 at the re-vendor, 342 after the port change; 372 after CV AMT / matrix / SRC; golden hash unchanged at 4feda137ff4c35a9 with contraction off).
 
 **Bit-identity of the wave tests.** A scratch dump program renders every sample the eight wave tests compute.
 - 1.1.1 vs the 9d6e382 build (54ff487): all eight are byte-identical, with g++ and with clang++. The per-block plan gives the same wire decisions as the old static rule for these renders, and the shared AdaaStage computes the same ADAA values on (0, 0) samples.

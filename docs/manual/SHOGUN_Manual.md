@@ -58,7 +58,7 @@ SHOGUN runs as a VST3 instrument and as a device in the JIDAI RACK. A new instan
 6. Open **GRID** to see and edit all sixteen tracks at once.
 7. Play SHOGUN from a MIDI keyboard: drums on notes 36 to 49, LEAD on channel 1, BASS on channel 2 (section 5).
 
-Loading a kit resets the clock source to INT. If you work with SRC on HOST, click SRC again after loading.
+SRC belongs to the SHOGUN instance, not to the kit: loading a kit or INIT PATCH keeps HOST, INT or EXT as you set it. Your DAW project saves and restores it with the rest of the plugin's state.
 
 ## 3. Panel reference
 
@@ -177,7 +177,7 @@ Every DECAY runs from 8 to 720 ms. Click a group's name to select its voice.
 | **ACC AMT** | 0 to 100 %, default 100 % | Accent depth for the voice. |
 | **PAN** | -100 to +100 % | Equal-power pan. |
 | **CHOKE** | OFF, 1 to 4 | Voices in the same group cut each other off. |
-| **CV AMT** | -100 to +100 %, default +100 % | Scales the voice's PITCH, DECAY and TONE jacks (drum voices). |
+| **CV AMT** | -100 to +100 %, default +100 % | Drum voices: scales the PITCH, DECAY and TONE jacks. LEAD and BASS: scales the pitch CV at NOTE and V/OCT. +100 % tracks exactly 1 V/oct, +50 % tracks half (1 V moves 6 semitones), 0 % holds NOTE at C3, negative values invert around C3. |
 
 **WAVE · TRIPLE WAVE SHAPER.** For the selected kick or tom (BD1, BD2, LTC, MTC, HTC). Three folding stages run in series. The front WAVE knob (on the voice) is a macro that brings in stage 1, then 2, then 3.
 
@@ -237,8 +237,11 @@ Parameter locks come with the factory patterns and with saved patches. A locked 
 - Click SOURCE, DEST or VIA for a menu. Per-voice sources offer OWN VOICE or a named voice.
 - Drag DEPTH sideways.
 - Click CURVE to step through the curves, ON to switch the row, **×** to clear it.
-- Click **+ add** (the SOURCE of the empty row) to start a new row. The panel lists the first ten rows in use.
+- Click **+ add** (the SOURCE of the empty row) to start a new row. It is always the last row in the list.
+- Ten rows show at a time. With more in use, a scroll bar appears at the right edge with **▲** and **▼** keys: the keys move a page of ten rows, the mouse wheel over the matrix moves one row, and the header shows which rows are in view (for example 23-32 / 32). Every row up to all 32 can be reached, edited and cleared.
 - Every row also shows as a ring on its destination knob.
+
+![MOD tab with all 32 rows in use, scrolled to rows 23 to 32](images/panel_mod_scroll.png)
 
 **PER-VOICE SOURCES** (each voice has its own): **ENV**, **VEL**, **ACC**, **RND/HIT** (a new random value per hit), **PITCH ENV**, **NOTE**. **GLOBAL SOURCES**: **RND** (a new random value every step), **MOD W** (MIDI CC 1) and **AT** (channel aftertouch).
 
@@ -261,7 +264,7 @@ Parameter locks come with the factory patterns and with saved patches. A locked 
 | **PAN** | -100 to +100 % | Equal-power pan. |
 | **OUTPUT** | MAIN, BUS A to D, AUX 1/2 to AUX 15/16, PAIR | Where the voice goes (section 7 lists the PAIR outputs). |
 | **CHOKE** | OFF, 1 to 4 | Choke group. |
-| **CV AMT** | -100 to +100 % | Scales the voice's PITCH, DECAY and TONE jacks (drum voices). |
+| **CV AMT** | -100 to +100 % | Drum voices: PITCH, DECAY and TONE jacks. LEAD and BASS: the pitch CV at NOTE and V/OCT (+100 % = exact 1 V/oct). |
 
 ### 3.9 FX/MIX tab
 
@@ -338,7 +341,7 @@ Parameter locks come with the factory patterns and with saved patches. A locked 
 | INTERFACE | **UI SCALE** 75 %, 100 %, 125 %, 150 %, 200 % | Resizes the window. You can also drag its corner. |
 | CPU & ENGINE | Meters | Load of the drum voices, LEAD and BASS, bus effects and master. |
 | CPU & ENGINE | **PANIC / ALL OFF** | Stops the sequencer and restarts the pattern. |
-| CPU & ENGINE | **INIT PATCH** | Loads INIT: default kit, empty pattern, no cables, no matrix rows. |
+| CPU & ENGINE | **INIT PATCH** | Loads INIT: default kit, empty pattern, no cables, no matrix rows. SRC stays as it is. |
 
 ## 4. Patching
 
@@ -376,7 +379,7 @@ Modulation inputs add to their knob:
 | **PITCH** (drums) | 1 V/oct on the voice's pitch, times CV AMT. |
 | **DECAY**, **TONE** (drums) | ±5 V sweeps the knob's whole range, times CV AMT. |
 | **WAVE** (BD1, BD2) | ±5 V sweeps the WAVE knob's whole range. |
-| **V/OCT** (LEAD, BASS) | 1 V/oct transposes the synth. |
+| **V/OCT** (LEAD, BASS) | 1 V/oct transposes the synth, times CV AMT. |
 | **CUTOFF** (LEAD, BASS) | 1 V/oct on the filter cutoff. |
 
 A voice's **OUT** jack carries a copy of the voice after its level and envelope, before pan. The voice stays in the mix, so to use an external effect as an insert, patch OUT to the effect and the effect back into the same voice's RET.
@@ -404,8 +407,8 @@ LEAD and BASS each have eight jacks:
 |---|---|---|---|
 | GATE | in | Gate | Starts a note on the rising edge and ends it on the falling edge. |
 | VEL | in | CV | Velocity, 0 to 5 V. 4.5 V or more is an accent. |
-| NOTE | in | 1 V/oct | The note, 0 V = C3. |
-| V/OCT | in | 1 V/oct | Transposes the synth. |
+| NOTE | in | 1 V/oct | The note, 0 V = C3, times the voice's CV AMT (+100 % = exact 1 V/oct). |
+| V/OCT | in | 1 V/oct | Transposes the synth, times the voice's CV AMT. |
 | CUTOFF | in | CV | Adds to the cutoff, 1 V/oct. |
 | RET | in | Audio | Return into the voice's mixer channel. |
 | OUT | out | Audio | The voice, post level and envelope, pre pan. |
@@ -452,6 +455,8 @@ The **SRC** key (header) and SOURCE (SEQ/MIDI) pick the clock:
 | **EXT** | Steps on rising edges at CLK IN: one step per pulse with CLK IN on STEP, or 1 to 48 pulses per quarter note. Start it with ▶ or a pulse at RUN IN. RST IN restarts the pattern. |
 
 With SRC on HOST and no host transport (for example in a host that sends no play position), SHOGUN runs on its own TEMPO with ▶.
+
+SRC is a setting of the SHOGUN instance, as on the rack. Loading a kit (from the DAW's program list, the KIT and PATTERN displays or their arrows), INIT PATCH and switching between A and B keep the current SRC. Undo and redo include SRC changes, and the DAW project saves and restores SRC with the plugin's state.
 
 CLK OUT, RST OUT and RUN OUT follow whichever source is active, so SHOGUN can clock other devices in every mode.
 
@@ -533,7 +538,7 @@ Then have your DAW rescan its plugins. SHOGUN is listed under **Martial Systems*
 ### Using it in any DAW
 
 1. Insert SHOGUN on an instrument track.
-2. Set **SRC** to **HOST** so SHOGUN plays with your DAW's transport. Set it again after loading a kit.
+2. Set **SRC** to **HOST** so SHOGUN plays with your DAW's transport. Loading kits keeps it on HOST.
 3. To play voices from MIDI, record or draw notes on the track (section 5).
 4. Pick kits from your DAW's program list or from SHOGUN's KIT display. The DAW saves the whole patch with your project: kit, pattern, cables, matrix rows and unit.
 5. Leave the DAW's plugin delay compensation on. SHOGUN reports its latency (0, 23 or 26 samples).
@@ -589,7 +594,7 @@ A voice routed to an aux output leaves the main mix. Its SEND FX still feeds the
 
 | Problem | What to check |
 |---|---|
-| SHOGUN doesn't play with my DAW | Set SRC to HOST. Loading a kit sets SRC back to INT. |
+| SHOGUN doesn't play with my DAW | Set SRC to HOST. Loading a kit keeps SRC as it is. |
 | Nothing plays on INT | Click ▶. Check that the INT/EXT switch is on INT. |
 | Nothing plays on EXT | Click ▶ (or send a pulse to RUN IN), then send pulses to CLK IN. Check the CLK IN setting (STEP or PPQN). |
 | The pattern runs but voices are silent | Check the INT/EXT switch: on EXT only TRIG and GATE jacks play the voices. Also check mute, solo and LEVEL. |

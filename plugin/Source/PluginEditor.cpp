@@ -1475,7 +1475,8 @@ void ShogunPanel::wheelAt(juce::Point<float> p, float deltaY) {
   const Bound& b = bounds_[static_cast<size_t>(bi)];
   const LayoutOp& o = kOps[b.op];
   if (b.kind == B_MATRIX) {  // wheel over the matrix scrolls it a row per notch (down = later rows)
-    if (deltaY != 0.0f) scrollMatrix(deltaY < 0.0f ? 1 : -1);
+    if (deltaY < 0.0f) scrollMatrix(1);
+    else if (deltaY > 0.0f) scrollMatrix(-1);
     return;
   }
   const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
