@@ -761,6 +761,15 @@ def cstr(s):
 HELP_NOT = {"OVERSAMPLING (offline render)", "VOICES (14 drums)"}  # section labels, not help
 
 
+# Item K: where a help line grown to 9 pt would cross its section frame or the face edge, it moves just inside.
+HELP_MOVE = {
+    "pre-VCA: ENV drives the folds": {"x": 408.0, "anchor": 0},  # under POST / PRE-VCA, now starting inside the WAVE frame
+    "audio rate, unsmoothed": {"x": 1127.0},
+    "WAVE 0 = true bypass": {"x": 1127.0},                      # kept aligned with the line above
+    "click = on → accent → off": {"y": 659.0},                  # inside the step frame, under its keys (no room between frames)
+}
+
+
 def is_help(o):
     """Item K: paragraph help, hint lines, tab notes, the matrix footer and the text under graphs: unbound plain text
     with lower-case words (3 or more). Knob, jack, key and value labels never match (caps, short, or bound)."""
@@ -801,6 +810,10 @@ def main():
                 flags |= 32
             if is_help(o):
                 flags |= 64
+                for pre, mv in HELP_MOVE.items():
+                    if o.get("text", "").startswith(pre):
+                        o.update(mv)
+                        flags = (flags & ~3) | (o.get("anchor", 0) & 3)
             out.append("  {%d, %d, %d, %s, %s, %s, %s, %s, %s, %s, 0x%08Xu, 0x%08Xu, %s, %s, %s, %s, %s, %d, %d},"
                        % (k, ti, flags, fnum(float(o.get("x", 0))), fnum(float(o.get("y", 0))), fnum(float(o.get("w", 0))),
                           fnum(float(o.get("h", 0))), fnum(float(o.get("r", 0))), fnum(float(o.get("z", 0))),
