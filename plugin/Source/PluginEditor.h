@@ -17,7 +17,7 @@ struct LayoutOp {
   int steps, ticks;
 };
 
-class ShogunPanel : public juce::Component, private juce::Timer {
+class ShogunPanel : public juce::Component, public juce::TooltipClient, private juce::Timer {
  public:
   static constexpr int kW = 1200, kH = 672, kEar = 30;
   explicit ShogunPanel(ShogunAudioProcessor& p);
@@ -47,6 +47,9 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   // ("" when none).
   bool bindRect(const char* bind, juce::Rectangle<float>& r, int nth = 0) const;
   juce::String bindAt(juce::Point<float> p) const;
+  // Tooltip of the control at a panel point ("" when none); getTooltip() asks it for the mouse position.
+  juce::String tooltipAt(juce::Point<float> p) const;
+  juce::String getTooltip() override;
   void wheelAt(juce::Point<float> p, float deltaY);
   void dragMatrixDepth(juce::Point<float> p, float dx);
   // MOD tab matrix view: entries in the list (used rows + "+ add"), the first one in view, and scrolling by rows.
@@ -67,7 +70,9 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   void paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b);
   void paintCables(juce::Graphics& g);
   void paintMatrix(juce::Graphics& g, const LayoutOp& o);
-  int findBound(juce::Point<float> p) const;  // index into bounds_, or −1
+  int findBound(juce::Point<float> p) const;
+  static int muteParam(int v);  // <V>:MUTE param id
+  bool voiceMuted(int v) const;  // index into bounds_, or −1
   void click(int bi, juce::ModifierKeys mods, juce::Point<float> p);
   void matrixClick(const LayoutOp& o, juce::Point<float> p, juce::ModifierKeys mods);
   void showProgramMenu();
@@ -118,5 +123,6 @@ class ShogunAudioProcessorEditor : public juce::AudioProcessorEditor {
 
  private:
   ShogunPanel panel_;
+  juce::TooltipWindow tips_{this, 500};
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ShogunAudioProcessorEditor)
 };

@@ -458,6 +458,51 @@ int main(int argc, char** argv) {
               (playhead ? "yes" : "NO"));
   }
 
+  // ---- VOICE tab group-key corner lights (L): kept as one-click mute toggles (user decision). During playback a click
+  // on each light mutes its whole group (the same <V>:MUTE params the GRID and FX/MIX M keys drive), the tooltip
+  // flips Mute -> Unmute, a second click unmutes; an M key press on GRID shows on the light; clicking the group's name
+  // key selects the voice without muting.
+  {
+    auto p = fresh();
+    p->setCurrentProgram(1);
+    setU(*p, "CLOCK:SOURCE", 0.5f);
+    p->requestRun(true);
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    render(*p, 24576);
+    auto muted = [&](const juce::String& v) { return p->param(findParam((v + ":MUTE").toRawUTF8()))->getValue() > 0.5f; };
+    const char* groups[] = {"BD1", "BD2", "SD+RS", "CP+CL", "CB+MA", "CH+OH+CY", "LTC+MTC+HTC", "LEAD", "BASS"};
+    const char* names[] = {"sel:BD1", "sel:BD2", "sel:SD", "sel:CP", "sel:CB", "sel:CH", "sel:LTC", "sel:LEAD", "sel:BASS"};
+    int okCount = 0;
+    juce::String bad;
+    for (int g = 0; g < 9; ++g) {
+      pn.setTab(1);
+      const juce::StringArray vs = juce::StringArray::fromTokens(groups[g], "+", "");
+      const juce::String bind = juce::String("vmute:") + groups[g];
+      juce::Rectangle<float> led;
+      bool ok = pn.bindRect(bind.toRawUTF8(), led) && pn.tooltipAt(led.getCentre()) == "Mute";
+      ok = ok && pn.clickAt(led.getCentre());
+      render(*p, 4096);
+      for (const auto& v : vs) ok = ok && muted(v);
+      ok = ok && pn.tooltipAt(led.getCentre()) == "Unmute";
+      pn.setTab(2);  // GRID: the M key of the group's first voice shows it and unmutes it
+      ok = ok && pn.pressBind(("p:" + vs[0] + ":MUTE").toRawUTF8()) && !muted(vs[0]);
+      pn.setTab(1);
+      ok = ok && pn.tooltipAt(led.getCentre()) == "Mute";  // no longer all muted -> the light is red again
+      ok = ok && pn.clickAt(led.getCentre());              // mutes the whole group again
+      for (const auto& v : vs) ok = ok && muted(v);
+      ok = ok && pn.clickAt(led.getCentre());              // and unmutes it
+      render(*p, 4096);
+      for (const auto& v : vs) ok = ok && !muted(v);
+      ok = ok && pn.pressBind(names[g]);  // the name key selects without muting
+      for (const auto& v : vs) ok = ok && !muted(v);
+      if (ok) ++okCount; else bad << " " << groups[g];
+    }
+    check(okCount == 9, "VOICE corner mute lights",
+          juce::String(okCount) + "/9 groups toggle mute during playback, synced with the GRID M keys, tooltip Mute/Unmute, "
+                                  "name key selects without muting" + (bad.isEmpty() ? juce::String() : "; failed:" + bad));
+  }
+
   // ---- MOD tab matrix past ten rows: all 32 slots in use; the view shows 10 and scrolls (▲ ▼ keys = a page, wheel =
   // a row). Every slot is reached by scrolling and edited through the panel (CURVE, ON, DEPTH drag), then rows are
   // removed with ✕ (one only reachable after scrolling) and the "+ add" row is reachable at the end of the list.

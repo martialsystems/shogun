@@ -30,7 +30,7 @@ enum B {
   B_LFORATE, B_LFOSCOPE, B_MATRIX, B_CABLES, B_JACK, B_TITLE, B_STEPINFO, B_TRACKINFO, B_TRACKSCALE, B_LOCKINFO,
   B_TRK, B_PAGE, B_COPY, B_PASTE, B_CLEAR, B_RANDOM, B_SHIFTL, B_SHIFTR, B_CLEARLOCKS, B_IDEAL, B_INITPATCH, B_PANIC,
   B_REROLL, B_SERIAL, B_LATENCY, B_RATE, B_OSBADGE, B_SP, B_WP, B_OFF, B_PROG, B_BROWSE, B_AB, B_UNDO, B_REDO, B_SRC,
-  B_ASSIGN, B_UISCALE, B_PLAYHEAD, B_STATIC
+  B_ASSIGN, B_UISCALE, B_PLAYHEAD, B_VMUTE, B_STATIC
 };
 
 int voiceIndex(const juce::String& s) {
@@ -277,7 +277,7 @@ void ShogunPanel::buildBindings() {
       {"clearlocks", B_CLEARLOCKS}, {"ideal", B_IDEAL}, {"initpatch", B_INITPATCH}, {"panic", B_PANIC},
       {"reroll", B_REROLL}, {"serial", B_SERIAL}, {"latency", B_LATENCY}, {"rate", B_RATE}, {"osbadge", B_OSBADGE},
       {"sp", B_SP}, {"wp", B_WP}, {"off", B_OFF}, {"prog", B_PROG}, {"browse", B_BROWSE}, {"ab", B_AB},
-      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE}, {"playhead", B_PLAYHEAD},
+      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE}, {"playhead", B_PLAYHEAD}, {"vmute", B_VMUTE},
   };
   for (int i = 0; i < kOpCount; ++i) {
     const LayoutOp& o = kOps[i];
@@ -304,6 +304,12 @@ void ShogunPanel::buildBindings() {
       case B_FADER:
       case B_BUS:
       case B_CVAMT: b.a = voiceIndex(rest); break;
+      case B_VMUTE: {  // voice bitmask of the group ("SD+RS")
+        b.a = 0;
+        for (const auto& v : juce::StringArray::fromTokens(rest, "+", ""))
+          if (voiceIndex(v) >= 0) b.a |= 1 << voiceIndex(v);
+        break;
+      }
       case B_GR: b.a = rest[0] - 'A'; break;
       case B_GRID:
         b.a = rest.upToFirstOccurrenceOf(":", false, false).getIntValue();
@@ -484,6 +490,17 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     }
     case B_SEL: fill = b->a == selVoice_ ? GRN.getARGB() : 0; break;
     case B_ACT: on = b->a >= 0 && vPeak_[b->a] > 1e-3f; break;
+    case B_VMUTE: {  // steady green while the group is muted, else the red activity light
+      bool muted = b->a != 0, active = false;
+      for (int v = 0; v < kVoices; ++v)
+        if ((b->a >> v) & 1) {
+          muted = muted && voiceMuted(v);
+          active = active || vPeak_[v] > 1e-3f;
+        }
+      fill = muted ? GRN.getARGB() : o.fill;
+      on = muted || active;
+      break;
+    }
     case B_STEP: {
       const int s = page_ * 16 + b->a;
       const Step& st = pat.tracks[selVoice_].steps[s];
@@ -995,6 +1012,7 @@ int ShogunPanel::findBound(juce::Point<float> p) const {
       case KEY:
       case LCD:
       case RECT: hit = juce::Rectangle<float>(o.x, o.y, o.w, o.h).contains(p); break;
+      case LED: hit = b.kind == B_VMUTE && p.getDistanceFrom({o.x, o.y}) <= o.r + 4; break;  // just the light
       case TEXT:
         hit = (b.kind == B_TABTEXT) && std::fabs(p.x - o.x) < 28 && p.y > o.y - 14 && p.y < o.y + 6;
         break;
@@ -1008,7 +1026,7 @@ int ShogunPanel::findBound(juce::Point<float> p) const {
       case B_RANDOM: case B_SHIFTL: case B_SHIFTR: case B_CLEARLOCKS: case B_IDEAL: case B_INITPATCH: case B_PANIC:
       case B_REROLL: case B_SP: case B_WP: case B_CLIPLED: case B_FADER: case B_DISP: case B_KIT: case B_PATTERN:
       case B_OSBADGE: case B_PROG: case B_BROWSE: case B_AB: case B_UNDO: case B_REDO: case B_SRC: case B_ASSIGN:
-      case B_UISCALE:
+      case B_UISCALE: case B_VMUTE:
         return *it;
       default: break;
     }
@@ -1054,6 +1072,34 @@ bool ShogunPanel::pressBind(const char* bind, bool right, bool shift, int nth) {
     return true;
   }
   return false;
+}
+
+int ShogunPanel::muteParam(int v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%s:MUTE", kVoiceNames[v]);
+  return findParam(buf);
+}
+
+bool ShogunPanel::voiceMuted(int v) const {
+  const int id = muteParam(v);
+  return id >= 0 && proc_.param(id)->getValue() > 0.5f;
+}
+
+juce::String ShogunPanel::tooltipAt(juce::Point<float> p) const {
+  const int bi = findBound(p);
+  if (bi < 0) return {};
+  const Bound& b = bounds_[static_cast<size_t>(bi)];
+  if (b.kind == B_VMUTE) {
+    bool all = b.a != 0;
+    for (int v = 0; v < kVoices; ++v)
+      if ((b.a >> v) & 1) all = all && voiceMuted(v);
+    return all ? "Unmute" : "Mute";
+  }
+  return {};
+}
+
+juce::String ShogunPanel::getTooltip() {
+  return tooltipAt(getMouseXYRelative().toFloat().transformedBy(panelTransform().inverted()));
 }
 
 bool ShogunPanel::bindRect(const char* bind, juce::Rectangle<float>& r, int nth) const {
@@ -1205,6 +1251,17 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
     case B_CHOICE:
       proc_.setParamU(b.a, static_cast<float>(stepU(b.b, kParams[b.a].steps)));
       break;
+    case B_VMUTE: {  // toggle the group's mute (the same <V>:MUTE params the GRID / FX-MIX M keys drive)
+      bool all = b.a != 0;
+      for (int v = 0; v < kVoices; ++v)
+        if ((b.a >> v) & 1) all = all && voiceMuted(v);
+      for (int v = 0; v < kVoices; ++v)
+        if ((b.a >> v) & 1) {
+          const int id = muteParam(v);
+          if (id >= 0) proc_.setParamU(id, all ? 0.0f : 1.0f);
+        }
+      break;
+    }
     case B_SEL:
       selVoice_ = b.a;
       if (mods.isAltDown() || tab_ == 0) proc_.pushPad(b.a);  // MAIN select keys also audition

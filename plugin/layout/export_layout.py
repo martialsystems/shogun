@@ -221,7 +221,8 @@ def bind_voice_block(ops, y0, y1):
             o["lit"] = 0
             continue
         if k == "LED" and sec and abs(o["y"] - (y0 + 8)) < 0.5:
-            o["bind"] = "act:" + o_bind_voice(sec)
+            # the group key's corner light: red = activity, steady green = muted; a click toggles the group's mute
+            o["bind"] = "vmute:" + "+".join(VOICE_GROUPS[sec])
             continue
         if sec is None:
             continue
@@ -255,6 +256,11 @@ def bind_voice_block(ops, y0, y1):
 
 def t2(o):
     return o.get("text2", "")
+
+
+VOICE_GROUPS = {"BD 1": ["BD1"], "BD 2": ["BD2"], "SNARE · RIM": ["SD", "RS"], "CLAP · CLAVES": ["CP", "CL"],
+                "CB · MA": ["CB", "MA"], "HATS · CYMBAL": ["CH", "OH", "CY"], "TOMS · CONGAS": ["LTC", "MTC", "HTC"],
+                "LEAD": ["LEAD"], "BASS": ["BASS"]}
 
 
 def o_bind_voice(sec):
