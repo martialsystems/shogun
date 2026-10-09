@@ -229,6 +229,7 @@ void Engine::reset() {
   for (auto& e : events_) e.live = false;
   sample_ = 0;
   running_ = wasRunning_ = false;
+  previewing_ = false;
   ppq_ = intPpq_ = 0.0;
   hostOffset_ = 0;
   for (int t = 0; t < 16; ++t) {
@@ -399,11 +400,29 @@ void Engine::clockSample(const float* in, const bool* con) {
 
   bool run = running_;
   double ppq = 0.0;
-  if (hostMode) {
+  if (hostMode && running_ && !host_.playing) {
+    // ▶ with the host stopped: an internal preview at the host's tempo (the INT clock from the press), until the host
+    // starts and takes over.
+    previewing_ = true;
+    if (!dsp::exactEq(bpm, intAnchorBpm_)) {
+      intAnchorPpq_ = intPpq_;
+      intAnchorSample_ = sample_;
+      intAnchorBpm_ = bpm;
+    }
+    ppq = intAnchorPpq_ + static_cast<double>(sample_ - intAnchorSample_) * bpm / (60.0 * fs_);
+    intPpq_ = ppq;
+    ++hostOffset_;
+  } else if (hostMode) {
+    if (previewing_ && host_.playing) {  // the host started: the preview ends, the host's transport drives
+      running_ = false;
+      wasRunning_ = false;
+    }
+    previewing_ = false;  // (or ▶ stopped it: the stop below runs as usual)
     run = host_.playing;
     ppq = host_.ppq + hostOffset_ * bpm / (60.0 * fs_);
     ++hostOffset_;
   } else if (src == SRC_EXT) {
+    previewing_ = false;
     if (run && clkEdge) {
       if (lastClkEdge_ >= 0) extPeriod_ = static_cast<double>(sample_ - lastClkEdge_);
       lastClkEdge_ = sample_;
@@ -413,6 +432,7 @@ void Engine::clockSample(const float* in, const bool* con) {
     const double perQ = mode == 0 ? spqG : kPpqn[mode];
     ppq = extCount_ > 0 ? static_cast<double>(extCount_ - 1) / perQ : -1.0;
   } else {
+    previewing_ = false;
     if (!dsp::exactEq(bpm, intAnchorBpm_)) {
       intAnchorPpq_ = intPpq_;
       intAnchorSample_ = sample_;
@@ -576,6 +596,7 @@ void Engine::fireDue(const float* in, const bool* con) {
       }
       continue;
     }
+    if (tapPlayed_ && e.pattern && nPlayed_ < kPlayedMax) played_[nPlayed_++] = {sample_, e.voice, e.kind, e.acc, static_cast<int>(std::lround(e.note)), e.tie};
     fireEvent(e, in, con);
   }
   nEvents_ = top;

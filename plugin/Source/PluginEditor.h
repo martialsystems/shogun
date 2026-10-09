@@ -4,6 +4,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <functional>
+
 #include "PluginProcessor.h"
 
 struct LayoutOp {
@@ -15,6 +17,31 @@ struct LayoutOp {
   const char* text2;
   const char* bind;
   int steps, ticks;
+};
+
+// Item J: the ⌕ program search, a small popup: a text box filters the factory programs by name (or number); Enter
+// or a click loads one.
+class ProgramSearch : public juce::Component, private juce::ListBoxModel, private juce::TextEditor::Listener {
+ public:
+  explicit ProgramSearch(ShogunAudioProcessor& p);
+  static std::vector<int> filter(const juce::String& query);  // matching program indices, bank order
+  void setQuery(const juce::String& q);                        // (probe) as if typed
+  bool pressReturn();                                          // (probe) Enter: loads the selected / first match
+  int matches() const { return static_cast<int>(rows_.size()); }
+  void resized() override;
+
+ private:
+  int getNumRows() override { return static_cast<int>(rows_.size()); }
+  void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) override;
+  void listBoxItemClicked(int row, const juce::MouseEvent&) override { load(row); }
+  void returnKeyPressed(int) override { pressReturn(); }
+  void textEditorTextChanged(juce::TextEditor&) override { setQuery(box_.getText()); }
+  void textEditorReturnKeyPressed(juce::TextEditor&) override { pressReturn(); }
+  void load(int row);
+  ShogunAudioProcessor& proc_;
+  juce::TextEditor box_;
+  juce::ListBox list_;
+  std::vector<int> rows_;
 };
 
 class ShogunPanel : public juce::Component, public juce::TooltipClient, private juce::Timer {
@@ -49,6 +76,36 @@ class ShogunPanel : public juce::Component, public juce::TooltipClient, private 
   juce::String bindAt(juce::Point<float> p) const;
   // Tooltip of the control at a panel point ("" when none); getTooltip() asks it for the mouse position.
   juce::String tooltipAt(juce::Point<float> p) const;
+  // Repaint-only-what-changed (probe / bench): run the timer's work once and return the dirty rects (component px) it
+  // repainted; an empty list when nothing on the tab changed. refreshDirty() is the same, used after edits.
+  juce::RectangleList<int> tickForTest();
+  juce::RectangleList<int> refreshDirty();
+  // Press feedback (probe): mouse down / up on a panel point as mouseDown / mouseUp would, and a test clock (ms, -1 =
+  // the real one) so the 120 ms release flash can be stepped.
+  void pressAt(juce::Point<float> p, juce::ModifierKeys mods = {});
+  void releaseAt(juce::Point<float> p);
+  void setTestClockMs(double ms) { testClockMs_ = ms; }
+  bool flashActive() const { return !flashes_.empty(); }
+  bool timerOn() const { return isTimerRunning(); }
+  juce::File exportPatternMidi();  // the current pattern as a .mid in the temp folder (drag-out, probe)
+  // Probe: record menus instead of showing them; the last one's items / ticks; pick an item by its text; answer the
+  // pending "Type …" prompt.
+  struct MenuCapture {
+    juce::StringArray items;
+    std::vector<int> ids;
+    std::vector<bool> ticked;
+    std::function<void(int)> cb;
+  };
+  void setCaptureMenus(bool on) { captureMenus_ = on; }
+  const MenuCapture& lastMenu() const { return lastMenu_; }
+  int menusOpened() const { return menusOpened_; }
+  bool pickMenuItem(const juce::String& text);
+  bool typeForTest(double v);
+  std::vector<juce::String> clickableBinds() const;  // every clickable bound on this tab (bind, "|K" = knob)
+  void flashBind(int kind);  // item M flash on the first bound of a kind on this tab (keyboard undo / redo / ▶)
+  static int kindUndo(), kindRedo(), kindRun();
+  void visibilityChanged() override;
+  void parentHierarchyChanged() override;
   juce::String getTooltip() override;
   void wheelAt(juce::Point<float> p, float deltaY);
   void dragMatrixDepth(juce::Point<float> p, float dx);
@@ -76,6 +133,25 @@ class ShogunPanel : public juce::Component, public juce::TooltipClient, private 
   void click(int bi, juce::ModifierKeys mods, juce::Point<float> p);
   void matrixClick(const LayoutOp& o, juce::Point<float> p, juce::ModifierKeys mods);
   void showProgramMenu();
+  void showSearch();
+  // List controls (rule 3): right-click = the whole list as a menu (current ticked), left = next, shift-left = back;
+  // long lists (10+ items) open the menu on left-click too. TEMPO / A4 / LEN readouts open their value menus.
+  struct ListCtl {
+    juce::StringArray items;
+    int cur = -1;
+    std::function<void(int)> set;
+    bool longList = false;
+  };
+  bool listFor(const Bound& b, int pid, const LayoutOp& o, juce::Point<float> p, ListCtl& L);
+  bool handleListClick(int bi, int pid, juce::ModifierKeys mods, juce::Point<float> p);
+  void showList(const ListCtl& L);
+  void showTempoMenu();
+  void showA4Menu();
+  void showValueMenu(int pid);
+  void showLenMenu(int track);
+  void typeValue(const juce::String& title, const juce::String& range, std::function<void(double)> apply);
+  void openMenu(juce::PopupMenu m, std::function<void(int)> cb);
+  std::function<void(double)> pendingType_;
   bool assignTo(int pid);
   int uiScalePercent() const;
   int selWaveVoice() const;
@@ -110,18 +186,57 @@ class ShogunPanel : public juce::Component, public juce::TooltipClient, private 
   std::array<shogun::Step, shogun::kMaxSteps> clipboard_{};
   int clipLen_ = 0;
   int armedSrc_ = 0;   // ASSIGN: the armed mod source (mod::SRC_*), 0 = none
+  bool captureMenus_ = false;
+  MenuCapture lastMenu_;
+  int menusOpened_ = 0;
   int menuOpen_ = 0;   // async popup menus still open (their callbacks settle the undo step)
   juce::String lastText_;  // the text paintOp drew last (boundText)
+  // Dirty tracking: paintOp in resolve mode (sig_ set) hashes what it would draw and where, without drawing.
+  struct Sig {
+    std::uint64_t h = 1469598103934665603ull;
+    juce::Rectangle<float> r;  // panel units
+    bool full = false;         // change repaints the whole panel (cables)
+  };
+  Sig* sig_ = nullptr;
+  std::vector<std::uint64_t> sigH_;
+  std::vector<juce::Rectangle<int>> sigR_;
+  std::vector<char> sigOk_;
+  int sigTab_ = -1;
+  juce::Image sigImg_{juce::Image::ARGB, 1, 1, true};
+  juce::RectangleList<int> collectDirty();
+  juce::Rectangle<float> opExtent(const LayoutOp& o, float x, float y, float w, float h, const juce::String& t) const;
+  // Press feedback (item M): the bound held down, and release flashes (bound, start ms) decaying over 120 ms.
+  int pressedBi_ = -1;
+  std::vector<std::pair<int, double>> flashes_;
+  double testClockMs_ = -1.0;
+  double nowMs() const;
+  int pressLevel(int bi) const;  // -1 pressed, 1..8 flash, 0 none
+  void updateTimer();
 };
 
-class ShogunAudioProcessorEditor : public juce::AudioProcessorEditor {
+class ShogunAudioProcessorEditor : public juce::AudioProcessorEditor, private juce::KeyListener {
  public:
   explicit ShogunAudioProcessorEditor(ShogunAudioProcessor& p);
+  ~ShogunAudioProcessorEditor() override;
   void resized() override;
   void paint(juce::Graphics&) override {}
   ShogunPanel& panel() { return panel_; }
+  // Item Q: after the host window is moved, collapsed / restored or the editor re-parented, the editor goes back to
+  // 0,0 in its host view and re-runs the layout path the UI-scale keys use (recursion-guarded).
+  void moved() override;
+  void parentSizeChanged() override;
+  void visibilityChanged() override;
+  void parentHierarchyChanged() override;
+  void reanchor();
+  // Keys (items G / N / P), heard through a listener on the top-level window so the editor never needs to grab
+  // keyboard focus: Cmd/Ctrl-Z undo, Cmd/Ctrl-Shift-Z or -Y redo, space = SHOGUN's ▶ unless the host's transport is
+  // rolling. Everything else returns false and goes on to the host. Public for the probe.
+  bool handleKey(const juce::KeyPress& key);
 
  private:
+  bool keyPressed(const juce::KeyPress& key, juce::Component*) override { return handleKey(key); }
+  juce::Component* keyTop_ = nullptr;
+  bool anchoring_ = false;
   ShogunPanel panel_;
   juce::TooltipWindow tips_{this, 500};
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ShogunAudioProcessorEditor)

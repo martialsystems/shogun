@@ -5,6 +5,7 @@
 // Allocation happens only in prepare(). processSample() is the per-sample contract shared by jidai-rack
 // (ShogunDevice, §13.4), the plugin and the web build.
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 
@@ -85,6 +86,24 @@ class Engine {
   void setHostTransport(const HostTransport& t);  // call at each block start (SOURCE = HOST)
   void setRunning(bool run);
   bool running() const { return running_; }
+  bool previewing() const { return previewing_; }
+  bool sequencing() const { return wasRunning_; }
+  // MIDI out tap (plugin): every pattern hit that actually plays (after probability, with ratchets / flams / micro-
+  // timing as scheduled), at the sample it fires. Reading it never changes the audio.
+  struct Played {
+    std::int64_t at;  // absolute sample index (sampleIndex() at the hit)
+    int voice, kind, acc, note;  // kind 0 drum hit, 1 synth note on, 2 synth rest
+    bool tie;
+  };
+  static constexpr int kPlayedMax = 512;
+  void setPlayedTap(bool on) { tapPlayed_ = on; nPlayed_ = 0; }
+  int takePlayed(Played* out, int max) {
+    const int n = std::min(nPlayed_, max);
+    for (int i = 0; i < n; ++i) out[i] = played_[i];
+    nPlayed_ = 0;
+    return n;
+  }
+  std::int64_t sampleIndex() const { return sample_; }  // the pattern is running (or armed, EXT) after the last sample
   void restart();                       // position to step 1, keeps running
   std::int64_t counter() const { return counter_; }  // clock steps fired since start
   int displayStep() const { return displayStep_; }   // 1-based step of the bar
@@ -310,6 +329,10 @@ class Engine {
   int nEvents_ = 0;
   std::int64_t sample_ = 0;  // absolute base-sample index
   bool running_ = false, wasRunning_ = false;
+  bool previewing_ = false;
+  bool tapPlayed_ = false;
+  int nPlayed_ = 0;
+  Played played_[kPlayedMax];  // ▶ preview while the host is stopped (SRC HOST)
   double ppq_ = 0.0;         // song position of the current sample
   double intPpq_ = 0.0, intAnchorPpq_ = 0.0, intAnchorBpm_ = 120.0;
   std::int64_t intAnchorSample_ = 0;

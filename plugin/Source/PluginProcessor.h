@@ -28,7 +28,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::Timer {
 
   const juce::String getName() const override { return "SHOGUN"; }
   bool acceptsMidi() const override { return true; }
-  bool producesMidi() const override { return false; }
+  bool producesMidi() const override { return true; }  // MIDI out of every played step (item 2b)
   bool isMidiEffect() const override { return false; }
   double getTailLengthSeconds() const override { return 2.0; }
 
@@ -124,6 +124,7 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::Timer {
     std::atomic<float> peakL{0}, peakR{0}, cpu{0};
     std::atomic<int> step{1}, globalStep{0};
     std::atomic<bool> running{false}, clip{false};
+    std::atomic<bool> hostPlaying{false}, previewing{false};  // host transport rolling; ▶ preview (SRC HOST, host stopped)
     std::array<std::atomic<float>, shogun::kVoices> voicePeak{};
     std::array<std::atomic<bool>, shogun::kVoices> voiceActive{};
     std::array<std::atomic<float>, 4> busGr{};
@@ -152,6 +153,15 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::Timer {
   std::vector<float> last_;
   int currentProgram_ = 0;
   std::atomic<bool> snapParams_{false};  // next block sets parameters without smoothing (program change)
+  void emitMidiOut(juce::MidiBuffer& midi, std::int64_t blockStart, int n);
+  struct PendingOff {
+    std::int64_t at;
+    int ch, note;
+  };
+  static constexpr int kMaxPendingOff = 64;
+  PendingOff pendingOff_[kMaxPendingOff]{};
+  int nPendingOff_ = 0;
+  int synthNote_[2] = {-1, -1};
   std::atomic<int> loading_{0};          // a program load / state recall is between its reset and its values
   std::atomic<bool> applyAll_{false};    // next block re-applies every parameter (program change)
   struct LoadGuard {

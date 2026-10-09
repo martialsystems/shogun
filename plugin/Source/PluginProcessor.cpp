@@ -426,6 +426,73 @@ void ShogunAudioProcessor::handleMidi(const juce::MidiMessage& m) {
   }
 }
 
+// MIDI out (item 2b): every step SHOGUN plays, sample-accurate, on the same map as MIDI in — drums on channel 10,
+// notes 36 + voice (BD1 36 … HTC 49); LEAD on channel 1 and BASS on channel 2 at the step's note. Velocity follows the
+// accent (soft 70, on 100, accent 127). A drum note ends half a step later (or just before its next hit); a synth
+// note ends at its next step unless tied; everything ends when the pattern stops.
+void ShogunAudioProcessor::emitMidiOut(juce::MidiBuffer& midi, std::int64_t blockStart, int n) {
+  static constexpr int kVel[4] = {0, 70, 100, 127};
+  Engine::Played pl[Engine::kPlayedMax];
+  const int np = engine_->takePlayed(pl, Engine::kPlayedMax);
+  auto offsetOf = [&](std::int64_t at) { return static_cast<int>(std::clamp<std::int64_t>(at - blockStart, 0, n - 1)); };
+  auto endPending = [&](int ch, int note, int off) {
+    for (int k = 0; k < nPendingOff_; ++k)
+      if (pendingOff_[k].ch == ch && pendingOff_[k].note == note) {
+        midi.addEvent(juce::MidiMessage::noteOff(ch, note), off);
+        pendingOff_[k] = pendingOff_[--nPendingOff_];
+        return;
+      }
+  };
+  for (int i = 0; i < np; ++i) {
+    const Engine::Played& h = pl[i];
+    // due offs before this hit
+    for (int k = 0; k < nPendingOff_;) {
+      if (pendingOff_[k].at <= h.at) {
+        midi.addEvent(juce::MidiMessage::noteOff(pendingOff_[k].ch, pendingOff_[k].note), offsetOf(pendingOff_[k].at));
+        pendingOff_[k] = pendingOff_[--nPendingOff_];
+      } else {
+        ++k;
+      }
+    }
+    const int off = offsetOf(h.at);
+    const int acc = std::clamp(h.acc, 1, 3);
+    if (h.kind == 0 && isDrum(h.voice)) {
+      const int note = 36 + h.voice;
+      endPending(10, note, off);
+      midi.addEvent(juce::MidiMessage::noteOn(10, note, static_cast<juce::uint8>(kVel[acc])), off);
+      if (nPendingOff_ < kMaxPendingOff)
+        pendingOff_[nPendingOff_++] = {h.at + std::max<std::int64_t>(1, std::llround(0.5 * engine_->periodSamples())), 10, note};
+    } else if (h.voice == LEAD || h.voice == BASS) {
+      const int s = h.voice == LEAD ? 0 : 1, ch = s + 1;
+      const int note = std::clamp(h.note, 0, 127);
+      if (h.kind == 1 && h.tie && synthNote_[s] == note) continue;  // tied: the note carries on
+      if (synthNote_[s] >= 0) midi.addEvent(juce::MidiMessage::noteOff(ch, synthNote_[s]), off);
+      synthNote_[s] = -1;
+      if (h.kind == 1) {
+        midi.addEvent(juce::MidiMessage::noteOn(ch, note, static_cast<juce::uint8>(kVel[acc])), off);
+        synthNote_[s] = note;
+      }
+    }
+  }
+  for (int k = 0; k < nPendingOff_;) {  // offs due in this block
+    if (pendingOff_[k].at < blockStart + n) {
+      midi.addEvent(juce::MidiMessage::noteOff(pendingOff_[k].ch, pendingOff_[k].note), offsetOf(pendingOff_[k].at));
+      pendingOff_[k] = pendingOff_[--nPendingOff_];
+    } else {
+      ++k;
+    }
+  }
+  if (!engine_->sequencing()) {  // stopped: nothing hangs
+    for (int k = 0; k < nPendingOff_; ++k) midi.addEvent(juce::MidiMessage::noteOff(pendingOff_[k].ch, pendingOff_[k].note), 0);
+    nPendingOff_ = 0;
+    for (int s = 0; s < 2; ++s)
+      if (synthNote_[s] >= 0) {
+        midi.addEvent(juce::MidiMessage::noteOff(s + 1, synthNote_[s]), 0);
+        synthNote_[s] = -1;
+      }
+  }
+}
+
 void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
   juce::ScopedNoDenormals noDenormals;
   const int n = buffer.getNumSamples();
@@ -484,6 +551,8 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     aux[b - 1][1] = bb.getWritePointer(1);
   }
 
+  engine_->setPlayedTap(true);  // MIDI out: the hits this block plays
+  const std::int64_t blockStart = engine_->sampleIndex();
   float pkL = 0.0f, pkR = 0.0f;
   float vpk[kVoices] = {};
   auto it = midi.cbegin();
@@ -512,6 +581,7 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     ++it;
   }
   midi.clear();
+  emitMidiOut(midi, blockStart, n);
 
   // Meters (relaxed; the editor decays them).
   auto maxStore = [](std::atomic<float>& a, float v) {
@@ -528,7 +598,9 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     meters.lfo[static_cast<size_t>(l)].store(static_cast<float>(engine_->modulation().lfo[l].value(-1)));
   meters.step.store(engine_->displayStep(), std::memory_order_relaxed);
   meters.globalStep.store(static_cast<int>(engine_->globalStep()), std::memory_order_relaxed);
-  meters.running.store(engine_->running(), std::memory_order_relaxed);
+  meters.running.store(engine_->running() || engine_->sequencing(), std::memory_order_relaxed);
+  meters.hostPlaying.store(ht.valid && ht.playing, std::memory_order_relaxed);
+  meters.previewing.store(engine_->previewing(), std::memory_order_relaxed);
   if (engine_->clipOver()) meters.clip.store(true, std::memory_order_relaxed);
   const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
   const double budget = 1000.0 * n / sr_;
