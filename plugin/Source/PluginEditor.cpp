@@ -778,14 +778,14 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     case B_SEL: fill = b->a == selVoice_ ? GRN.getARGB() : 0; break;
     case B_ACT: on = b->a >= 0 && vPeak_[b->a] > 1e-3f; break;
     case B_VMUTE: {  // steady green while the group is muted, else the red activity light
-      bool muted = b->a != 0, active = false;
+      bool groupMuted = b->a != 0, groupActive = false;
       for (int v = 0; v < kVoices; ++v)
         if ((b->a >> v) & 1) {
-          muted = muted && voiceMuted(v);
-          active = active || vPeak_[v] > 1e-3f;
+          groupMuted = groupMuted && voiceMuted(v);
+          groupActive = groupActive || vPeak_[v] > 1e-3f;
         }
-      fill = muted ? GRN.getARGB() : o.fill;
-      on = muted || active;
+      fill = groupMuted ? GRN.getARGB() : o.fill;
+      on = groupMuted || groupActive;
       break;
     }
     case B_STEP: {
@@ -1639,10 +1639,10 @@ void ShogunPanel::openMenu(juce::PopupMenu m, std::function<void(int)> cb) {
   juce::Component::SafePointer<ShogunPanel> safe(this);
   ++menuOpen_;
   m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(),
-                  [safe, cb = std::move(cb)](int r) {
+                  [safe, done = std::move(cb)](int r) {
                     if (safe == nullptr) return;  // the editor may be gone by the time the menu closes
                     --safe->menuOpen_;            // the timer settles the undo step now
-                    if (r != 0) cb(r);
+                    if (r != 0) done(r);
                     safe->repaint();
                   });
 }

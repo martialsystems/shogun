@@ -261,6 +261,7 @@ class ShogunAudioProcessorEditor : public juce::AudioProcessorEditor, private ju
   bool handleKey(const juce::KeyPress& key);
 
  private:
+  using juce::Component::keyPressed;  // the KeyListener overload below does not hide Component's (strict)
   bool keyPressed(const juce::KeyPress& key, juce::Component*) override { return handleKey(key); }
   juce::Component* keyTop_ = nullptr;
   bool anchoring_ = false;

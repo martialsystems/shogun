@@ -1005,7 +1005,7 @@ int main(int argc, char** argv) {
       return img;
     };
     struct Shot { int tab; const char* bind; const char* name; };
-    for (const Shot& s : {Shot{3, "disp:CLOCK:TEMPO", "k_mod_tempo_menu"}, Shot{7, "src", "k_global_src_menu"}}) {
+    for (const Shot& s : {Shot{3, "disp:CLOCK:TEMPO", "k_mod_tempo_menu"}, Shot{7, "src", "k_global_src_menu"}, Shot{2, "len:0", "k_grid_len_menu"}}) {
       pn.setTab(s.tab);
       pn.setLegacyTextForTest(true);
       const juce::Image before = panelImage();

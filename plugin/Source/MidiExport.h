@@ -48,7 +48,7 @@ inline juce::MidiFile patternToMidi(const Pattern& pat, double bpm, double globa
     for (long k = 0; k < steps; ++k) {
       const Step& st = tr.steps[k % len];
       if (!st.on) continue;
-      double at = static_cast<double>(k) * stepT + st.micro * stepT + tr.shift * 30.0 * ticksPerMs;
+      double at = static_cast<double>(k) * stepT + static_cast<double>(st.micro) * stepT + static_cast<double>(tr.shift) * 30.0 * ticksPerMs;
       if ((k & 1) == 1) at += (2.0 * sw - 1.0) * stepT;
       at = std::max(0.0, at);
       const auto vel = static_cast<juce::uint8>(velocityFor(st.acc));

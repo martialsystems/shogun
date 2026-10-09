@@ -449,7 +449,7 @@ static void testBd1DriveToZeroBounded() {
       if (h == 4) e.setParam(P_BD1_DRIVE, 0.0005);
       e.trigger(BD1, 5.0, 0.0, 3);
       for (long i = 0; i < 24000; ++i) {
-        if (h >= 4) e.setExternalInput(drumPort(BD1, DJ_TONE), static_cast<float>(5.0 * std::sin(i * 0.001)), true);
+        if (h >= 4) e.setExternalInput(drumPort(BD1, DJ_TONE), static_cast<float>(5.0 * std::sin(static_cast<double>(i) * 0.001)), true);
         e.processSample();
         const double v = std::fabs(e.voiceOut(BD1)), m = std::fmax(std::fabs(e.mainL()), std::fabs(e.mainR()));
         finite = finite && std::isfinite(v) && std::isfinite(m);
