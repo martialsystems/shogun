@@ -51,8 +51,8 @@ SHOGUN runs as a VST3 instrument and as a device in the JIDAI RACK. A new instan
 1. Insert SHOGUN on an instrument track in your DAW (section 7).
 2. Click the **⌕** key next to KIT and pick a kit, for example **002 Deep Round Kick House**. The kit and its pattern load together.
 3. Choose a clock with the **SRC** key in the header:
-   - **HOST** plays while your DAW plays, locked to the song position. Press play in the DAW.
-   - **INT** runs on SHOGUN's own TEMPO. Click **▶** to start and stop.
+   - **HOST** plays while your DAW plays, locked to the song position. Press play in the DAW. With the DAW stopped, **▶ PLAY** previews the pattern at the DAW's tempo until the DAW starts.
+   - **INT** runs on SHOGUN's own TEMPO. Click **▶ PLAY** to start and stop, or press the space bar while the SHOGUN window has focus.
 4. Turn the voice knobs on the **MAIN** tab. Click a voice name (BD1, SD and so on) to select it and hear it.
 5. Edit the selected voice's steps in the STEPS row: click a step to turn it on or off, shift-click for an accent.
 6. Open **GRID** to see and edit all sixteen tracks at once.
@@ -71,8 +71,12 @@ The panel is 1200 × 672 points with eight tabs: MAIN, VOICE, GRID, MOD, ROUTE, 
 | Drag a knob up or down | Changes its value. Hold **Shift** for fine control (4× finer). |
 | Mouse wheel over a knob | Small steps. |
 | Double-click a knob | Returns it to its default (the INIT kit value). |
-| Click a key or display | Steps to the next choice. Toggles flip. |
-| Right-click a key or display | Steps back one choice. |
+| Click a key or display | Steps to the next choice. Toggles flip. Lists of 10 or more choices open as a menu instead. |
+| Shift-click a key or display | Steps back one choice. |
+| Right-click a key or display | Opens the full list as a menu, with the current choice ticked. |
+| Click a knob's value readout | Opens a menu of values (TEMPO and A4 have their own presets and a typed entry). |
+| **Cmd-Z** / **Ctrl-Z** | Undo. **Cmd-Shift-Z** or **Cmd-Y** (**Ctrl-Shift-Z** or **Ctrl-Y**) redo. These work while the SHOGUN window has focus; some DAWs keep these keys for themselves, and the **↶ ↷** keys always work. |
+| Space bar | Starts and stops **▶ PLAY** while the SHOGUN window has focus. While the DAW's transport plays, the space bar goes to the DAW. |
 | Click a tab | Shows that tab. |
 
 Every sound, mixer, clock and global control is a plugin parameter (454 in all), so your DAW can automate it. Knob moves, step edits, cable changes and kit loads can all be undone.
@@ -88,22 +92,22 @@ Every sound, mixer, clock and global control is a plugin parameter (454 in all),
 | PATTERN **◀ ▶** | The same program steps as the KIT arrows. Every program is a kit with its matching pattern. |
 | **⌕** | Opens the program list. |
 | **A** / **B** | Compare two versions of the whole patch. Click a slot to switch to it (the first visit to B starts as a copy of A). Right-click or shift-click a slot to copy the other slot onto it. |
-| **↶** / **↷** | Undo and redo, 64 levels. |
+| **↶** / **↷** | Undo and redo, 64 levels. Also Cmd-Z / Ctrl-Z and Cmd-Shift-Z / Ctrl-Y (section 3.1). |
 
 ### 3.3 CLOCK, SYNC and MASTER strip
 
 | Control | Range | What it does |
 |---|---|---|
-| **▶** | | Starts and stops the sequencer when SRC is INT or EXT. |
+| **▶ PLAY** | | In the TRANSPORT group. INT: starts and stops the sequencer. HOST with the DAW stopped: plays a preview at the DAW's tempo, and the DAW takes over when it starts. EXT: arms the sequencer for CLK IN. The light next to it shows that it is running. The space bar does the same while the SHOGUN window has focus. |
 | **RST** | | Restarts the pattern from step 1. |
 | **INT / EXT** switch | INT, EXT | Where the voices are played from. **INT**: the pattern plays the voices. **EXT**: only the TRIG and GATE jacks play them (section 4). |
-| **TEMPO** | 40 to 200 BPM, default 120 | SHOGUN's own tempo. With SRC on HOST, the host tempo is used. |
+| **TEMPO** | 40 to 200 BPM, default 120 | SHOGUN's own tempo. With SRC on HOST, the host tempo is used. Click the readout for a menu of tempos, **Type tempo…** and **Sync to DAW**. Picking a tempo while SRC is HOST switches SRC to INT. |
 | **SWING** | 50 to 75 %, default 50 % | Delays every second step. 50 % is straight. |
 | **SCALE** | 1/32, 1/16, 1/8T, 1/8 | Step length for tracks set to GLOBAL. Default 1/16. |
 | **BAR** | 1 to 32 steps, default 16 | Bar length in steps. Sets the STEP/BAR count, the RST OUT pulse and LFO bar restarts. |
 | **STEP / BAR** | | Bar and step position, with a run light. |
 | **CLK IN** display | STEP, 1, 2, 4, 24, 48 PPQN | How SHOGUN reads pulses at CLK IN when SRC is EXT: one pulse per step, or 1 to 48 pulses per quarter note. |
-| **SRC** | HOST, INT, EXT | The clock source (section 5). Click for the next, right-click for the previous. |
+| **SRC** | HOST, INT, EXT | The clock source (section 5). Click for the next, shift-click for the previous, right-click for the list. |
 | **ACCENT** | 0 to 100 %, default 100 % | How much velocity and accent change the level. At 0 every hit plays at full level. |
 | **DRIVE** | OFF to +24 dB | Master drive. |
 | **VOLUME** | -inf to +6 dB, default 0 dB | Master volume. |
@@ -113,7 +117,7 @@ Every sound, mixer, clock and global control is a plugin parameter (454 in all),
 
 ![MAIN tab](images/panel_main.png)
 
-**VOICES.** Three knobs per voice, with the voice's name key on top. Click a name key to select the voice and audition it. The knobs are each voice's most used controls:
+**VOICES.** Three knobs per voice, with the voice's name key on top. Click a name key to select the voice and audition it. The red light under each name key flashes when the voice plays. The knobs are each voice's most used controls:
 
 | Voice | Knobs |
 |---|---|
@@ -128,7 +132,7 @@ Every sound, mixer, clock and global control is a plugin parameter (454 in all),
 
 | Control | What it does |
 |---|---|
-| Step keys | Click: step on or off. Shift-click: step on and toggle its accent. Right-click: select the step without changing it. |
+| Step keys | Click: step on or off. Shift-click: step on and toggle its accent. Right-click: select the step without changing it. Clicking a step past the track's length turns it on and extends the length to that step. |
 | Track display | The selected track and its length. |
 | **1-16** / **17-32** | Shows the first or second half of a 32-step track. |
 | **LEN** display | The track's length and scale (GLOBAL or its own). |
@@ -166,7 +170,7 @@ Every sound control of every voice, in voice groups:
 | **TOMS · CONGAS** | Per tom: TUNE (LTC 70 to 180 Hz, MTC 100 to 280 Hz, HTC 140 to 400 Hz) · DECAY · WAVE · LEVEL · TOM/CGA switch · NZ (noise on) · and the shared TOM NZ level |
 | **LEAD**, **BASS** | CUTOFF (LEAD 200 Hz to 8 kHz, BASS 80 Hz to 4 kHz) · RESO · ENV (filter envelope depth) · DECAY · SAW/SQR · OCT -1, 0, +1 · TUNE ±100 cents · GLIDE 2 to 489 ms · ACCENT · LEVEL |
 
-Every DECAY runs from 8 to 720 ms. Click a group's name to select its voice.
+Every DECAY runs from 8 to 720 ms. Click a group's name to select its voice. The light in a group's corner flashes red when its voice plays. Click the light to mute or unmute the voice: it stays green while the voice is muted, and it follows the **M** keys on GRID and FX/MIX.
 
 **SELECTED VOICE.** Settings for the selected voice:
 
@@ -203,13 +207,14 @@ All sixteen tracks, 32 steps wide.
 |---|---|
 | Grid cell | Click: off → on → accent → off. Shift-click or right-click: select the step and its track. |
 | **M / S** | Mute and solo for the track. |
-| **LEN** | The track's length. Click the right half to add a step, the left half to remove one (1 to 32). |
+| **LEN** | The track's length. Click for a menu of lengths 1 to 32 (the current one ticked), **Type length…** and **Apply to all tracks**. Shift-click removes a step. |
 | Step knobs | ACCENT, FLAM, RATCHET, PROB, MICRO, BEND and NOTE for the selected step, as on MAIN. |
 | **TIE** | On a LEAD or BASS step, holds the previous note into this step (legato with glide). |
 | **LOCKS ✕** | Clears the selected step's parameter locks. The display shows how many locks the step has and whether it is tied. |
 | **COPY / PASTE / CLEAR** | As on MAIN, for the selected track. |
 | **SHIFT ◀ / SHIFT ▶** | Rotates the selected track one step left or right. |
 | **RANDOM** | Turns on a random 30 % of the selected track's steps. |
+| **DRAG MIDI** | Drag it to your DAW or desktop to export the pattern as a MIDI file: one full cycle of every track, drums on channel 10 (notes 36 to 49), LEAD on channel 1 and BASS on channel 2, velocity from the accent, ratchets and flams as repeated notes. Probability isn't written: every step that is on is in the file. |
 
 Parameter locks come with the factory patterns and with saved patches. A locked step plays its own value for that parameter.
 
@@ -450,7 +455,7 @@ The **SRC** key (header) and SOURCE (SEQ/MIDI) pick the clock:
 
 | SRC | Behaviour |
 |---|---|
-| **HOST** | Plays while the DAW plays, at the host tempo, locked to the song position. Loops and jumps land on the right step. ▶ is not needed. |
+| **HOST** | Plays while the DAW plays, at the host tempo, locked to the song position. Loops and jumps land on the right step. With the DAW stopped, ▶ PLAY previews the pattern at the DAW's tempo until the DAW starts. |
 | **INT** | Runs on TEMPO. Start and stop with ▶ or a pulse at RUN IN. |
 | **EXT** | Steps on rising edges at CLK IN: one step per pulse with CLK IN on STEP, or 1 to 48 pulses per quarter note. Start it with ▶ or a pulse at RUN IN. RST IN restarts the pattern. |
 
@@ -474,6 +479,8 @@ The **INT/EXT** switch in the CLOCK strip sets what plays the voices. On **INT**
 | Any note on channel 2 | BASS at that note. |
 
 MIDI notes play the voices in both INT and EXT, and alongside the pattern. Velocity sets the level through the VELOCITY CURVE (GLOBAL).
+
+**MIDI out.** Every step the pattern plays is also sent on SHOGUN's MIDI output at its exact sample position, with a note-off: drums on channel 10 (notes 36 to 49, as above), LEAD on channel 1 and BASS on channel 2 at the step's note, velocity 70, 100 or 127 from the accent.
 
 ### 5.4 MIDI CCs
 
@@ -521,7 +528,7 @@ SHOGUN has one factory bank: INIT and 21 kits. Each kit loads with its own patte
 
 ## 7. DAW setup
 
-SHOGUN is a VST3 instrument with MIDI input, a stereo main output and eight optional stereo aux outputs.
+SHOGUN is a VST3 instrument with MIDI input and output, a stereo main output and eight optional stereo aux outputs.
 
 ### Installing
 
@@ -542,6 +549,7 @@ Then have your DAW rescan its plugins. SHOGUN is listed under **Martial Systems*
 3. To play voices from MIDI, record or draw notes on the track (section 5).
 4. Pick kits from your DAW's program list or from SHOGUN's KIT display. The DAW saves the whole patch with your project: kit, pattern, cables, matrix rows and unit.
 5. Leave the DAW's plugin delay compensation on. SHOGUN reports its latency (0, 23 or 26 samples).
+6. If your DAW doesn't show SHOGUN's MIDI output after an update, have it rescan its plugins.
 
 ### Multiple outputs
 
@@ -576,7 +584,7 @@ A voice routed to an aux output leaves the main mix. Its SEND FX still feeds the
 | Type | Drum machine: 14 drum voices and 2 synth voices, with a sequencer track per voice |
 | Format | VST3 instrument. Also a device in the JIDAI RACK. |
 | Outputs | Stereo main plus 8 optional stereo aux outputs |
-| MIDI | Note input (drums on notes 36 to 49, LEAD channel 1, BASS channel 2), 12 fixed CCs, mod wheel, channel aftertouch |
+| MIDI | Note input (drums on notes 36 to 49, LEAD channel 1, BASS channel 2), 12 fixed CCs, mod wheel, channel aftertouch. Note output of every played step. Pattern export as a MIDI file. |
 | Sample rates | Runs at the host's sample rate. Tested at 44.1, 48 and 96 kHz. |
 | Oversampling | 1×, 2× (default) or 4× realtime. Offline render at the same setting or 4×. |
 | Latency | 0 samples at 1×, 23 at 2×, 26 at 4×, reported to the host (23 samples is 0.48 ms at 48 kHz) |
@@ -595,8 +603,8 @@ A voice routed to an aux output leaves the main mix. Its SEND FX still feeds the
 | Problem | What to check |
 |---|---|
 | SHOGUN doesn't play with my DAW | Set SRC to HOST. Loading a kit keeps SRC as it is. |
-| Nothing plays on INT | Click ▶. Check that the INT/EXT switch is on INT. |
-| Nothing plays on EXT | Click ▶ (or send a pulse to RUN IN), then send pulses to CLK IN. Check the CLK IN setting (STEP or PPQN). |
+| Nothing plays on INT | Click ▶ PLAY. Check that the INT/EXT switch is on INT. |
+| Nothing plays on EXT | Click ▶ PLAY (or send a pulse to RUN IN), then send pulses to CLK IN. Check the CLK IN setting (STEP or PPQN). |
 | The pattern runs but voices are silent | Check the INT/EXT switch: on EXT only TRIG and GATE jacks play the voices. Also check mute, solo and LEVEL. |
 | A TRIG cable does nothing | On INT, turn on the track's MERGE (SEQ/MIDI), or switch to EXT. |
 | A voice is missing from the main mix | Its OUTPUT is set to an aux output. Enable that output in your DAW, or set OUTPUT to MAIN. |

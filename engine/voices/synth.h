@@ -31,6 +31,8 @@ struct SynthVoice : Voice {
   double f = jidai::jcs::pitch::kC3Hz, fc = 1000.0, k = 0.0, R = 0.5, envAmt = 0.5, last = 0.0;
   bool gate = false, sqr = false, glideNext = false, over = false;
   int oct = 0;
+  Memo2 mGlide_;
+  Memo1 mPitch_, mTau_, mCut_, mEnv_, mAcc_;  // per-voice coefficient memos (bit-exact, see dsp.h Memo1)
 
   void prepare(double fs, double fsE) override {
     Voice::prepare(fs, fsE);
@@ -50,26 +52,26 @@ struct SynthVoice : Voice {
   // Base-rate control: glide (log2 domain = semitone domain / 12, τ_g = 0.002·e^{5.5u}), filter laws.
   void control(const VoiceCtx& c) override {
     const double* ue = c.ue;
-    aGlide = rcCoef(glideTau(ue[pGlide]), fs_);
+    aGlide = mGlide_(ue[pGlide], fs_, [](double u, double fs) { return rcCoef(glideTau(u), fs); });
     noteGlided = noteGlided + (1.0 - aGlide) * (noteTarget - noteGlided);
     if (std::fabs(noteTarget - noteGlided) < 1e-9) noteGlided = noteTarget;
     const double tuneCents = 100.0 * bip(ue[pTune]);
     // JCS R4: note 48 = 0 V = C3 = the shared kC3Hz (exact 55·2^(15/12)) at A4 440; A4 scales it (R4.6 receiver side).
-    f = jidai::jcs::pitch::kC3Hz * (a4 / 440.0) * std::exp2((noteGlided - 48.0) / 12.0 + tuneCents / 1200.0 + vOct) * c.tolPitch;
+    f = jidai::jcs::pitch::kC3Hz * (a4 / 440.0) * mPitch_((noteGlided - 48.0) / 12.0 + tuneCents / 1200.0 + vOct, [](double x) { return std::exp2(x); }) * c.tolPitch;
     envAmt = ue[pEnv];
     accAmt = ue[pAcc];
-    ef.setDecay(decayTau(ue[pDecay]) * c.tolTau, fsE_);
+    ef.setDecay(mTau_(ue[pDecay], decayTau) * c.tolTau, fsE_);
     if (id_ == LEAD) {
       R = 1.0 - 0.985 * ue[pReso];
     } else {
       k = 4.2 * ue[pReso];
     }
   }
-  double cutoffNow(const double* ue, double tolCut) const {
+  double cutoffNow(const double* ue, double tolCut) {
     const double accOct = acc * accAmt * ef.e;  // accent: +1 oct of filter env · ACCENT
-    if (id_ == LEAD)
-      return 200.0 * std::pow(40.0, ue[pCut]) * std::exp2(envAmt * 6.0 * ef.e + accOct + cutoffOct) * tolCut;
-    return 80.0 * std::pow(50.0, ue[pCut]) * std::exp2(envAmt * 6.0 * ef.e + accOct + cutoffOct) * tolCut;
+    const double eo = mEnv_(envAmt * 6.0 * ef.e + accOct + cutoffOct, [](double x) { return std::exp2(x); });
+    if (id_ == LEAD) return 200.0 * mCut_(ue[pCut], [](double u) { return std::pow(40.0, u); }) * eo * tolCut;
+    return 80.0 * mCut_(ue[pCut], [](double u) { return std::pow(50.0, u); }) * eo * tolCut;
   }
   // Note on from the sequencer, the GATE/NOTE jacks or MIDI. tie: glide, no retrigger (§10.2 TIE).
   void noteOn(const VoiceCtx& c, double note, double accIn, bool tie) {
@@ -109,7 +111,7 @@ struct SynthVoice : Voice {
       ladder.set(fc, fsE_);
       y = ladder.tick(s * (1.0 + 0.5 * k), k, 1.0);
     }
-    const double accGain = std::pow(10.0, 4.0 * acc * accAmt / 20.0);  // +4 dB · ACCENT
+    const double accGain = mAcc_(4.0 * acc * accAmt / 20.0, [](double x) { return std::pow(10.0, x); });  // +4 dB · ACCENT
     last = y;
     y *= vca.e * accGain;
     ef.tick();

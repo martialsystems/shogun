@@ -723,7 +723,7 @@ Names are unique (case-insensitive), fit the pattern name, and carry none of 50 
 
 ## Plugin shell (ShogunProbe, `make probe-linux`)
 
-The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. The panel checks press the real keys through the editor's binds (`pressBind` / `clickAt` / `wheelAt`): the KIT and PATTERN arrows step every program with wraparound on all 8 tabs, SRC cycles CLOCK:SOURCE and the engine follows the host tempo only on HOST, **SRC on program load** keeps HOST / INT / EXT across every program, INIT PATCH and A/B (undo of the SRC key and host save/restore still restore it), the MOD matrix past ten rows scrolls (▲ ▼ = a page, wheel = a row) so all 32 slots are reachable, editable (CURVE, ON, DEPTH) and removable with ✕, A/B recalls two full snapshots exactly and copies either onto the other, undo/redo restores kit loads, knob gestures and step edits (a no-op click keeps redo; 64 levels), the MOD ◉ keys arm a source and a knob click adds the row, UI SCALE resizes, the OS keys and offline 4× set their parameters, RE-ROLL UNIT changes the unit serial in the engine and the saved state, and VELOCITY CURVE shapes MIDI velocity. 28 checks, last run all PASS:
+The probe builds the real `ShogunAudioProcessor`/editor (JUCE 8.0.4) and checks the shell laws of §15.0 step 4. The three `program` checks are the factory bank through the host program list: the count and names, each kit playing 2 bars between -40 and -6 dBFS at 44.1 and 48 kHz (the same peaks as `testFactoryRenderLevels`), and each loaded program's state reloading to the same bytes. The panel checks press the real keys through the editor's binds (`pressBind` / `clickAt` / `wheelAt`): the KIT and PATTERN arrows step every program with wraparound on all 8 tabs, SRC cycles CLOCK:SOURCE and the engine follows the host tempo only on HOST, **SRC on program load** keeps HOST / INT / EXT across every program, INIT PATCH and A/B (undo of the SRC key and host save/restore still restore it), the MOD matrix past ten rows scrolls (▲ ▼ = a page, wheel = a row) so all 32 slots are reachable, editable (CURVE, ON, DEPTH) and removable with ✕, A/B recalls two full snapshots exactly and copies either onto the other, undo/redo restores kit loads, knob gestures and step edits (a no-op click keeps redo; 64 levels), the MOD ◉ keys arm a source and a knob click adds the row, UI SCALE resizes, the OS keys and offline 4× set their parameters, RE-ROLL UNIT changes the unit serial in the engine and the saved state, and VELOCITY CURVE shapes MIDI velocity. **perf-midi checks (2026-10-08).** **program load race**: a program load while audio runs is bit-identical to a plain switch at the same sample (atomic load), with a peak bound. **GRID cells**: all 512 cells hit-test to their own row and column (the playhead column is not a cell). **VOICE corner mute lights**: each of the 9 group lights toggles its voices' mute during playback, in sync with the M keys, with the Mute / Unmute tooltip. **editor repaint**: 360 timer ticks on 8 tabs, the dirty-rect repaint equals a full repaint (at most 2/255 off at clip edges from anti-aliasing), the timer stops while hidden, and a step-key press marks only its own rect and its 120 ms flash ends. **PLAY in each SRC mode**: INT starts and stops, HOST with the host stopped previews at the host tempo and the host takes over, EXT arms. **keys**: Cmd/Ctrl-Z, -Shift-Z and -Y undo and redo and flash the keys, space toggles PLAY and passes to the host while the host plays, no click takes keyboard focus. **host view move / collapse**: after a height-only collapse/restore and a move the editor is back at 0,0 through the UI-scale layout path. **list controls**: every list control on the 8 tabs (136, 35 of them 10+ items) opens its full list on right-click with the current item ticked, steps forward on click and back on shift-click; TEMPO, A4, LEN and continuous readouts open value menus. **step past length** and **MAIN activity lights**. **program search**: the ⌕ popup filters the 22 programs and Enter loads. **help text**: 30 help lines at 9 pt or more, none overlapping a label or crossing a frame, the 0.5 s hover zoom repaints only its bubble, menus use the plain face. **MIDI out**: a test pattern at 120 BPM sends each note-on at its exact step sample (accent, ratchet, micro-timing, LEAD line) and every note-on has its note-off. **MIDI drag-out**: the DRAG MIDI file for Peak Time Warehouse has, per lane, the pattern's note count and accent velocities, each note with its note-off. Label pixels outside the help text are identical before and after the help-text change on all 8 tabs. 43 checks, last run all PASS:
 
 ```
 PASS params  count 454 (table 454), float 0..1 SECTION:LABEL ids, mismatches 0
@@ -738,22 +738,36 @@ PASS aux 1/2 bus  channels 4, aux peak 0.149767, main peak 0.000000
 PASS programs  22 (INIT + 21 factory kits), names 22
 PASS programs play  21 kits x 2 rates, 2 bars, peaks -10.47 .. -8.00 dBFS
 PASS program state  21/21 programs save and reload to the same state
+PASS program load race  Metallic Industrial (BD1 DRIVE 0.444) -> Deep Round Kick House, block mid-load at 4 offsets: peak -6.31 dBFS (same switch without the mid-load block -6.31, kits alone -8.35 / -9.92); bit-identical to the plain switch yes; mid-load block applied nothing yes
 PASS state round trip  XML <SHOGUN version=2> JSON 11564 chars; params/pattern/lock/mod/cable restored
 PASS alias load  cables 4 (1 + 3 toms) = 4, BASS:NOTE law 1, MTC:PITCH CV AMT 0.083333
 PASS old HZ/V plays  BASS:HZ/V cable at 2.0 V -> 110.000000 Hz (0.00000 cents from 110), law 1
 PASS removed jacks  old FILL IN / LANE A cables dropped 2 (removed 2), kept 1; report: SHOGUN: dropped 2 saved cable(s) (2 on removed jacks CLOCK:FILL IN / MOD:LANE A): SHOGUN/CLOCK:CLK OUT -> SHOGUN#1/CLOCK:FILL IN, SHOGUN/MOD:LANE A -> SHOGUN/BD1:DECAY
-PASS editor  1200x672, bay jacks 151/151, ops 2550
-PASS tab renders  8 PNGs in build/plugin-linux/tabs
+PASS editor  1200x672, bay jacks 151/151, ops 2583
+PASS tab renders  8 PNGs in /workspace/shogun/build/plugin-linux/tabs
+PASS GRID cells  512 cells, 0 bad; row 2 col 5 click edits row 2 only yes; playhead column separate yes
+PASS VOICE corner mute lights  9/9 groups toggle mute during playback, synced with the GRID M keys, tooltip Mute/Unmute, name key selects without muting
+PASS editor repaint  360 ticks on 8 tabs: incremental vs full repaint max 588 px off by at most 2/255 (tab 2 tick 33), mean dirty area 1.1% of the panel; timer off while hidden yes; step key press/flash repaints only its rect yes, flash frames 4
+PASS PLAY in each SRC mode  HOST: preview peak 0.347 (preview), host takes over yes, stops with host yes, ▶ stops preview yes; INT: peak 0.337, start/stop yes; EXT: armed yes, silent until clock yes
+PASS keys  undo/redo via Cmd/Ctrl-Z, -Shift-Z, -Y yes; space passed to the host while it plays yes, toggles PLAY when stopped yes; other keys passed on yes; click never grabs focus yes
+PASS host view move / collapse  editor back at 0,0 with the UI-scale layout after move, re-centre, hide/show, re-parent: yes
+PASS list controls  136 list controls (per tab 5 12 5 17 37 14 41 5; 35 long lists open on left-click), 0 bad; matrix CURVE yes; TEMPO menu yes; A4 menu yes; LEN menu yes
+PASS step past length  MAIN step 12 of an 8-step track: on, length 12 yes; GRID step 21 of a 16-step track: on, length 21 yes
+PASS MAIN activity lights  16/16 under their name keys
+PASS program search  ⌕ opens the search yes; 22 listed, 'metal' -> 1, Enter loads Metallic Industrial; no match = nothing loads yes
+PASS help text  30 help lines, smallest 9.0 pt, overlaps / off-front / frame crossings 0; hover zoom not before 0.5 s yes, at 0.5 s repaints only its bubble yes, gone on leaving yes; menu face DejaVu Sans 17.5
+PASS MIDI out  9/9 note-ons at their exact step samples, 9 in bar 1; 11 ons / 11 offs, every on has its off yes; producesMidi yes
+PASS MIDI drag-out  Peak Time Warehouse: SHOGUN 003 Peak Time Warehouse.mid, 34 notes on 6 lane notes over 4 beats; per-lane counts and accents match the pattern yes, note-offs yes; GRID handle yes
 PASS matrix 32 rows  pages 0 10 20 22 12 2 0; 32/32 reached by wheel, 32 edited (CURVE/ON/DEPTH), 32 removed with X; 11 rows scroll to 2
 PASS KIT/PATTERN arrows  352 steps over 22 programs on 8 tabs, both arrow pairs wrap INIT <-> Lo-Fi Tape Wobble, ▶▶ = program 2 state
-PASS SRC key  SRC INT > SRC EXT > SRC HOST > SRC INT, right-click SRC EXT > SRC INT; engine tempo 120.0 / 120.0 / 100.0 / 120.0 BPM (host 100, knob 120.0)
+PASS SRC key  SRC INT > SRC EXT > SRC HOST > SRC INT, shift-click SRC EXT > SRC INT; engine tempo 120.0 / 120.0 / 100.0 / 120.0 BPM (host 100, knob 120.0)
 PASS SRC on program load  HOST kept, INT kept, EXT kept over 132 program loads (22 programs, host change + KIT arrows, INIT PATCH); A/B keeps yes; undo of SRC key restores yes; saved state restores EXT yes
 PASS A/B compare  B = copy on first visit, A/B recall exact (BD1:DECAY 0.774 / 0.900, SD step 4), copy A>B and B>A
 PASS undo/redo  kit load + knob gesture + step edit undone and redone exactly; no-op click keeps redo; 64 levels after 70 edits
 PASS ASSIGN keys  LFO 1 > BD1:DECAY +50 % in slot 1, AT > BD2:TUNE in slot 2, second press cancels
 PASS UI scale keys  150% = 1800 px, 75% = 900x504, 100% = 1200
-PASS OS keys  badge 2x > 4x, right-click back; offline 4x sets OFFLINE (OS stays 2x)
-PASS RE-ROLL UNIT  0x5A31C0DE > 0x74C37F51, engine + saved state follow (SN 0x74C3-7F51)
+PASS OS keys  badge 2x > 4x, shift-click back; offline 4x sets OFFLINE (OS stays 2x)
+PASS RE-ROLL UNIT  0x5A31C0DE > 0xCE54090B, engine + saved state follow (SN 0xCE54-090B)
 PASS VELOCITY CURVE  velocity 40 peaks HARD 0.035 < LINEAR 0.063 < SOFT 0.094 <= FIXED 0.150
 ShogunProbe: all checks passed
 ```

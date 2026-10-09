@@ -28,6 +28,7 @@ struct TomVoice : Voice {
   double ring = 1.0, aRing = 0.0, aRel = 0.0;
   long n = 0, holdN = 0;
   bool conga = false, nz = false, ringMode = false;
+  Memo1 mTune_, mOct_, mTau_, mBend_;  // per-voice coefficient memos (bit-exact, see dsp.h Memo1)
 
   void prepare(double fs, double fsE) override {
     Voice::prepare(fs, fsE);
@@ -54,15 +55,16 @@ struct TomVoice : Voice {
   }
   void control(const VoiceCtx& c) override {
     const double* ue = c.ue;
-    fTune = fMin * std::pow(fMax / fMin, ue[pTune]);
-    fMul = std::exp2(c.pitchOct) * c.tolPitch;
+    const double ratio = fMax / fMin;
+    fTune = fMin * mTune_(ue[pTune], [ratio](double u) { return std::pow(ratio, u); });
+    fMul = mOct_(c.pitchOct, [](double x) { return std::exp2(x); }) * c.tolPitch;
     nzAmt = ue[P_TOM_NOISE];
     const bool full = ue[pDecay] >= 126.5 / 127.0;
-    tauR = (full ? 20.0 : decayTau(ue[pDecay])) * c.tolTau;
+    tauR = (full ? 20.0 : mTau_(ue[pDecay], decayTau)) * c.tolTau;
     e.setDecay(tauR, fsE_);
     wave.control(c);
   }
-  double freq() const { return clampPitch(fTune * std::exp2(bend * b / 12.0) * fMul, fMin, fMax); }
+  double freq() { return clampPitch(fTune * mBend_(bend * b / 12.0, [](double x) { return std::exp2(x); }) * fMul, fMin, fMax); }
   void trigger(const VoiceCtx& c, const HitInfo& h) override {
     control(c);
     conga = stepIndex(c.ue[pConga], 2) == 1;

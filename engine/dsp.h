@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 
 namespace shogun {
@@ -24,6 +25,46 @@ inline bool exactEq(float a, float b) noexcept { return std::equal_to<float>{}(a
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kQuiet = 3.1622776601683795e-5;  // −90 dB voice end (§3.7)
+
+// Bit-keyed memo of a pure function of one or more doubles: the stored value is f(key) itself, so a hit returns
+// exactly what recomputing would (keys compare by bits, so -0/+0 and NaNs stay distinct). Used to skip libm calls
+// whose inputs hold still between samples; the result is bit-identical to calling f every time.
+inline std::uint64_t bitsOf(double x) {
+  std::uint64_t b;
+  std::memcpy(&b, &x, sizeof b);
+  return b;
+}
+struct Memo1 {
+  std::uint64_t k = 0;
+  bool ok = false;
+  double v = 0.0;
+  template <class F>
+  double operator()(double x, F f) {
+    const std::uint64_t b = bitsOf(x);
+    if (!ok || b != k) {
+      k = b;
+      ok = true;
+      v = f(x);
+    }
+    return v;
+  }
+};
+struct Memo2 {
+  std::uint64_t k0 = 0, k1 = 0;
+  bool ok = false;
+  double v = 0.0;
+  template <class F>
+  double operator()(double x, double y, F f) {
+    const std::uint64_t a = bitsOf(x), b = bitsOf(y);
+    if (!ok || a != k0 || b != k1) {
+      k0 = a;
+      k1 = b;
+      ok = true;
+      v = f(x, y);
+    }
+    return v;
+  }
+};
 
 inline double flushDenormal(double x) { return std::fabs(x) < 1e-15 ? 0.0 : x; }
 inline double clampd(double x, double lo, double hi) { return x < lo ? lo : (x > hi ? hi : x); }
@@ -76,8 +117,9 @@ struct RcEnv {
   double aD = 0.0;
   double S = 0.0;   // hold/sustain level (BD2 and tom holds)
   Stage stage = Idle;
-  void setAttack(double tau, double fs) { aA = rcCoef(tau, fs); }
-  void setDecay(double tau, double fs) { aD = rcCoef(tau, fs); }
+  Memo2 mA_, mD_;  // rcCoef memos (the coefficient is still assigned every call, so discharge() cannot go stale)
+  void setAttack(double tau, double fs) { aA = mA_(tau, fs, rcCoef); }
+  void setDecay(double tau, double fs) { aD = mD_(tau, fs, rcCoef); }
   void setSustain(double s) { S = s; }
   // Recharges from the present value (no reset): RONIN S-15 edge rule (§3.8).
   void trigger() {
@@ -120,8 +162,9 @@ struct RcEnv {
 struct TptOnePole {
   double s = 0.0;
   double G = 0.0;
+  Memo2 mG_;
   void set(double f, double fsE) {
-    const double g = prewarp(f, fsE);
+    const double g = mG_(f, fsE, prewarp);
     G = g / (1.0 + g);
   }
   double lp(double x) {
@@ -144,7 +187,8 @@ struct TptSvf {
     R = RR;
     D = 1.0 / (1.0 + 2.0 * R * g + g * g);
   }
-  void set(double f, double RR, double fsE) { setG(prewarp(f, fsE), RR); }
+  Memo2 mG_;
+  void set(double f, double RR, double fsE) { setG(mG_(f, fsE, prewarp), RR); }
   void tick(double x) {
     hp = (x - (2.0 * R + g) * s1 - s2) * D;
     bp = g * hp + s1;
@@ -163,12 +207,25 @@ struct TptSvf {
 struct Resonator {
   TptSvf svf;
   double pending = 0.0;
+  // set() runs every sub-sample during a pitch sweep: g and R are memoised on the exact (f, tau, fsE) bits.
+  std::uint64_t mk_[3] = {0, 0, 0};
+  bool mok_ = false;
+  double mg_ = 0.0, mR_ = 0.0;
   void set(double f, double tau, double fsE) {
-    const double g = prewarp(f, fsE);
-    const double r2 = std::exp(-2.0 / (tau * fsE));
-    double R = (1.0 + g * g) * (1.0 - r2) / (2.0 * g * (1.0 + r2));
-    if (R > 4.0) R = 4.0;  // overdamped clamp
-    svf.setG(g, R);
+    const std::uint64_t k0 = bitsOf(f), k1 = bitsOf(tau), k2 = bitsOf(fsE);
+    if (!mok_ || k0 != mk_[0] || k1 != mk_[1] || k2 != mk_[2]) {
+      mk_[0] = k0;
+      mk_[1] = k1;
+      mk_[2] = k2;
+      mok_ = true;
+      const double g = prewarp(f, fsE);
+      const double r2 = std::exp(-2.0 / (tau * fsE));
+      double R = (1.0 + g * g) * (1.0 - r2) / (2.0 * g * (1.0 + r2));
+      if (R > 4.0) R = 4.0;  // overdamped clamp
+      mg_ = g;
+      mR_ = R;
+    }
+    svf.setG(mg_, mR_);
   }
   void kick(double A) {
     const double Rk = svf.R < 0.999 ? svf.R : 0.999;
@@ -281,7 +338,12 @@ struct TanhAdaa {
     const double td = std::tanh(d);
     const double diff = x - xp;
     double y;
-    if (std::fabs(diff) < 1e-5) {
+    if (d < 1e-2) {
+      // Tiny drive: the ADAA difference quotient (logCosh(d·x) − logCosh(d·xp)) / (d·tanh d·Δx) cancels to noise
+      // over ~d² and blew up (+191 dBFS on a BD1 DRIVE glide to 0). Here the curve is a straight line to 1e-4, so
+      // the plain tanh(d·x)/tanh(d) needs no anti-aliasing.
+      y = std::tanh(d * x) / td;
+    } else if (std::fabs(diff) < 1e-5) {
       y = std::tanh(d * 0.5 * (x + xp)) / td;
     } else {
       y = (logCosh(d * x) - logCosh(d * xp)) / (d * td * diff);
@@ -297,8 +359,9 @@ struct ZdfLadder {
   double y4p = 0.0;
   double g = 0.1, G = 0.1 / 1.1;
   int lastIters = 0;
+  Memo2 mG_;
   void set(double fc, double fsE) {
-    g = std::tan(kPi * clampd(fc, 20.0, 0.45 * fsE) / fsE);
+    g = mG_(fc, fsE, [](double f, double fs) { return std::tan(kPi * clampd(f, 20.0, 0.45 * fs) / fs); });
     G = g / (1.0 + g);
   }
   double tick(double x, double k, double drive = 1.0) {
@@ -391,11 +454,22 @@ class Decimator {
     phase2_ = 0;
     u0_ = 0.0;
     out_ = 0.0;
+    zeroRun_ = kSilentRun;
   }
+  // Every stored sample is +0 (bit pattern 0): the last kSilentRun pushes were +0, enough to refill both stages
+  // (2 × 92 stage-1 entries at 4x, after the 25-tap stage 2), or nothing non-zero was pushed since reset(). Pushing
+  // +0 into a silent decimator returns +0 and leaves it silent; only the ring positions move (the engine's sleep).
+  static constexpr int kSilentRun = 2 * 92 + hb::kStage2Taps + 4;
+  bool silent() const { return zeroRun_ >= kSilentRun && bitsOf(out_) == 0 && bitsOf(u0_) == 0; }
   // Push one sample at M·fs. Returns true (and sets out) on the push that completes a base-rate output: the last
   // sub-sample of the base sample. The output is y[n] = Σ h[k]·u[2n−k] (centred on the FIRST sub-sample of base
   // sample n − latency), so the delay is an integer number of base samples.
   bool push(double x, double& out) {
+    if (bitsOf(x) == 0) {
+      if (zeroRun_ < kSilentRun) ++zeroRun_;
+    } else {
+      zeroRun_ = 0;
+    }
     if (M_ == 1) {
       out = x;
       return true;
@@ -427,6 +501,7 @@ class Decimator {
   int phase2_ = 0;
   double u0_ = 0.0;
   double out_ = 0.0;
+  int zeroRun_ = kSilentRun;
 };
 
 // RET-style upsampler: base rate in, M samples out. +23 (2×) / +26 (4×).

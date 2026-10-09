@@ -13,6 +13,7 @@ struct HatVoice : Voice {
   RcEnv e;
   XorShift32 rng;
   double kHat = 1.0, last = 0.0, lastNz = 0.0;
+  Memo1 mTune_, mOct_, mTone_, mTau_;  // per-voice coefficient memos (bit-exact, see dsp.h Memo1)
   void prepare(double fs, double fsE) override {
     Voice::prepare(fs, fsE);
     e.setAttack(0.0002, fsE);
@@ -27,12 +28,12 @@ struct HatVoice : Voice {
     last = lastNz = 0.0;
   }
   void control(const VoiceCtx& c) override {
-    kHat = std::exp2(2.0 * (c.ue[P_CH_TUNE] - 0.5)) * std::exp2(c.pitchOct);  // HAT TUNE, shared by CH and OH
-    const double kTone = std::exp2(c.toneV * 2.0 / 5.0);
+    kHat = mTune_(2.0 * (c.ue[P_CH_TUNE] - 0.5), [](double x) { return std::exp2(x); }) * mOct_(c.pitchOct, [](double x) { return std::exp2(x); });  // HAT TUNE, shared by CH and OH
+    const double kTone = mTone_(c.toneV * 2.0 / 5.0, [](double x) { return std::exp2(x); });
     bp.set(7100.0 * kTone * c.tolCut, 0.25, fsE_);
     hp.set(5000.0 * kTone * c.tolCut, fsE_);
     const double u = id_ == CH ? c.ue[P_CH_DECAY] : c.ue[P_OH_DECAY];
-    if (!choked_) e.setDecay(decayTau(u) * c.tolTau, fsE_);
+    if (!choked_) e.setDecay(mTau_(u, decayTau) * c.tolTau, fsE_);
   }
   void trigger(const VoiceCtx& c, const HitInfo&) override {
     choked_ = false;
@@ -66,6 +67,7 @@ struct CyVoice : Voice {
   RcEnv eLo, eHi;
   XorShift32 rng;
   double kCy = 1.0, tone = 0.5, last = 0.0, lastNz = 0.0;
+  Memo1 mTune_, mOct_, mTau_;
   void prepare(double fs, double fsE) override {
     Voice::prepare(fs, fsE);
     eLo.setAttack(0.0002, fsE);
@@ -82,10 +84,10 @@ struct CyVoice : Voice {
     last = lastNz = 0.0;
   }
   void control(const VoiceCtx& c) override {
-    kCy = std::exp2(2.0 * (c.ue[P_CY_TUNE] - 0.5)) * std::exp2(c.pitchOct);
+    kCy = mTune_(2.0 * (c.ue[P_CY_TUNE] - 0.5), [](double x) { return std::exp2(x); }) * mOct_(c.pitchOct, [](double x) { return std::exp2(x); });
     lo.set(3440.0 * c.tolCut, 0.30, fsE_);
     hi.set(7100.0 * c.tolCut, 0.25, fsE_);
-    const double tau = decayTau(c.ue[P_CY_DECAY]) * c.tolTau;
+    const double tau = mTau_(c.ue[P_CY_DECAY], decayTau) * c.tolTau;
     eLo.setDecay(tau, fsE_);
     eHi.setDecay(0.5 * tau, fsE_);
     tone = c.ue[P_CY_TONE];

@@ -3,11 +3,23 @@
 #include <jidai/CableStandard.h>
 
 #include "factory.h"
+#include "MidiExport.h"
 
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 
 using namespace shogun;
+
+namespace {
+// FNV-1a over the bytes of a value (dirty tracking signatures)
+template <typename T>
+void hmix(std::uint64_t& h, const T& v) {
+  unsigned char bytes[sizeof(T)];
+  std::memcpy(bytes, &v, sizeof(T));
+  for (unsigned char c : bytes) h = (h ^ c) * 1099511628211ull;
+}
+}  // namespace
 
 namespace {
 
@@ -17,7 +29,10 @@ const LayoutOp kOps[] = {
 constexpr int kOpCount = static_cast<int>(sizeof kOps / sizeof kOps[0]);
 
 enum OpKind { TEXT, RTEXT, RULE, BOX, KNOB, LED, KEY, LCD, TOGGLE, JACK, RECT, CIRCLE, LINE, PATH };
-enum Flag { kAnchor = 3, kOn = 4, kOut = 8, kRound = 16, kBold = 32 };
+enum Flag { kAnchor = 3, kOn = 4, kOut = 8, kRound = 16, kBold = 32, kHelp = 64 };
+// Item K: help / description lines (flag kHelp from export_layout.py) draw at 9 pt at least and zoom on a 0.5 s hover.
+constexpr float kHelpPt = 9.0f, kZoomPt = 13.0f;
+constexpr double kZoomDelayMs = 500.0;
 
 const juce::Colour INK(0xFFF2F1EA), DIM(0xFF9A9A90), GRN(0xFF4AA862), RED(0xFFE0402E), AMB(0xFFF0B030);
 const juce::Colour LCDGRN(0xFF7EE08C), METERGRN(0xFF37C25A);
@@ -30,7 +45,7 @@ enum B {
   B_LFORATE, B_LFOSCOPE, B_MATRIX, B_CABLES, B_JACK, B_TITLE, B_STEPINFO, B_TRACKINFO, B_TRACKSCALE, B_LOCKINFO,
   B_TRK, B_PAGE, B_COPY, B_PASTE, B_CLEAR, B_RANDOM, B_SHIFTL, B_SHIFTR, B_CLEARLOCKS, B_IDEAL, B_INITPATCH, B_PANIC,
   B_REROLL, B_SERIAL, B_LATENCY, B_RATE, B_OSBADGE, B_SP, B_WP, B_OFF, B_PROG, B_BROWSE, B_AB, B_UNDO, B_REDO, B_SRC,
-  B_ASSIGN, B_UISCALE, B_STATIC
+  B_ASSIGN, B_UISCALE, B_PLAYHEAD, B_VMUTE, B_MIDIDRAG, B_STATIC
 };
 
 int voiceIndex(const juce::String& s) {
@@ -277,7 +292,7 @@ void ShogunPanel::buildBindings() {
       {"clearlocks", B_CLEARLOCKS}, {"ideal", B_IDEAL}, {"initpatch", B_INITPATCH}, {"panic", B_PANIC},
       {"reroll", B_REROLL}, {"serial", B_SERIAL}, {"latency", B_LATENCY}, {"rate", B_RATE}, {"osbadge", B_OSBADGE},
       {"sp", B_SP}, {"wp", B_WP}, {"off", B_OFF}, {"prog", B_PROG}, {"browse", B_BROWSE}, {"ab", B_AB},
-      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE},
+      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE}, {"playhead", B_PLAYHEAD}, {"vmute", B_VMUTE}, {"mididrag", B_MIDIDRAG},
   };
   for (int i = 0; i < kOpCount; ++i) {
     const LayoutOp& o = kOps[i];
@@ -304,6 +319,12 @@ void ShogunPanel::buildBindings() {
       case B_FADER:
       case B_BUS:
       case B_CVAMT: b.a = voiceIndex(rest); break;
+      case B_VMUTE: {  // voice bitmask of the group ("SD+RS")
+        b.a = 0;
+        for (const auto& v : juce::StringArray::fromTokens(rest, "+", ""))
+          if (voiceIndex(v) >= 0) b.a |= 1 << voiceIndex(v);
+        break;
+      }
       case B_GR: b.a = rest[0] - 'A'; break;
       case B_GRID:
         b.a = rest.upToFirstOccurrenceOf(":", false, false).getIntValue();
@@ -342,6 +363,7 @@ bool ShogunPanel::jackPosition(int port, juce::Point<float>& out) const {
 
 void ShogunPanel::setTab(int t) {
   tab_ = juce::jlimit(0, 7, t);
+  hoverOp_ = zoomOp_ = -1;
   repaint();
 }
 
@@ -360,7 +382,277 @@ void ShogunPanel::timerCallback() {
   // An open undo step (begun at mouse-down) is settled once the gesture is over; a menu settles it in its callback.
   if (menuOpen_ == 0 && proc_.undoPending() && !juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
     proc_.settleUndoStep();
-  repaint();
+  if (!isShowing()) {  // window minimised / hidden: no painting; poll slowly until it shows again
+    if (getTimerInterval() != 250) startTimer(250);
+    sigTab_ = -1;
+    return;
+  }
+  if (getTimerInterval() == 250) {
+    startTimerHz(30);
+    repaint();
+  }
+  refreshDirty();  // repaint only the ops whose drawn state changed (meters, step lights, readouts, flashes)
+}
+
+void ShogunPanel::updateTimer() {
+  if (isShowing()) {
+    if (!isTimerRunning() || getTimerInterval() == 250) startTimerHz(30);
+  } else {
+    stopTimer();
+  }
+}
+
+void ShogunPanel::visibilityChanged() { updateTimer(); }
+void ShogunPanel::parentHierarchyChanged() { updateTimer(); }
+
+double ShogunPanel::nowMs() const { return testClockMs_ >= 0.0 ? testClockMs_ : juce::Time::getMillisecondCounterHiRes(); }
+
+int ShogunPanel::pressLevel(int bi) const {
+  if (bi == pressedBi_) return -1;
+  for (const auto& f : flashes_)
+    if (f.first == bi) {
+      const double dt = nowMs() - f.second;
+      return dt >= 120.0 ? 0 : juce::jlimit(1, 8, static_cast<int>(std::ceil(8.0 * (1.0 - dt / 120.0))));
+    }
+  return 0;
+}
+
+juce::Rectangle<float> ShogunPanel::opExtent(const LayoutOp& o, float x, float y, float w, float h,
+                                            const juce::String& t) const {
+  const float tw = static_cast<float>(t.length()) * o.z * 0.9f + 8.0f;
+  switch (o.kind) {
+    case TEXT: {
+      const int anchor = o.flags & kAnchor;
+      const float x0 = anchor == 0 ? x : (anchor == 2 ? x - tw : x - 0.5f * tw);
+      return {x0 - 3.0f, y - o.z * 1.4f, tw + 6.0f, o.z * 2.1f};
+    }
+    case RTEXT: return {x - tw / 2 - 4.0f, y - o.z * 1.4f, tw + 8.0f, o.z * 2.2f + 4.0f};
+    case KNOB: {
+      const float half = std::max(o.r + 10.0f, tw / 2 + 2.0f);
+      return {x - half, y - o.r - 10.0f, 2.0f * half, 2.0f * o.r + 22.0f + o.z * 1.6f};
+    }
+    case LED: return juce::Rectangle<float>(x, y, 0, 0).expanded(o.r * 2.6f + 3.0f);
+    case KEY:
+    case LCD:
+    case RECT: return juce::Rectangle<float>(x, y, std::max(w, 0.0f), std::max(h, 0.0f)).expanded(3.0f);
+    case BOX: return juce::Rectangle<float>(x, y - o.z - 4.0f, w, h + o.z + 4.0f).expanded(3.0f);
+    case TOGGLE: {
+      const float lw = static_cast<float>(std::max(t.length(), u8(o.text2).length())) * o.z * 0.9f + 8.0f;
+      return {x - 14.0f - lw, y - 10.0f, 28.0f + 2.0f * lw, 20.0f};
+    }
+    case CIRCLE: return juce::Rectangle<float>(x, y, 0, 0).expanded(o.r + o.sw + 2.0f);
+    case LINE:
+    case RULE: return juce::Rectangle<float>(juce::Point<float>(x, y), juce::Point<float>(w, h)).expanded(o.sw + 2.0f);
+    default: return {0.0f, 0.0f, static_cast<float>(kW), static_cast<float>(kH)};
+  }
+}
+
+juce::RectangleList<int> ShogunPanel::collectDirty() {
+  juce::RectangleList<int> out;
+  const size_t n = bounds_.size();
+  if (sigH_.size() != n) {
+    sigH_.assign(n, 0);
+    sigR_.assign(n, {});
+    sigOk_.assign(n, 0);
+  }
+  if (hoverOp_ >= 0 && zoomOp_ < 0 && nowMs() - hoverSince_ >= kZoomDelayMs) {  // item K: the 0.5 s hover zoom
+    zoomOp_ = hoverOp_;
+    out.add(zoomRect(zoomOp_).transformedBy(panelTransform()).getSmallestIntegerContainer().expanded(2));
+  }
+  const bool fresh = sigTab_ != tab_;  // a tab change repainted everything already
+  if (fresh) std::fill(sigOk_.begin(), sigOk_.end(), 0);
+  sigTab_ = tab_;
+  const double now = nowMs();
+  juce::Graphics dg(sigImg_);
+  const juce::AffineTransform tr = panelTransform();
+  for (int bi : tabBounds_[tab_]) {
+    const Bound& b = bounds_[static_cast<size_t>(bi)];
+    const size_t i = static_cast<size_t>(bi);
+    Sig s;
+    if (b.kind == B_CABLES) {
+      for (int c = 0; c < proc_.cableCount(); ++c) {
+        hmix(s.h, proc_.cable(c).first);
+        hmix(s.h, proc_.cable(c).second);
+      }
+      s.full = true;
+    } else {
+      sig_ = &s;
+      paintOp(dg, kOps[b.op], &b);
+      sig_ = nullptr;
+    }
+    const juce::Rectangle<int> r =
+        s.full ? getLocalBounds() : s.r.transformedBy(tr).getSmallestIntegerContainer().expanded(2);
+    if (sigOk_[i] && sigH_[i] != s.h) out.add(r.getUnion(sigR_[i]));
+    sigH_[i] = s.h;
+    sigR_[i] = r;
+    sigOk_[i] = 1;
+  }
+  // finished flashes leave the list once their last (level 0) frame has been resolved
+  flashes_.erase(std::remove_if(flashes_.begin(), flashes_.end(),
+                                [&](const std::pair<int, double>& f) { return now - f.second >= 120.0; }),
+                 flashes_.end());
+  return out;
+}
+
+juce::RectangleList<int> ShogunPanel::refreshDirty() {
+  juce::RectangleList<int> d = collectDirty();
+  for (const auto& r : d) repaint(r);
+  return d;
+}
+
+juce::RectangleList<int> ShogunPanel::tickForTest() {
+  auto decay = [](float& m, std::atomic<float>& a) {
+    const float v = a.exchange(0.0f, std::memory_order_relaxed);
+    m = std::fmax(v, m * 0.82f);
+  };
+  decay(meterL_, proc_.meters.peakL);
+  decay(meterR_, proc_.meters.peakR);
+  for (int v = 0; v < kVoices; ++v) decay(vPeak_[v], proc_.meters.voicePeak[static_cast<size_t>(v)]);
+  return refreshDirty();
+}
+
+void ShogunPanel::pressAt(juce::Point<float> p, juce::ModifierKeys mods) {
+  const int bi = findBound(p);
+  if (bi >= 0) {
+    if (kOps[bounds_[static_cast<size_t>(bi)].op].kind == KEY || bounds_[static_cast<size_t>(bi)].kind == B_VMUTE)
+      pressedBi_ = bi;
+    click(bi, mods, p);
+  }
+  dragBound_ = -1;
+  refreshDirty();
+}
+
+int ShogunPanel::kindUndo() { return B_UNDO; }
+int ShogunPanel::kindRedo() { return B_REDO; }
+int ShogunPanel::kindRun() { return B_RUN; }
+
+void ShogunPanel::flashBind(int kind) {
+  for (int bi : tabBounds_[tab_])
+    if (bounds_[static_cast<size_t>(bi)].kind == kind) {
+      flashes_.emplace_back(bi, nowMs());
+      refreshDirty();
+      return;
+    }
+}
+
+void ShogunPanel::releaseAt(juce::Point<float>) {
+  if (pressedBi_ >= 0) flashes_.emplace_back(pressedBi_, nowMs());
+  pressedBi_ = -1;
+  refreshDirty();
+}
+
+
+// ---------------------------------------------------------------- item K: menus and help text
+
+juce::Font ShogunLookAndFeel::getPopupMenuFont() { return font(15.0f, false); }  // plain sans, not the LCD face
+
+juce::Rectangle<float> ShogunPanel::helpRect(int op, bool asLaidOut) const {  // the line as drawn (at least kHelpPt)
+  const LayoutOp& o = kOps[op];
+  const float z = asLaidOut ? o.z : std::max(o.z, kHelpPt);
+  juce::GlyphArrangement ga;
+  ga.addLineOfText(font(z, (o.flags & kBold) != 0, false, o.v), u8(o.text), 0.0f, 0.0f);
+  const float w = ga.getBoundingBox(0, -1, true).getRight();
+  const int anchor = o.flags & kAnchor;
+  const float x0 = anchor == 0 ? o.x : (anchor == 2 ? o.x - w : o.x - 0.5f * w);
+  return {x0, o.y - z * 1.0f, w, z * 1.3f};
+}
+
+juce::Rectangle<float> ShogunPanel::zoomRect(int op) const {  // the hover bubble: kZoomPt text above the line
+  const LayoutOp& o = kOps[op];
+  juce::GlyphArrangement ga;
+  ga.addLineOfText(font(kZoomPt, false), u8(o.text), 0.0f, 0.0f);
+  const float w = ga.getBoundingBox(0, -1, true).getRight() + 20.0f, h = kZoomPt * 1.9f;
+  const juce::Rectangle<float> line = helpRect(op);
+  float y = line.getY() - h - 4.0f;
+  if (y < 4.0f) y = line.getBottom() + 4.0f;
+  const float x = juce::jlimit(8.0f, static_cast<float>(kW) - 8.0f - w, line.getCentreX() - 0.5f * w);
+  return {x, y, w, h};
+}
+
+juce::Rectangle<int> ShogunPanel::zoomDirtyRect(int op) const {
+  return zoomRect(op).transformedBy(panelTransform()).getSmallestIntegerContainer().expanded(2);
+}
+
+int ShogunPanel::helpOpAt(juce::Point<float> p) const {
+  for (int i : tabStaticOps_[tab_])
+    if ((kOps[i].flags & kHelp) && kOps[i].kind == TEXT && helpRect(i).expanded(2.0f).contains(p)) return i;
+  return -1;
+}
+
+void ShogunPanel::hoverAt(juce::Point<float> p) {
+  const int op = helpOpAt(p);
+  if (op == hoverOp_) return;
+  if (zoomOp_ >= 0) {  // leaving the line: the bubble goes at once
+    repaint(zoomRect(zoomOp_).transformedBy(panelTransform()).getSmallestIntegerContainer().expanded(2));
+    zoomOp_ = -1;
+  }
+  hoverOp_ = op;
+  hoverSince_ = nowMs();
+}
+
+void ShogunPanel::mouseMove(const juce::MouseEvent& e) { hoverAt(e.position.transformedBy(panelTransform().inverted())); }
+void ShogunPanel::mouseExit(const juce::MouseEvent&) { hoverAt({-100.0f, -100.0f}); }
+
+void ShogunPanel::paintZoom(juce::Graphics& g) {
+  if (zoomOp_ < 0 || kOps[zoomOp_].tab != tab_) return;
+  const juce::Rectangle<float> r = zoomRect(zoomOp_);
+  g.setColour(juce::Colour(0xF2101210));
+  g.fillRoundedRectangle(r, 4.0f);
+  g.setColour(GRN);
+  g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
+  text(g, r.getX() + 10.0f, r.getY() + kZoomPt * 1.35f, u8(kOps[zoomOp_].text), kZoomPt, 0, INK, false, 0.0f);
+}
+
+std::vector<std::pair<int, juce::Rectangle<float>>> ShogunPanel::helpAreas() const {  // probe: old and new extents
+  std::vector<std::pair<int, juce::Rectangle<float>>> out;
+  for (int i = 0; i < kOpCount; ++i)
+    if ((kOps[i].flags & kHelp) && kOps[i].kind == TEXT) out.emplace_back(kOps[i].tab, helpRect(i).getUnion(helpRect(i, true)));
+  return out;
+}
+
+std::vector<juce::String> ShogunPanel::helpAudit(int& lines, float& minPt) const {
+  std::vector<juce::String> bad;
+  lines = 0;
+  minPt = 99.0f;
+  const juce::Rectangle<float> front(6.0f, 0.0f, static_cast<float>(kW) - 12.0f, static_cast<float>(kH));  // op units: the face
+  for (int tab = 0; tab < 8; ++tab) {
+    for (int i = 0; i < kOpCount; ++i) {
+      const LayoutOp& o = kOps[i];
+      if (o.tab != tab || !(o.flags & kHelp) || o.kind != TEXT) continue;
+      ++lines;
+      minPt = std::min(minPt, std::max(o.z, kHelpPt));
+      const juce::Rectangle<float> r = helpRect(i);
+      if (!front.contains(r)) bad.push_back(u8(o.text).substring(0, 24) + " " + r.toString() + ": off the front");
+      for (int j = 0; j < kOpCount; ++j) {
+        const LayoutOp& q = kOps[j];
+        if (j == i || q.tab != tab) continue;
+        juce::Rectangle<float> qr;
+        switch (q.kind) {
+          case TEXT: {
+            if (!u8(q.text).trim().isNotEmpty()) continue;
+            if (q.flags & kHelp) { qr = helpRect(j); break; }
+            juce::GlyphArrangement ga;
+            ga.addLineOfText(font(q.z, (q.flags & kBold) != 0, false, q.v), u8(q.text), 0.0f, 0.0f);
+            const float w = ga.getBoundingBox(0, -1, true).getRight();
+            const int a = q.flags & kAnchor;
+            qr = {a == 0 ? q.x : (a == 2 ? q.x - w : q.x - 0.5f * w), q.y - q.z, w, q.z * 1.3f};
+            break;
+          }
+          case KEY: case LCD: case TOGGLE: qr = {q.x, q.y, q.w, q.h}; break;
+          case KNOB: case JACK: case LED: qr = juce::Rectangle<float>(q.x, q.y, 0, 0).expanded(std::max(q.r, 3.0f)); break;
+          case BOX: {  // a section frame: the line must sit wholly inside or wholly outside it
+            const juce::Rectangle<float> b(q.x, q.y, q.w, q.h);
+            if (b.intersects(r) && !b.contains(r))
+              bad.push_back(u8(o.text).substring(0, 24) + " " + r.toString() + ": crosses frame '" + u8(q.text) + "' " + b.toString());
+            continue;
+          }
+          default: continue;
+        }
+        if (qr.intersects(r)) bad.push_back(u8(o.text).substring(0, 24) + " " + r.toString() + " overlaps '" + u8(q.text).substring(0, 16) + "' " + qr.toString());
+      }
+    }
+  }
+  return bad;
 }
 
 // ---------------------------------------------------------------- painting
@@ -403,6 +695,7 @@ void ShogunPanel::paint(juce::Graphics& g) {
   }
   for (int bi : tabBounds_[tab_])
     if (bounds_[static_cast<size_t>(bi)].kind == B_CABLES) paintCables(g);
+  paintZoom(g);
   g.restoreState();
 }
 
@@ -484,6 +777,17 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     }
     case B_SEL: fill = b->a == selVoice_ ? GRN.getARGB() : 0; break;
     case B_ACT: on = b->a >= 0 && vPeak_[b->a] > 1e-3f; break;
+    case B_VMUTE: {  // steady green while the group is muted, else the red activity light
+      bool groupMuted = b->a != 0, groupActive = false;
+      for (int vi = 0; vi < kVoices; ++vi)
+        if ((b->a >> vi) & 1) {
+          groupMuted = groupMuted && voiceMuted(vi);
+          groupActive = groupActive || vPeak_[vi] > 1e-3f;
+        }
+      fill = groupMuted ? GRN.getARGB() : o.fill;
+      on = groupMuted || groupActive;
+      break;
+    }
     case B_STEP: {
       const int s = page_ * 16 + b->a;
       const Step& st = pat.tracks[selVoice_].steps[s];
@@ -503,6 +807,14 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       if (st.on) fill = st.acc >= 3 ? 0xFFF0B030u : (st.acc == 2 ? 0xFF4AA862u : 0xFF2F6B3Fu);
       if (running && b->b == curStep % juce::jmax(1, tr.len)) stroke = 0xFFF2F1EAu;
       if (b->a == selVoice_ && b->b == selStep_) stroke = 0xFFF0B030u;
+      break;
+    }
+    case B_PLAYHEAD: {  // GRID column highlight: follows the step while running, gone when stopped
+      if (!running || curStep < 0) {
+        if (sig_ != nullptr) sig_->r = {o.x, o.y, o.w, o.h};  // hidden: hash stays the seed
+        return;
+      }
+      x += (1200.0f - 12.0f - 150.0f) / 32.0f * static_cast<float>(curStep % 32 - 4);  // layout column 5 + n
       break;
     }
     case B_GRIDSEL: {
@@ -538,6 +850,12 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     case B_CLIPLED: on = proc_.meters.clip.load(); break;
     case B_METER: {
       const float pk = b->a == 0 ? meterL_ : meterR_;
+      if (sig_ != nullptr) {
+        const float d = pk > 1e-6f ? 20.0f * std::log10(pk) : -120.0f;
+        hmix(sig_->h, juce::jlimit(0, 34, juce::roundToInt((d + 48.0f) / 48.0f * 34.0f)));
+        sig_->r = juce::Rectangle<float>(x, y, w, h).expanded(2.0f);
+        return;
+      }
       rect(g, x, y, w, h, o.r, fill, stroke, o.sw);
       const float db = pk > 1e-6f ? 20.0f * std::log10(pk) : -120.0f;
       const int lit = juce::jlimit(0, 34, juce::roundToInt((db + 48.0f) / 48.0f * 34.0f));
@@ -617,6 +935,12 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       const int sid = findParam(buf);
       const int shape = sid >= 0 ? stepIndex(static_cast<double>(proc_.paramU(sid)), 6) : 0;
       const float x0 = o.x, yc = o.y, ww = 260.0f, hh = 24.4f;
+      if (sig_ != nullptr) {
+        hmix(sig_->h, shape);
+        hmix(sig_->h, stroke);
+        sig_->r = juce::Rectangle<float>(x0, yc - hh, ww, 2.0f * hh).expanded(o.sw + 3.0f);
+        return;
+      }
       juce::Path p;
       juce::Random rnd(7);
       float hold = 0.0f;
@@ -642,11 +966,28 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       g.strokePath(p, juce::PathStrokeType(o.sw));
       return;
     }
-    case B_MATRIX: paintMatrix(g, o); return;
+    case B_MATRIX:
+      if (sig_ != nullptr) {
+        for (int r = 0; r < mod::kRows; ++r) {
+          const mod::Row& row = proc_.editRows()[r];
+          hmix(sig_->h, row.src); hmix(sig_->h, row.srcVoice); hmix(sig_->h, row.dst); hmix(sig_->h, row.depth);
+          hmix(sig_->h, row.via); hmix(sig_->h, row.viaVoice); hmix(sig_->h, row.curve); hmix(sig_->h, row.on);
+        }
+        hmix(sig_->h, matrixTop_);
+        sig_->r = {8.0f, 330.0f, 800.0f, 340.0f};
+        return;
+      }
+      paintMatrix(g, o);
+      return;
     case B_JACK: {
       bool patched = false;
       for (int c = 0; c < proc_.cableCount(); ++c)
         patched = patched || proc_.cable(c).first == b->a || proc_.cable(c).second == b->a;
+      if (sig_ != nullptr) {
+        hmix(sig_->h, patched);
+        sig_->r = {x - 30.0f, y - 20.0f, 60.0f, 56.0f};
+        return;
+      }
       drawJack(g, x, y, t, (o.flags & kOut) != 0, t2, o.z, b->a >= 0 ? roleColour(b->a) : DIM, patched);
       return;
     }
@@ -712,9 +1053,22 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     default: break;
   }
 
+  const int bi = b != nullptr && b >= bounds_.data() && b < bounds_.data() + bounds_.size()
+                     ? static_cast<int>(b - bounds_.data()) : -1;
+  const int press = bi >= 0 ? pressLevel(bi) : 0;
+  if (sig_ != nullptr) {
+    hmix(sig_->h, t.hashCode64());
+    hmix(sig_->h, fill); hmix(sig_->h, stroke); hmix(sig_->h, on); hmix(sig_->h, v); hmix(sig_->h, ring);
+    hmix(sig_->h, dim); hmix(sig_->h, x); hmix(sig_->h, y); hmix(sig_->h, w); hmix(sig_->h, h); hmix(sig_->h, press);
+    sig_->r = opExtent(o, x, y, w, h, t);
+    return;
+  }
+  if (press < 0 && o.kind == KEY) {  // held down: the key sits 1 px in
+    x += 1.0f; y += 1.0f; w -= 2.0f; h -= 2.0f;
+  }
   lastText_ = t;
   switch (o.kind) {
-    case TEXT: text(g, x, y, t, o.z, anchor, juce::Colour(fill), bold, v); break;
+    case TEXT: text(g, x, y, t, (o.flags & kHelp) && !legacyText_ ? std::max(o.z, kHelpPt) : o.z, anchor, juce::Colour(fill), bold, v); break;
     case RTEXT: drawRtext(g, x, y, t, o.z); break;
     case RULE: line(g, x, y, w, h, juce::Colour(stroke), o.sw); break;
     case BOX: drawBox(g, x, y, w, h, t, o.z); break;
@@ -746,6 +1100,11 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       break;
     }
     default: break;
+  }
+  if (press != 0 && (o.kind == KEY || o.kind == LED)) {  // item M: darker while held, then a 120 ms fading flash
+    g.setColour(press < 0 ? juce::Colour(0x48000000) : juce::Colours::white.withAlpha(0.32f * static_cast<float>(press) / 8.0f));
+    if (o.kind == KEY) g.fillRoundedRectangle(x, y, w, h, 3.0f);
+    else g.fillEllipse(x - o.r - 1.6f, y - o.r - 1.6f, 2.0f * o.r + 3.2f, 2.0f * o.r + 3.2f);
   }
 }
 
@@ -884,7 +1243,7 @@ void ShogunPanel::matrixClick(const LayoutOp&, juce::Point<float> p, juce::Modif
   if (i < 0 || i >= n) return;
   const int row = slots[top + i];
   mod::Row& r = proc_.editRows()[row];
-  auto commit = [this] { proc_.commitEdits(); repaint(); };
+  auto commit = [this] { proc_.commitEdits(); refreshDirty(); };
   auto sourceMenu = [](bool perVoice) {
     juce::PopupMenu menu;
     menu.addItem(1000, "(none)");
@@ -990,6 +1349,7 @@ int ShogunPanel::findBound(juce::Point<float> p) const {
       case KEY:
       case LCD:
       case RECT: hit = juce::Rectangle<float>(o.x, o.y, o.w, o.h).contains(p); break;
+      case LED: hit = b.kind == B_VMUTE && p.getDistanceFrom({o.x, o.y}) <= o.r + 4; break;  // just the light
       case TEXT:
         hit = (b.kind == B_TABTEXT) && std::fabs(p.x - o.x) < 28 && p.y > o.y - 14 && p.y < o.y + 6;
         break;
@@ -1003,7 +1363,7 @@ int ShogunPanel::findBound(juce::Point<float> p) const {
       case B_RANDOM: case B_SHIFTL: case B_SHIFTR: case B_CLEARLOCKS: case B_IDEAL: case B_INITPATCH: case B_PANIC:
       case B_REROLL: case B_SP: case B_WP: case B_CLIPLED: case B_FADER: case B_DISP: case B_KIT: case B_PATTERN:
       case B_OSBADGE: case B_PROG: case B_BROWSE: case B_AB: case B_UNDO: case B_REDO: case B_SRC: case B_ASSIGN:
-      case B_UISCALE:
+      case B_UISCALE: case B_VMUTE: case B_MIDIDRAG:
         return *it;
       default: break;
     }
@@ -1017,6 +1377,8 @@ void ShogunPanel::mouseDown(const juce::MouseEvent& e) {
   dragStart_ = e.position;
   matrixDragRow_ = -1;
   if (dragBound_ < 0) return;
+  const Bound& pb = bounds_[static_cast<size_t>(dragBound_)];
+  if (kOps[pb.op].kind == KEY || pb.kind == B_VMUTE) pressedBi_ = dragBound_;  // item M: drawn pressed while held
   click(dragBound_, e.mods, p);
 }
 
@@ -1049,6 +1411,59 @@ bool ShogunPanel::pressBind(const char* bind, bool right, bool shift, int nth) {
     return true;
   }
   return false;
+}
+
+int ShogunPanel::muteParam(int v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%s:MUTE", kVoiceNames[v]);
+  return findParam(buf);
+}
+
+bool ShogunPanel::voiceMuted(int v) const {
+  const int id = muteParam(v);
+  return id >= 0 && proc_.param(id)->getValue() > 0.5f;
+}
+
+juce::String ShogunPanel::tooltipAt(juce::Point<float> p) const {
+  const int bi = findBound(p);
+  if (bi < 0) return {};
+  const Bound& b = bounds_[static_cast<size_t>(bi)];
+  if (b.kind == B_VMUTE) {
+    bool all = b.a != 0;
+    for (int v = 0; v < kVoices; ++v)
+      if ((b.a >> v) & 1) all = all && voiceMuted(v);
+    return all ? "Unmute" : "Mute";
+  }
+  if (b.kind == B_MIDIDRAG) return "Drag the pattern out as a MIDI file";
+  if (b.kind == B_RUN) {  // item P: what ▶ PLAY does now, in the current SRC mode
+    const int src = stepIndex(static_cast<double>(proc_.paramU(P_CLOCK_SOURCE)), 3);
+    const bool on = proc_.meters.running.load();
+    if (src == SRC_INT) return on ? "Stop the pattern (space)" : "Play the pattern (space)";
+    if (src == SRC_EXT) return on ? "Armed: waiting for clock at CLK IN. Click to disarm (space)"
+                                  : "Arm: the pattern starts with the first clock at CLK IN (space)";
+    if (proc_.meters.hostPlaying.load()) return "The host is playing: SHOGUN follows its transport";
+    return on ? "Stop the preview (space)" : "Play a preview at the host tempo; the host takes over when it plays (space)";
+  }
+  return {};
+}
+
+juce::String ShogunPanel::getTooltip() {
+  return tooltipAt(getMouseXYRelative().toFloat().transformedBy(panelTransform().inverted()));
+}
+
+bool ShogunPanel::bindRect(const char* bind, juce::Rectangle<float>& r, int nth) const {
+  for (int bi : tabBounds_[tab_]) {
+    const LayoutOp& o = kOps[bounds_[static_cast<size_t>(bi)].op];
+    if (std::strcmp(o.bind, bind) != 0 || nth-- > 0) continue;
+    r = {o.x, o.y, o.w, o.h};
+    return true;
+  }
+  return false;
+}
+
+juce::String ShogunPanel::bindAt(juce::Point<float> p) const {
+  const int bi = findBound(p);
+  return bi < 0 ? juce::String() : u8(kOps[bounds_[static_cast<size_t>(bi)].op].bind);
 }
 
 bool ShogunPanel::clickAt(juce::Point<float> p, bool right) {
@@ -1093,6 +1508,103 @@ int ShogunPanel::uiScalePercent() const {
   return ed != nullptr ? juce::roundToInt(100.0 * ed->getWidth() / kW) : 100;
 }
 
+ProgramSearch::ProgramSearch(ShogunAudioProcessor& p) : proc_(p) {
+  box_.setTextToShowWhenEmpty("search programs", juce::Colour(0xFF7A7A72));
+  box_.setFont(juce::FontOptions(15.0f));
+  box_.addListener(this);
+  list_.setModel(this);
+  list_.setRowHeight(22);
+  addAndMakeVisible(box_);
+  addAndMakeVisible(list_);
+  setQuery({});
+  setSize(260, 320);
+}
+
+std::vector<int> ProgramSearch::filter(const juce::String& query) {
+  std::vector<int> out;
+  const juce::String q = query.trim();
+  for (int i = 0; i < factory::kPrograms; ++i) {
+    const juce::String name = u8(factory::programName(i));
+    if (q.isEmpty() || name.containsIgnoreCase(q) || juce::String(i + 1).paddedLeft('0', 3).startsWith(q)) out.push_back(i);
+  }
+  return out;
+}
+
+void ProgramSearch::setQuery(const juce::String& q) {
+  if (box_.getText() != q) box_.setText(q, false);
+  rows_ = filter(q);
+  list_.updateContent();
+  list_.selectRow(rows_.empty() ? -1 : 0);
+  list_.repaint();
+}
+
+bool ProgramSearch::pressReturn() {
+  const int row = list_.getSelectedRow();
+  if (rows_.empty()) return false;
+  load(row >= 0 ? row : 0);
+  return true;
+}
+
+void ProgramSearch::load(int row) {
+  if (row < 0 || row >= static_cast<int>(rows_.size())) return;
+  proc_.setCurrentProgram(rows_[static_cast<size_t>(row)]);  // brackets its own undo step
+  if (auto* box = findParentComponentOfClass<juce::CallOutBox>()) box->dismiss();
+}
+
+void ProgramSearch::resized() {
+  box_.setBounds(getLocalBounds().removeFromTop(30).reduced(4));
+  list_.setBounds(getLocalBounds().withTrimmedTop(32));
+}
+
+void ProgramSearch::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool selected) {
+  if (row < 0 || row >= static_cast<int>(rows_.size())) return;
+  const int i = rows_[static_cast<size_t>(row)];
+  if (selected) g.fillAll(juce::Colour(0xFF2F6B3F));
+  g.setColour(i == proc_.getCurrentProgram() ? juce::Colour(0xFFF0B030) : juce::Colour(0xFFF2F1EA));
+  g.setFont(juce::FontOptions(14.0f));  // a plain readable font (item K), not the panel's LCD face
+  g.drawText(juce::String(i + 1).paddedLeft('0', 3) + "  " + u8(factory::programName(i)), 8, 0, w - 12, h,
+             juce::Justification::centredLeft);
+}
+
+juce::File ShogunPanel::exportPatternMidi() {
+  const Pattern& pat = proc_.editPattern();
+  const double bpm = tempoBpm(static_cast<double>(proc_.paramU(P_CLOCK_TEMPO)));  // the file's tempo (hosts re-time it)
+  const double swing = 0.5 + 0.25 * static_cast<double>(proc_.paramU(P_CLOCK_SWING));
+  const int scale = stepIndex(static_cast<double>(proc_.paramU(P_CLOCK_SCALE)), 4);
+  const juce::String name = juce::File::createLegalFileName(juce::String("SHOGUN ") + pat.name).trim();
+  const juce::File f = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile(name + ".mid");
+  return midiexport::writePatternFile(pat, bpm, swing, scale, f) ? f : juce::File();
+}
+
+void ShogunPanel::dragHint(const Bound& b) {
+  if (captureMenus_) {  // probe: counted like a menu
+    ++menusOpened_;
+    return;
+  }
+  if (dragBubble_ == nullptr) {
+    dragBubble_ = std::make_unique<juce::BubbleMessageComponent>();
+    addChildComponent(*dragBubble_);
+  }
+  const LayoutOp& o = kOps[b.op];
+  juce::AttributedString s("Drag this key to your DAW or desktop for a MIDI file of the pattern");
+  s.setColour(INK);
+  s.setFont(font(kHelpPt + 2.0f, false));
+  dragBubble_->showAt(juce::Rectangle<float>(o.x, o.y, o.w, o.h).transformedBy(panelTransform()).getSmallestIntegerContainer(), s, 2500,
+                      true, false);
+}
+
+void ShogunPanel::showSearch() {
+  if (captureMenus_) {  // probe: count it, as for menus
+    ++menusOpened_;
+    return;
+  }
+  auto search = std::make_unique<ProgramSearch>(proc_);
+  juce::Rectangle<float> r;
+  bindRect("browse", r);
+  const auto area = r.transformedBy(panelTransform()).getSmallestIntegerContainer();
+  juce::CallOutBox::launchAsynchronously(std::move(search), localAreaToGlobal(area), nullptr);
+}
+
 void ShogunPanel::showProgramMenu() {
   juce::PopupMenu m;
   for (int i = 0; i < factory::kPrograms; ++i)
@@ -1106,6 +1618,242 @@ void ShogunPanel::showProgramMenu() {
     if (r > 0) safe->proc_.setCurrentProgram(r - 1);  // brackets its own undo step
     safe->repaint();
   });
+}
+
+// ---------------------------------------------------------------- list controls (rule 3, items D / H / O)
+
+void ShogunPanel::openMenu(juce::PopupMenu m, std::function<void(int)> cb) {
+  if (captureMenus_) {  // probe: record the menu instead of showing it
+    lastMenu_ = {};
+    for (juce::PopupMenu::MenuItemIterator it(m, true); it.next();) {
+      const auto& item = it.getItem();
+      if (item.isSeparator || item.itemID == 0) continue;
+      lastMenu_.items.add(item.text);
+      lastMenu_.ids.push_back(item.itemID);
+      lastMenu_.ticked.push_back(item.isTicked);
+    }
+    lastMenu_.cb = std::move(cb);
+    ++menusOpened_;
+    return;
+  }
+  juce::Component::SafePointer<ShogunPanel> safe(this);
+  ++menuOpen_;
+  m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(),
+                  [safe, done = std::move(cb)](int r) {
+                    if (safe == nullptr) return;  // the editor may be gone by the time the menu closes
+                    --safe->menuOpen_;            // the timer settles the undo step now
+                    if (r != 0) done(r);
+                    safe->repaint();
+                  });
+}
+
+bool ShogunPanel::pickMenuItem(const juce::String& text) {
+  const int i = lastMenu_.items.indexOf(text);
+  if (i < 0 || !lastMenu_.cb) return false;
+  auto cb = lastMenu_.cb;
+  cb(lastMenu_.ids[static_cast<size_t>(i)]);
+  return true;
+}
+
+bool ShogunPanel::listFor(const Bound& b, int pid, const LayoutOp& o, juce::Point<float> p, ListCtl& L) {
+  auto paramList = [&](int id) {
+    const ParamInfo& pi = kParams[id];
+    const int n = pi.steps;
+    for (int i = 0; i < n; ++i) L.items.add(paramDisplay(id, static_cast<float>(stepU(i, n))));
+    L.cur = stepIndex(static_cast<double>(proc_.paramU(id)), n);
+    L.set = [this, id, n](int i) { proc_.setParamU(id, static_cast<float>(stepU(i, n))); };
+    L.longList = n >= 10;
+    return n >= 2;
+  };
+  switch (b.kind) {
+    case B_PARAM:
+    case B_SP:
+    case B_WP:
+    case B_DISP: {
+      if (pid < 0 || o.kind == KNOB) return false;
+      const ParamInfo& pi = kParams[pid];
+      const bool named = pi.choices != nullptr && pi.choices[0] != 0 && std::strcmp(pi.choices, "OFF|ON") != 0;
+      if (pi.kind == ParamKind::Stepped || (pi.kind == ParamKind::Toggle && named)) return paramList(pid);
+      return false;
+    }
+    case B_SRC: return paramList(P_CLOCK_SOURCE);
+    case B_OSBADGE: return paramList(P_GLOBAL_OS);
+    case B_TSCALE: {
+      static const char* const s[] = {"GLOBAL", "1/32", "1/16", "1/8T", "1/8"};
+      for (const char* x : s) L.items.add(x);
+      const int t = b.a;
+      L.cur = proc_.editPattern().tracks[t].scale + 1;
+      L.set = [this, t](int i) {
+        proc_.editPattern().tracks[t].scale = i - 1;
+        proc_.commitEdits();
+      };
+      return true;
+    }
+    case B_MATRIX: {
+      if (!(p.x >= 588 && p.x < 652)) return false;  // the CURVE column
+      int slots[kMatrixEntries];
+      const int total = matrixRows(proc_.editRows(), slots);
+      const int n = std::min(kRowsShown, total - matrixTop());
+      const int i = static_cast<int>(std::floor((p.y - (kRowY0 - 2)) / kRowH));
+      if (i < 0 || i >= n) return false;
+      const int row = slots[matrixTop() + i];
+      if (proc_.editRows()[row].src == mod::SRC_NONE) return false;
+      for (int c = 0; c < mod::kCurveCount; ++c) L.items.add(kCurveLabel[c]);
+      L.cur = proc_.editRows()[row].curve;
+      L.set = [this, row](int c) {
+        proc_.editRows()[row].curve = c;
+        proc_.commitEdits();
+      };
+      return true;
+    }
+    default: return false;
+  }
+}
+
+void ShogunPanel::showList(const ListCtl& L) {
+  juce::PopupMenu m;
+  for (int i = 0; i < L.items.size(); ++i) m.addItem(i + 1, L.items[i], true, i == L.cur);
+  auto set = L.set;
+  openMenu(m, [set](int r) { if (r > 0) set(r - 1); });
+}
+
+void ShogunPanel::typeValue(const juce::String& title, const juce::String& range, std::function<void(double)> apply) {
+  if (captureMenus_) {  // probe: the next typed value goes straight to apply
+    pendingType_ = std::move(apply);
+    return;
+  }
+  auto* w = new juce::AlertWindow(title, range, juce::MessageBoxIconType::NoIcon, this);
+  w->addTextEditor("v", {}, {});
+  w->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
+  w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+  juce::Component::SafePointer<ShogunPanel> safe(this);
+  w->enterModalState(true, juce::ModalCallbackFunction::create([safe, w, apply](int r) {
+                       if (safe != nullptr && r == 1) {
+                         const juce::String s = w->getTextEditorContents("v").trim();
+                         if (s.containsAnyOf("0123456789")) apply(s.getDoubleValue());
+                         safe->repaint();
+                       }
+                     }),
+                     true);
+}
+
+bool ShogunPanel::typeForTest(double v) {
+  if (!pendingType_) return false;
+  auto f = std::move(pendingType_);
+  pendingType_ = nullptr;
+  f(v);
+  return true;
+}
+
+void ShogunPanel::showTempoMenu() {
+  static const int presets[] = {60, 70, 80, 90, 100, 110, 120, 125, 128, 130, 140, 150, 160, 170, 174};
+  const double bpm = tempoBpm(static_cast<double>(proc_.paramU(P_CLOCK_TEMPO)));
+  const bool host = stepIndex(static_cast<double>(proc_.paramU(P_CLOCK_SOURCE)), 3) == SRC_HOST;
+  juce::PopupMenu m;
+  for (int i = 0; i < 15; ++i) m.addItem(i + 1, juce::String(presets[i]) + " BPM", true, !host && std::fabs(bpm - presets[i]) < 0.05);
+  m.addSeparator();
+  m.addItem(100, u8("Type tempo\xE2\x80\xA6"));
+  m.addItem(101, "Sync to DAW", true, host);
+  openMenu(m, [this](int r) {
+    auto setBpm = [this](double v) {
+      proc_.setParamU(P_CLOCK_TEMPO, static_cast<float>((juce::jlimit(40.0, 200.0, v) - 40.0) / 160.0));
+      if (stepIndex(static_cast<double>(proc_.paramU(P_CLOCK_SOURCE)), 3) == SRC_HOST)
+        proc_.setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(SRC_INT, 3)));  // a picked tempo runs the INT clock
+    };
+    if (r >= 1 && r <= 15) setBpm(presets[r - 1]);
+    else if (r == 100) typeValue("Tempo", "40 - 200 BPM", setBpm);
+    else if (r == 101) proc_.setParamU(P_CLOCK_SOURCE, static_cast<float>(stepU(SRC_HOST, 3)));
+  });
+}
+
+void ShogunPanel::showA4Menu() {
+  static const int presets[] = {415, 432, 440, 442, 444, 466};
+  const double hz = a4Hz(static_cast<double>(proc_.paramU(P_GLOBAL_A4)));
+  juce::PopupMenu m;
+  for (int i = 0; i < 6; ++i) m.addItem(i + 1, juce::String(presets[i]) + " Hz", true, std::fabs(hz - presets[i]) < 0.05);
+  m.addSeparator();
+  m.addItem(100, u8("Type A4\xE2\x80\xA6"));
+  openMenu(m, [this](int r) {
+    auto setHz = [this](double v) { proc_.setParamU(P_GLOBAL_A4, static_cast<float>((juce::jlimit(415.0, 466.0, v) - 415.0) / 51.0)); };
+    if (r >= 1 && r <= 6) setHz(presets[r - 1]);
+    else if (r == 100) typeValue("A4 tuning", "415 - 466 Hz", setHz);
+  });
+}
+
+void ShogunPanel::showValueMenu(int pid) {  // any other continuous readout: 0 .. 100 % in tenths, current ticked
+  const float u = proc_.paramU(pid);
+  juce::PopupMenu m;
+  for (int i = 0; i <= 10; ++i) m.addItem(i + 1, paramDisplay(pid, static_cast<float>(i) / 10.0f), true, std::fabs(u - static_cast<float>(i) / 10.0f) < 1e-4f);
+  openMenu(m, [this, pid](int r) {
+    if (r >= 1 && r <= 11) proc_.setParamU(pid, static_cast<float>(r - 1) / 10.0f);
+  });
+}
+
+void ShogunPanel::showLenMenu(int track) {
+  const int len = proc_.editPattern().tracks[track].len;
+  juce::PopupMenu m;
+  for (int i = 1; i <= kMaxSteps; ++i) m.addItem(i, juce::String(i) + (i == 1 ? " step" : " steps"), true, i == len);
+  m.addSeparator();
+  m.addItem(100, u8("Type length\xE2\x80\xA6"));
+  m.addItem(101, "Apply to all tracks");
+  openMenu(m, [this, track](int r) {
+    auto setLen = [this, track](double v) {
+      proc_.editPattern().tracks[track].len = juce::jlimit(1, kMaxSteps, static_cast<int>(std::lround(v)));
+      proc_.commitEdits();
+    };
+    if (r >= 1 && r <= kMaxSteps) setLen(r);
+    else if (r == 100) typeValue("Track length", "1 - " + juce::String(kMaxSteps) + " steps", setLen);
+    else if (r == 101) {
+      Pattern& pat = proc_.editPattern();
+      for (auto& tr : pat.tracks) tr.len = pat.tracks[track].len;
+      proc_.commitEdits();
+    }
+  });
+}
+
+bool ShogunPanel::handleListClick(int bi, int pid, juce::ModifierKeys mods, juce::Point<float> p) {
+  const Bound& b = bounds_[static_cast<size_t>(bi)];
+  const LayoutOp& o = kOps[b.op];
+  const bool right = mods.isRightButtonDown(), shift = mods.isShiftDown() && !right;
+  const bool readout = (b.kind == B_PARAM || b.kind == B_DISP || b.kind == B_SP || b.kind == B_WP) && o.kind != KNOB;
+  if (readout && pid == P_CLOCK_TEMPO) { showTempoMenu(); return true; }  // item D
+  if (readout && pid == P_GLOBAL_A4) { showA4Menu(); return true; }
+  if (b.kind == B_LEN) {  // item O: the menu; shift-click steps back
+    Track& tr = proc_.editPattern().tracks[b.a];
+    if (shift) {
+      tr.len = juce::jmax(1, tr.len - 1);
+      proc_.commitEdits();
+    } else {
+      showLenMenu(b.a);
+    }
+    return true;
+  }
+  ListCtl L;
+  if (!listFor(b, pid, o, p, L)) {
+    if (readout && pid >= 0 && kParams[pid].kind == ParamKind::Continuous) {  // item D audit: no 2-step fallback
+      showValueMenu(pid);
+      return true;
+    }
+    return false;
+  }
+  if (right || (L.longList && !shift)) {
+    showList(L);
+    return true;
+  }
+  const int n = L.items.size();
+  L.set((L.cur + (shift ? n - 1 : 1)) % n);
+  return true;
+}
+
+std::vector<juce::String> ShogunPanel::clickableBinds() const {
+  std::vector<juce::String> out;
+  for (int bi : tabBounds_[tab_]) {
+    const LayoutOp& o = kOps[bounds_[static_cast<size_t>(bi)].op];
+    juce::Point<float> c = o.kind == KNOB || o.kind == TOGGLE || o.kind == JACK || o.kind == LED
+                               ? juce::Point<float>(o.x, o.y) : juce::Point<float>(o.x + o.w / 2, o.y + o.h / 2);
+    if (findBound(c) == bi) out.push_back(u8(o.bind) + (o.kind == KNOB ? "|K" : ""));
+  }
+  return out;
 }
 
 bool ShogunPanel::assignTo(int pid) {
@@ -1152,9 +1900,14 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
   const Bound& b = bounds_[static_cast<size_t>(bi)];
   const LayoutOp& o = kOps[b.op];
   Pattern& pat = proc_.editPattern();
-  auto commit = [this] { proc_.commitEdits(); repaint(); };
+  auto commit = [this] { proc_.commitEdits(); refreshDirty(); };
   const int pid = pidForBound(b.kind, o.bind, b.a, selVoice_, selWaveVoice());
   if (editsState(b.kind)) proc_.beginUndoStep();  // settled when the gesture is over (timer) or by the menu callback
+  if (!(o.kind == KNOB && armedSrc_ > 0) && handleListClick(bi, pid, mods, p)) {
+    dragBound_ = -1;
+    refreshDirty();
+    return;
+  }
   switch (b.kind) {
     case B_PARAM:
     case B_SP:
@@ -1185,6 +1938,17 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
     case B_CHOICE:
       proc_.setParamU(b.a, static_cast<float>(stepU(b.b, kParams[b.a].steps)));
       break;
+    case B_VMUTE: {  // toggle the group's mute (the same <V>:MUTE params the GRID / FX-MIX M keys drive)
+      bool all = b.a != 0;
+      for (int v = 0; v < kVoices; ++v)
+        if ((b.a >> v) & 1) all = all && voiceMuted(v);
+      for (int v = 0; v < kVoices; ++v)
+        if ((b.a >> v) & 1) {
+          const int id = muteParam(v);
+          if (id >= 0) proc_.setParamU(id, all ? 0.0f : 1.0f);
+        }
+      break;
+    }
     case B_SEL:
       selVoice_ = b.a;
       if (mods.isAltDown() || tab_ == 0) proc_.pushPad(b.a);  // MAIN select keys also audition
@@ -1192,6 +1956,14 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
     case B_STEP: {
       const int s = page_ * 16 + b.a;
       Step& st = pat.tracks[selVoice_].steps[s];
+      if (s >= pat.tracks[selVoice_].len && !mods.isRightButtonDown()) {  // item E: past the end = on + the track grows
+        st.on = true;
+        if (mods.isShiftDown()) st.acc = 3;
+        pat.tracks[selVoice_].len = s + 1;
+        selStep_ = s;
+        commit();
+        break;
+      }
       if (mods.isRightButtonDown()) {
         selStep_ = s;
       } else if (mods.isShiftDown()) {  // panel legend: shift-click = accent
@@ -1210,6 +1982,13 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
       Step& st = pat.tracks[b.a].steps[b.b];
       selVoice_ = b.a;
       selStep_ = b.b;
+      if (b.b >= pat.tracks[b.a].len && !(mods.isRightButtonDown() || mods.isShiftDown())) {  // item E
+        st.on = true;
+        st.acc = 2;
+        pat.tracks[b.a].len = b.b + 1;
+        commit();
+        break;
+      }
       if (!(mods.isRightButtonDown() || mods.isShiftDown())) {
         if (!st.on) {
           st.on = true;
@@ -1297,8 +2076,9 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
     case B_IDEAL: proc_.requestIdeal(); break;
     case B_INITPATCH: proc_.setCurrentProgram(0); break;
     case B_KIT:
-    case B_PATTERN:
-    case B_BROWSE: showProgramMenu(); break;  // the factory bank browser: INIT and the kits, each with its pattern
+    case B_PATTERN: showProgramMenu(); break;  // the factory bank browser: INIT and the kits, each with its pattern
+    case B_BROWSE: showSearch(); break;          // item J: the search popup
+    case B_MIDIDRAG: dragHint(b); break;       // a plain click: how to use the handle (the drag itself is mouseDrag)
     case B_PROG: proc_.stepProgram(b.a); break;
     case B_AB:
       if (mods.isRightButtonDown() || mods.isShiftDown()) proc_.copyAB(1 - b.a, b.a);  // right-click B = copy A → B
@@ -1340,7 +2120,8 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
       break;
     default: break;
   }
-  repaint();
+  if (b.kind == B_JACK || cableFrom_ >= 0) repaint();  // patch bay: unchanged (whole panel)
+  else refreshDirty();
 }
 
 void ShogunPanel::setStepField(const Bound& b, float u) {
@@ -1364,6 +2145,12 @@ void ShogunPanel::mouseDrag(const juce::MouseEvent& e) {
   if (cableFrom_ >= 0) {
     cableEnd_ = p;
     repaint();
+    return;
+  }
+  if (dragBound_ >= 0 && bounds_[static_cast<size_t>(dragBound_)].kind == B_MIDIDRAG && e.getDistanceFromDragStart() > 4) {
+    dragBound_ = -1;  // item 2a: the pattern leaves as a .mid file (an external file drag the host / desktop accepts)
+    const juce::File f = exportPatternMidi();
+    if (f.existsAsFile()) juce::DragAndDropContainer::performExternalDragDropOfFiles({f.getFullPathName()}, false, this);
     return;
   }
   const float dy = (dragStart_.y - e.position.y) / (e.mods.isShiftDown() ? 800.0f : 200.0f);
@@ -1429,10 +2216,15 @@ void ShogunPanel::mouseDrag(const juce::MouseEvent& e) {
     }
     default: break;
   }
-  repaint();
+  refreshDirty();
 }
 
 void ShogunPanel::mouseUp(const juce::MouseEvent& e) {
+  if (pressedBi_ >= 0) {  // item M: release flash (only keys and mute lights are ever pressed; jacks never)
+    flashes_.emplace_back(pressedBi_, nowMs());
+    pressedBi_ = -1;
+    refreshDirty();
+  }
   if (cableFrom_ >= 0) {
     const auto p = e.position.transformedBy(panelTransform().inverted());
     const int hit = findBound(p);
@@ -1498,15 +2290,83 @@ void ShogunPanel::wheelAt(juce::Point<float> p, float deltaY) {
 // ================================================================ editor
 
 ShogunAudioProcessorEditor::ShogunAudioProcessorEditor(ShogunAudioProcessor& p) : AudioProcessorEditor(p), panel_(p) {
+  setLookAndFeel(&lnf_);  // item K: menus and lists in the plain face
   addAndMakeVisible(panel_);
+  // Item G: a click never takes keyboard focus, so the host keeps its keys (space); SHOGUN hears keys through a
+  // listener on itself and its top-level window (handleKey) and passes on everything it does not use.
+  setWantsKeyboardFocus(false);
+  setMouseClickGrabsKeyboardFocus(false);
+  panel_.setWantsKeyboardFocus(false);
+  panel_.setMouseClickGrabsKeyboardFocus(false);
+  addKeyListener(this);
   setResizable(true, true);
   setResizeLimits(ShogunPanel::kW / 2, ShogunPanel::kH / 2, ShogunPanel::kW * 2, ShogunPanel::kH * 2);
   getConstrainer()->setFixedAspectRatio(static_cast<double>(ShogunPanel::kW) / ShogunPanel::kH);
   setSize(ShogunPanel::kW, ShogunPanel::kH);
 }
 
+ShogunAudioProcessorEditor::~ShogunAudioProcessorEditor() {
+  setLookAndFeel(nullptr);
+  if (keyTop_ != nullptr) keyTop_->removeKeyListener(this);
+  removeKeyListener(this);
+}
+
 void ShogunAudioProcessorEditor::resized() {
   const float s = static_cast<float>(getWidth()) / ShogunPanel::kW;
   panel_.setTransform(juce::AffineTransform::scale(s));
   panel_.setBounds(0, 0, ShogunPanel::kW, ShogunPanel::kH);
+}
+
+void ShogunAudioProcessorEditor::reanchor() {
+  if (anchoring_) return;
+  const juce::ScopedValueSetter<bool> guard(anchoring_, true);
+  // In a plugin host the editor owns its host view: it always sits at 0,0. (The standalone window may place it below
+  // its notification bar, so it is left alone there.)
+  if (!juce::JUCEApplicationBase::isStandaloneApp() && getParentComponent() != nullptr && getPosition() != juce::Point<int>())
+    setTopLeftPosition(0, 0);
+  resized();  // the UI-scale path: panel transform + bounds from the current width
+  panel_.repaint();
+}
+
+bool ShogunAudioProcessorEditor::handleKey(const juce::KeyPress& key) {
+  const auto mods = key.getModifiers();
+  const int code = key.getKeyCode();
+  auto& proc = dynamic_cast<ShogunAudioProcessor&>(processor);
+  if (mods.isCommandDown() && !mods.isAltDown()) {
+    const bool z = code == 'Z' || code == 'z', y = code == 'Y' || code == 'y';
+    if (z && !mods.isShiftDown()) {
+      proc.undo();
+      panel_.flashBind(ShogunPanel::kindUndo());
+      panel_.repaint();
+      return true;
+    }
+    if ((z && mods.isShiftDown()) || (y && !mods.isShiftDown())) {
+      proc.redo();
+      panel_.flashBind(ShogunPanel::kindRedo());
+      panel_.repaint();
+      return true;
+    }
+    return false;
+  }
+  if (code == juce::KeyPress::spaceKey && !mods.isAnyModifierKeyDown()) {
+    if (proc.meters.hostPlaying.load()) return false;  // the host's transport is rolling: space is the host's
+    proc.requestRun(!(proc.meters.running.load() || proc.meters.previewing.load()));
+    panel_.flashBind(ShogunPanel::kindRun());
+    return true;
+  }
+  return false;
+}
+
+void ShogunAudioProcessorEditor::moved() { reanchor(); }
+void ShogunAudioProcessorEditor::parentSizeChanged() { reanchor(); }
+void ShogunAudioProcessorEditor::visibilityChanged() { reanchor(); }
+void ShogunAudioProcessorEditor::parentHierarchyChanged() {
+  juce::Component* top = getTopLevelComponent();
+  if (top == this) top = nullptr;
+  if (top != keyTop_) {
+    if (keyTop_ != nullptr) keyTop_->removeKeyListener(this);
+    keyTop_ = top;
+    if (keyTop_ != nullptr) keyTop_->addKeyListener(this);
+  }
+  reanchor();
 }

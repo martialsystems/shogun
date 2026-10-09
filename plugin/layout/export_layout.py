@@ -149,6 +149,19 @@ def label_below(ops, k):
 
 
 def bind_chrome(ops):
+    # Item P: the transport (PLAY, its light, RST) gets its own TRANSPORT label and a divider from the CLOCK settings.
+    extra = []
+    for o in ops:
+        if o["kind"] == "TEXT" and o.get("text") == "CLOCK" and o["x"] == 16 and o["y"] == 48:
+            clk = dict(o)
+            clk["x"] = 101
+            extra.append(clk)
+            o["text"] = "TRANSPORT"
+        elif o["kind"] == "RULE" and o["x"] == 534 and o["w"] == 534:
+            div = dict(o)
+            div["x"] = div["w"] = 95
+            extra.append(div)
+    ops.extend(extra)
     for o in ops:
         if o["y"] > 90:
             continue
@@ -175,10 +188,10 @@ def bind_chrome(ops):
         elif k == "KEY":
             # transport and the SYNC box (was PERFORM: FILL / ROLL / MUTE GRP / SCENE A). The engine has no fill, roll,
             # mute groups or scenes, so the box carries the two clock controls instead: CLK IN and SRC.
-            if t == "▶":
-                o["bind"] = "run"
+            if t == "▶":  # a labelled PLAY key (was a bare ▶ glyph the user could not find)
+                o.update(text="▶ PLAY", x=14, w=40, z=7.5, bind="run")
             elif t == "RST":
-                o["bind"] = "rst"
+                o.update(x=65, w=26, bind="rst")
             elif t == "FILL":
                 o.update(text="CLK IN: STEP", x=546, w=118, bind="disp:CLOCK:CLK IN")
             elif t == "ROLL":
@@ -188,7 +201,7 @@ def bind_chrome(ops):
         elif k == "TEXT" and t == "PERFORM":
             o["text"] = "SYNC"
         elif k == "LED" and o["x"] == 52:
-            o["bind"] = "runled"
+            o.update(x=59, bind="runled")
         elif k == "LED" and o["x"] == 1140 and abs(o["y"] - 62) < 1:
             o["bind"] = "clipled"
         elif k == "RECT" and o["x"] >= 959 and o["x"] < 1130 and o["w"] < 5 and o["y"] < 80:
@@ -221,7 +234,8 @@ def bind_voice_block(ops, y0, y1):
             o["lit"] = 0
             continue
         if k == "LED" and sec and abs(o["y"] - (y0 + 8)) < 0.5:
-            o["bind"] = "act:" + o_bind_voice(sec)
+            # the group key's corner light: red = activity, steady green = muted; a click toggles the group's mute
+            o["bind"] = "vmute:" + "+".join(VOICE_GROUPS[sec])
             continue
         if sec is None:
             continue
@@ -257,6 +271,11 @@ def t2(o):
     return o.get("text2", "")
 
 
+VOICE_GROUPS = {"BD 1": ["BD1"], "BD 2": ["BD2"], "SNARE · RIM": ["SD", "RS"], "CLAP · CLAVES": ["CP", "CL"],
+                "CB · MA": ["CB", "MA"], "HATS · CYMBAL": ["CH", "OH", "CY"], "TOMS · CONGAS": ["LTC", "MTC", "HTC"],
+                "LEAD": ["LEAD"], "BASS": ["BASS"]}
+
+
 def o_bind_voice(sec):
     return {"BD 1": "BD1", "BD 2": "BD2", "SNARE · RIM": "SD", "CLAP · CLAVES": "CP", "CB · MA": "CB",
             "HATS · CYMBAL": "CH", "TOMS · CONGAS": "LTC", "LEAD": "LEAD", "BASS": "BASS"}[sec]
@@ -264,6 +283,13 @@ def o_bind_voice(sec):
 
 def bind_main(ops):
     bind_chrome(ops)
+    # Item F: an activity light under each drum / synth name key (red, as on the VOICE group keys)
+    led = next(o for o in ops if o["kind"] == "LED" and o.get("bind") == "runled")
+    for o in list(ops):
+        if o["kind"] == "KEY" and o.get("text") in VOICES and 102 < o["y"] < 140:
+            a = dict(led)
+            a.update(x=o["x"] + o["w"] / 2, y=o["y"] + o["h"] + 7, r=2.5, fill=colour("#E0402E"), bind="act:" + o["text"])
+            ops.append(a)
     X0, X1 = 10, mm.W - 10
     pitch = (X1 - X0) / 16
     steps = 0
@@ -369,14 +395,16 @@ def bind_grid(ops):
         if SY + 14 <= y < SY + 16 + rh * 16:
             ri = int((y - (SY + 16) + 1) // rh)
             ri = max(0, min(15, ri))
-            if k == "RECT" and o["x"] >= gx0 and o["w"] < cw:
+            # The playhead column (over step 5, the full grid height) first: it also starts at x >= gx0 and is
+            # narrower than a cell, and the step-cell rule used to bind it as one giant step-5 cell of row 1.
+            if k == "RECT" and abs(o["x"] - (gx0 + cw * 4)) < 0.1 and o.get("h", 0) > rh:
+                o["bind"] = "playhead"
+            elif k == "RECT" and o["x"] >= gx0 and o["w"] < cw and o.get("h", 0) < rh:
                 o["bind"] = "grid:%d:%d" % (ri, int((o["x"] - gx0) // cw))
                 o["fill"] = colour("#0b0c0b")
                 o["opacity"] = 1.0
             elif k == "RECT" and o["x"] == 12:
                 o["bind"] = "gridsel:%d" % ri
-            elif k == "RECT" and abs(o["x"] - (gx0 + cw * 4)) < 0.1:
-                o["bind"] = "playhead"
             elif k == "KEY" and o["x"] == 80:
                 o["bind"] = "p:%s:MUTE" % rows[ri]
                 o["lit"] = 0
@@ -399,11 +427,11 @@ def bind_grid(ops):
             elif k == "KNOB" and t in STEP_KNOBS:
                 o["bind"] = "sk:" + STEP_KNOBS[t]
             elif k == "KEY" and t == "LOCK RND":
-                o["hide"] = True  # no lock randomiser in the engine
+                # no lock randomiser in the engine: the slot carries the pattern's MIDI drag-out handle (item 2a)
+                o.update(text="DRAG MIDI", bind="mididrag")
             elif k == "KEY":
                 o["bind"] = {"TIE": "sk:tie", "LOCKS ✕": "clearlocks", "COPY": "copy", "PASTE": "paste", "CLEAR": "clear",
                              "SHIFT ◀": "shiftl", "SHIFT ▶": "shiftr", "RANDOM": "random"}.get(t, "")
-                o["x"] += 56  # eight keys, centred where nine were
             elif k == "TEXT" and t.startswith("hold a step"):
                 o["text"] = "click = on → accent → off  ·  shift / right-click = select  ·  knobs edit the selected step"
 
@@ -487,7 +515,9 @@ def bind_route(ops):
         if k == "TEXT" and t.startswith("LFO/RND/LANE"):
             o["text"] = "LFO/RND jacks are extras:"
         if k == "TEXT" and t.startswith("right-click any jack"):
-            o["text"] = "drag jack to jack = cable  ·  right-click a jack = unplug  ·  CV AMT knobs below"
+            # item I (text only): outside the rack the cables patch SHOGUN to itself
+            o["text"] = ("outside the rack, cables patch SHOGUN to itself: drag an output to an input  ·  "
+                         "right-click a jack = unplug  ·  CV AMT knobs below")
         if k == "JACK":
             if x < 960:
                 v = VOICES[int((x - 10) // colw)]
@@ -669,7 +699,7 @@ def bind_global(ops):
             o["x"] = 24
             o["text"] = {497: "KNOBS: drag up / down  ·  shift = fine  ·  wheel = nudge",
                          527: "DOUBLE-CLICK a knob = its default (the noon kit value)",
-                         557: "KEYS and LCDs: click = next choice  ·  right-click = previous",
+                         557: "KEYS and LCDs: click = next  ·  shift-click = previous  ·  right-click = list",
                          587: "UI SCALE resizes this window; the corner drag works too"}[int(round(y))]
             o["fill"] = colour(mm.DIM)
         elif k == "KEY" and t == "SAVE AS DEFAULT":
@@ -728,6 +758,26 @@ def cstr(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+HELP_NOT = {"OVERSAMPLING (offline render)", "VOICES (14 drums)"}  # section labels, not help
+
+
+# Item K: where a help line grown to 9 pt would cross its section frame or the face edge, it moves just inside.
+HELP_MOVE = {
+    "pre-VCA: ENV drives the folds": {"x": 408.0, "anchor": 0},  # under POST / PRE-VCA, now starting inside the WAVE frame
+    "audio rate, unsmoothed": {"x": 1127.0},
+    "WAVE 0 = true bypass": {"x": 1127.0},                      # kept aligned with the line above
+    "click = on → accent → off": {"y": 659.0},                  # inside the step frame, under its keys (no room between frames)
+}
+
+
+def is_help(o):
+    """Item K: paragraph help, hint lines, tab notes, the matrix footer and the text under graphs: unbound plain text
+    with lower-case words (3 or more). Knob, jack, key and value labels never match (caps, short, or bound)."""
+    t = o.get("text", "")
+    return (o["kind"] == "TEXT" and not o.get("bind") and t not in HELP_NOT and re.search("[a-z]", t) is not None
+            and len(t.split()) >= 3)
+
+
 def fnum(v):
     if isinstance(v, bool):
         return "1" if v else "0"
@@ -758,6 +808,12 @@ def main():
             flags = (o.get("anchor", 0) & 3) | (4 if o.get("on") else 0) | (8 if o.get("out") else 0) | (16 if o.get("round") else 0)
             if o.get("weight", 700) >= 700:
                 flags |= 32
+            if is_help(o):
+                flags |= 64
+                for pre, mv in HELP_MOVE.items():
+                    if o.get("text", "").startswith(pre):
+                        o.update(mv)
+                        flags = (flags & ~3) | (o.get("anchor", 0) & 3)
             out.append("  {%d, %d, %d, %s, %s, %s, %s, %s, %s, %s, 0x%08Xu, 0x%08Xu, %s, %s, %s, %s, %s, %d, %d},"
                        % (k, ti, flags, fnum(float(o.get("x", 0))), fnum(float(o.get("y", 0))), fnum(float(o.get("w", 0))),
                           fnum(float(o.get("h", 0))), fnum(float(o.get("r", 0))), fnum(float(o.get("z", 0))),

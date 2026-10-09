@@ -5,6 +5,7 @@
 // Allocation happens only in prepare(). processSample() is the per-sample contract shared by jidai-rack
 // (ShogunDevice, §13.4), the plugin and the web build.
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 
@@ -85,6 +86,24 @@ class Engine {
   void setHostTransport(const HostTransport& t);  // call at each block start (SOURCE = HOST)
   void setRunning(bool run);
   bool running() const { return running_; }
+  bool previewing() const { return previewing_; }
+  bool sequencing() const { return wasRunning_; }
+  // MIDI out tap (plugin): every pattern hit that actually plays (after probability, with ratchets / flams / micro-
+  // timing as scheduled), at the sample it fires. Reading it never changes the audio.
+  struct Played {
+    std::int64_t at;  // absolute sample index (sampleIndex() at the hit)
+    int voice, kind, acc, note;  // kind 0 drum hit, 1 synth note on, 2 synth rest
+    bool tie;
+  };
+  static constexpr int kPlayedMax = 512;
+  void setPlayedTap(bool on) { tapPlayed_ = on; nPlayed_ = 0; }
+  int takePlayed(Played* out, int max) {
+    const int n = std::min(nPlayed_, max);
+    for (int i = 0; i < n; ++i) out[i] = played_[i];
+    nPlayed_ = 0;
+    return n;
+  }
+  std::int64_t sampleIndex() const { return sample_; }  // the pattern is running (or armed, EXT) after the last sample
   void restart();                       // position to step 1, keeps running
   std::int64_t counter() const { return counter_; }  // clock steps fired since start
   int displayStep() const { return displayStep_; }   // 1-based step of the bar
@@ -128,6 +147,17 @@ class Engine {
   // ---------------------------------------------------------------- modulation
   mod::ModSystem& modulation() { return mod_; }
   const mod::ModSystem& modulation() const { return mod_; }
+
+  // ---------------------------------------------------------------- exact-silence sleep
+  // With no voice, RET or delay active and every mixer, bus and decimator state exactly +0, a base sample's voice and
+  // mix pass would only write +0 again: it is skipped (the clock, sequencer, modulation and outputs still run). The
+  // output is bit-identical to running it (tests/engine.cpp testSleepBitExact compares the two).
+  void setSleepEnabled(bool on) {
+    sleepEnabled_ = on;
+    sleepVerified_ = false;
+  }
+  bool asleep() const { return asleep_; }
+  long sleptSamples() const { return sleptSamples_; }
 
   // ---------------------------------------------------------------- probes (tests, UI meters)
   bool voiceActive(int v) const { return active_[v]; }
@@ -265,11 +295,30 @@ class Engine {
   mix::Clip clip_;
   mix::Delay delay_;
   bool glueOn_ = false, delayActive_ = false;
+  bool sleepEnabled_ = true, sleepVerified_ = false, asleep_ = false;
+  std::uint64_t sleepSig_ = 0;
+  long sleptSamples_ = 0;
+  dsp::Memo1 sleepGain_[4];
+  bool canSleep(const bool* retOn, const bool* busUsed, const bool* con);
   int busSc_[4] = {-1, -1, -1, -1};
   double delayEnergy_ = 0.0;
   double outMainL_ = 0.0, outMainR_ = 0.0, outAux_[16] = {};
   bool auxUsed_[8] = {};
   double volume_ = 1.0;
+  // PERF PROTOTYPE: caches of values derived from u_eff (recomputed only when an input changes; bit-exact).
+  double panKey_[kVoices], panLc_[kVoices], panRc_[kVoices];
+  double busKey_[4][8];
+  double mDriveKey_, glueKey_, ceilKey_;
+  double dlyKey_[5];
+  int inPorts_[kPorts]; int nInPorts_ = 0;
+  void invalidateCaches() {
+    const double nan = __builtin_nan("");
+    for (int v = 0; v < kVoices; ++v) panKey_[v] = nan;
+    for (auto& b : busKey_) for (double& k : b) k = nan;
+    mDriveKey_ = glueKey_ = ceilKey_ = nan;
+    for (double& k : dlyKey_) k = nan;
+    sleepVerified_ = false;
+  }
 
   // modulation
   mod::ModSystem mod_;
@@ -280,6 +329,10 @@ class Engine {
   int nEvents_ = 0;
   std::int64_t sample_ = 0;  // absolute base-sample index
   bool running_ = false, wasRunning_ = false;
+  bool previewing_ = false;
+  bool tapPlayed_ = false;
+  int nPlayed_ = 0;
+  Played played_[kPlayedMax];  // ▶ preview while the host is stopped (SRC HOST)
   double ppq_ = 0.0;         // song position of the current sample
   double intPpq_ = 0.0, intAnchorPpq_ = 0.0, intAnchorBpm_ = 120.0;
   std::int64_t intAnchorSample_ = 0;
