@@ -138,13 +138,20 @@ class Lfo {
 
   // Advance every live instance by one base sample. ppq/locked: the host/internal song position (SYNC FREE-RUN
   // re-anchors φ = frac(ppq/D) every sample, so blocks and jumps land on the exact phase, §8.2).
+  double kRate_ = -1.0, kBpm_ = -1.0, kSlew_ = -1.0, kFade_ = -1.0, kFs_ = -1.0; int kSync_ = -1, kDiv_ = -1;
+  double cF_ = 0.0, cA_ = 0.0, cAF_ = 0.0;
   void tick(double bpm, double ppq, bool locked) {
-    const double f = freqHz(bpm);
+    if (!(dsp::exactEq(kRate_, rateU) && dsp::exactEq(kBpm_, bpm) && dsp::exactEq(kSlew_, slew) && dsp::exactEq(kFade_, fadeS) && dsp::exactEq(kFs_, fs) && kSync_ == (int)sync && kDiv_ == div)) {
+      kRate_ = rateU; kBpm_ = bpm; kSlew_ = slew; kFade_ = fadeS; kFs_ = fs; kSync_ = (int)sync; kDiv_ = div;
+      cF_ = freqHz(bpm);
+      const double T0 = cF_ > 0.0 ? 1.0 / cF_ : 1.0;
+      cA_ = rcCoef(std::fmax(0.00025, slew * T0 / 4.0), fs);
+      cAF_ = fadeS > 0.0 ? rcCoef(fadeS, fs) : 0.0;
+    }
+    const double f = cF_;
     const double dphi = f / fs;
-    const double T = f > 0.0 ? 1.0 / f : 1.0;
-    const double tau = std::fmax(0.00025, slew * T / 4.0);
-    const double a = rcCoef(tau, fs);
-    const double aFade = fadeS > 0.0 ? rcCoef(fadeS, fs) : 0.0;
+    const double a = cA_;
+    const double aFade = cAF_;
     if (mode == M_FREE_RUN && sync && locked) {
       const double target = ppq / divBeats();
       advanceAnchored(global, target - std::floor(target), dphi, a);

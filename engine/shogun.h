@@ -270,6 +270,19 @@ class Engine {
   double outMainL_ = 0.0, outMainR_ = 0.0, outAux_[16] = {};
   bool auxUsed_[8] = {};
   double volume_ = 1.0;
+  // PERF PROTOTYPE: caches of values derived from u_eff (recomputed only when an input changes; bit-exact).
+  double panKey_[kVoices], panLc_[kVoices], panRc_[kVoices];
+  double busKey_[4][8];
+  double mDriveKey_, glueKey_, ceilKey_;
+  double dlyKey_[5];
+  int inPorts_[kPorts]; int nInPorts_ = 0;
+  void invalidateCaches() {
+    const double nan = __builtin_nan("");
+    for (int v = 0; v < kVoices; ++v) panKey_[v] = nan;
+    for (auto& b : busKey_) for (double& k : b) k = nan;
+    mDriveKey_ = glueKey_ = ceilKey_ = nan;
+    for (double& k : dlyKey_) k = nan;
+  }
 
   // modulation
   mod::ModSystem mod_;

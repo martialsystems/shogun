@@ -164,6 +164,9 @@ void Engine::drawTolerances() {
 }
 
 void Engine::prepare(double fs, int os) {
+  invalidateCaches();
+  nInPorts_ = 0;
+  for (int i = 0; i < kPorts; ++i) if (kPortTable[i].dir == PortDir::In) inPorts_[nInPorts_++] = i;
   fs_ = fs;
   M_ = (os >= 4) ? 4 : (os == 2 ? 2 : 1);
   fsE_ = fs_ * M_;
@@ -696,8 +699,8 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     in = extValues;
     con = extCon;
   } else {
-    for (int i = 0; i < kPorts; ++i) {
-      if (kPortTable[i].dir != PortDir::In) continue;
+    for (int k = 0; k < nInPorts_; ++k) {
+      const int i = inPorts_[k];
       inBuf_[i] = extConnected_[i] ? extValue_[i] : kPortTable[i].rest;
       connected_[i] = extConnected_[i];
     }
@@ -883,8 +886,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
   writeControlOutputs(out);
   if (!extValues) {
     // Mirror inputs too, so the bay can show every jack's voltage.
-    for (int i = 0; i < kPorts; ++i)
-      if (kPortTable[i].dir == PortDir::In) values_[i] = inBuf_[i];
+    for (int k = 0; k < nInPorts_; ++k) values_[inPorts_[k]] = inBuf_[inPorts_[k]];
   }
   ++sample_;
 }
@@ -936,9 +938,14 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   for (int v = 0; v < kVoices; ++v) {
     const VoiceParams& vp = vparams_[v];
     route[v] = stepIndex(target_[vp.output], 14);
-    const double p = bip(ue_[vp.pan]);
-    panLg[v] = panL(p);
-    panRg[v] = panR(p);
+    if (!dsp::exactEq(ue_[vp.pan], panKey_[v])) {
+      panKey_[v] = ue_[vp.pan];
+      const double p = bip(ue_[vp.pan]);
+      panLc_[v] = panL(p);
+      panRc_[v] = panR(p);
+    }
+    panLg[v] = panLc_[v];
+    panRg[v] = panRc_[v];
     send[v] = ue_[vp.send];
     level[v] = gLevel(ue_[vp.level]) * calib_[v];
     const bool muted = stepIndex(target_[vp.mute], 2) == 1;
@@ -953,23 +960,28 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   for (int b = 0; b < 4; ++b) {
     mix::Bus& bus = bus_[b];
     const int base = P_BUS_A_DRIVE + b * (P_BUS_B_DRIVE - P_BUS_A_DRIVE);
-    bus.drive.set(ue_[base + 0]);
-    bus.tilt.set(ue_[base + 1]);
-    bus.level = masterVolume(ue_[base + 2]);
-    bus.comp.set(-40.0 + 40.0 * ue_[base + 3], 1.0 + 19.0 * ue_[base + 4], 0.0001 * std::pow(1000.0, ue_[base + 5]),
-                 0.010 * std::pow(100.0, ue_[base + 6]), 24.0 * ue_[base + 7], fsE_);
+    bool same = true;
+    for (int k = 0; k < 8; ++k) same = same && dsp::exactEq(busKey_[b][k], ue_[base + k]);
+    if (!same) {
+      for (int k = 0; k < 8; ++k) busKey_[b][k] = ue_[base + k];
+      bus.drive.set(ue_[base + 0]);
+      bus.tilt.set(ue_[base + 1]);
+      bus.level = masterVolume(ue_[base + 2]);
+      bus.comp.set(-40.0 + 40.0 * ue_[base + 3], 1.0 + 19.0 * ue_[base + 4], 0.0001 * std::pow(1000.0, ue_[base + 5]),
+                   0.010 * std::pow(100.0, ue_[base + 6]), 24.0 * ue_[base + 7], fsE_);
+    }
     bus.mix = ue_[base + 8];
     bus.compOn = stepIndex(target_[base + 9], 2) == 1;
     busSc_[b] = stepIndex(target_[base + 10], 17) - 1;
   }
-  masterDrive_.set(ue_[P_MASTER_DRIVE]);
+  if (!dsp::exactEq(mDriveKey_, ue_[P_MASTER_DRIVE])) { mDriveKey_ = ue_[P_MASTER_DRIVE]; masterDrive_.set(ue_[P_MASTER_DRIVE]); }
   glueOn_ = ue_[P_MASTER_GLUE] > 0.0;
-  glue_.set(-20.0 * ue_[P_MASTER_GLUE], 2.0, 0.010, 0.100, 0.0, fsE_);
+  if (!dsp::exactEq(glueKey_, ue_[P_MASTER_GLUE])) { glueKey_ = ue_[P_MASTER_GLUE]; glue_.set(-20.0 * ue_[P_MASTER_GLUE], 2.0, 0.010, 0.100, 0.0, fsE_); }
   width_.w = 2.0 * ue_[P_MASTER_WIDTH];
   if (std::fabs(width_.w - 1.0) < 1e-9) width_.w = 1.0;
   volume_ = masterVolume(ue_[P_MASTER_VOLUME]);
   clip_.on = stepIndex(target_[P_MASTER_CLIP], 2) == 1;
-  clip_.C = std::pow(10.0, (-6.0 + 6.0 * ue_[P_MASTER_CEILING]) / 20.0);
+  if (!dsp::exactEq(ceilKey_, ue_[P_MASTER_CEILING])) { ceilKey_ = ue_[P_MASTER_CEILING]; clip_.C = std::pow(10.0, (-6.0 + 6.0 * ue_[P_MASTER_CEILING]) / 20.0); }
   const bool delayWas = delayActive_;
   delayActive_ = sendUsed || delayEnergy_ > 1e-14;
   if (delayActive_ && !delayWas) {
@@ -1102,8 +1114,12 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   if (delayActive_) {
     const int div = stepIndex(target_[P_FX_DELAY_TIME], 12);
     const double comp = 2.0 * latencySamples() + 1.0;
-    delay_.set(kDelayBeats[div] * 60.0 / tempo() * fs_ - comp, 0.9 * ue_[P_FX_DELAY_FB],
-               2000.0 * std::pow(6.0, ue_[P_FX_DELAY_LP]), fs_);
+    const double tp = tempo();
+    if (!(dsp::exactEq(dlyKey_[0], (double)div) && dsp::exactEq(dlyKey_[1], tp) && dsp::exactEq(dlyKey_[2], comp) && dsp::exactEq(dlyKey_[3], ue_[P_FX_DELAY_FB]) && dsp::exactEq(dlyKey_[4], ue_[P_FX_DELAY_LP]))) {
+      dlyKey_[0] = div; dlyKey_[1] = tp; dlyKey_[2] = comp; dlyKey_[3] = ue_[P_FX_DELAY_FB]; dlyKey_[4] = ue_[P_FX_DELAY_LP];
+      delay_.set(kDelayBeats[div] * 60.0 / tp * fs_ - comp, 0.9 * ue_[P_FX_DELAY_FB],
+                 2000.0 * std::pow(6.0, ue_[P_FX_DELAY_LP]), fs_);
+    }
     double dl, dr;
     delay_.process(sendDec[0], sendDec[1], dl, dr);
     delayEnergy_ = 0.999 * delayEnergy_ + dl * dl + dr * dr;
