@@ -1,3 +1,5 @@
+> **Found a bug?** Please [open a GitHub issue](https://github.com/martialsystems/shogun/issues/new/choose) and fill in the bug report form.
+
 # SHOGUN
 
 **A sixteen-voice analog-style drum machine with a full patch bay, from Martial Systems.**
