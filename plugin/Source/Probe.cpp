@@ -1,6 +1,7 @@
 // ShogunProbe: headless checks of the plugin shell (spec v2.2 §15.0 step 4) and the 8 tab renders.
 //   ShogunProbe <out-dir>   writes tab_0_main.png … tab_7_global.png and prints one line per check.
 #include <cstring>
+#include <cstdlib>
 #include <map>
 #include <cmath>
 #include <iostream>
@@ -934,6 +935,128 @@ int main(int argc, char** argv) {
           juce::String("⌕ opens the search ") + (opens ? "yes" : "NO") + "; " + juce::String(all) + " listed, 'metal' -> " +
               juce::String(metal) + ", Enter loads " + juce::String::fromUTF8(factory::programName(p->getCurrentProgram())) +
               "; no match = nothing loads " + (none ? "yes" : "NO"));
+  }
+
+  // ---- item K: help / description text at 9 pt at least, a 0.5 s hover zoom that repaints only its bubble, no
+  // overlap or frame crossing at the new size, and popup menus in the plain face (not the LCD face).
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    int lines = 0;
+    float minPt = 0.0f;
+    const auto bad = pn.helpAudit(lines, minPt);
+    if (const char* f = std::getenv("SHOGUN_HELP_RECTS")) {  // the areas the label pixel diff may differ in
+      juce::String s;
+      for (const auto& a : pn.helpAreas())
+        s << a.first << " " << a.second.getX() << " " << a.second.getY() << " " << a.second.getWidth() << " " << a.second.getHeight() << "\n";
+      juce::File(juce::String::fromUTF8(f)).replaceWithText(s);
+    }
+    pn.setTab(3);
+    int op = -1;
+    for (int y = 540; y < 620 && op < 0; ++y) op = pn.helpOpAt({812.0f + 40.0f, static_cast<float>(y)});
+    const juce::Rectangle<float> line = op >= 0 ? pn.helpRect(op) : juce::Rectangle<float>();
+    pn.setTestClockMs(1000.0);
+    pn.tickForTest();
+    pn.hoverAt(line.getCentre());
+    pn.setTestClockMs(1400.0);
+    const bool early = pn.tickForTest().isEmpty() && pn.zoomOp() < 0;
+    pn.setTestClockMs(1501.0);
+    const auto d = pn.tickForTest();
+    const juce::Rectangle<int> bubble = op >= 0 ? pn.zoomDirtyRect(op) : juce::Rectangle<int>();
+    const int zoomedOp = pn.zoomOp();
+    const bool zoomed = zoomedOp == op && op >= 0 && !d.isEmpty() && bubble.contains(d.getBounds());
+    pn.hoverAt({600.0f, 5.0f});
+    const bool cleared = pn.zoomOp() < 0;
+    pn.setTestClockMs(-1.0);
+    const juce::Font mf = pn.getLookAndFeel().getPopupMenuFont();
+    const bool plain = !mf.getTypefaceName().containsIgnoreCase("mono") && mf.getHeight() >= 12.0f;
+    check(lines >= 25 && minPt >= 9.0f && bad.empty() && early && zoomed && cleared && plain, "help text",
+          juce::String(lines) + " help lines, smallest " + juce::String(minPt, 1) + " pt, overlaps / off-front / frame crossings " +
+              juce::String(static_cast<int>(bad.size())) + (bad.empty() ? juce::String() : " (" + juce::StringArray(bad.data(), static_cast<int>(bad.size())).joinIntoString(" | ") + ")") +
+              "; hover zoom not before 0.5 s " + (early ? "yes" : "NO") + ", at 0.5 s repaints only its bubble " +
+              (zoomed ? "yes" : "NO [dirty " + d.getBounds().toString() + " bubble " + bubble.toString() + " op " + juce::String(op) + "/" + juce::String(zoomedOp) + "]") + ", gone on leaving " + (cleared ? "yes" : "NO") + "; menu face " + mf.getTypefaceName() +
+              " " + juce::String(mf.getHeight(), 1));
+  }
+
+  // ---- item K screenshots (only with SHOGUN_K_SHOTS=<dir>): the editor at 100 % on a 1366 × 768 screen, a tab with
+  // help text and an open popup menu drawn by the look-and-feel (the same calls a real menu window makes). "before" is
+  // the panel with help text at its old laid-out size and JUCE's default look-and-feel (as before item K; the panel
+  // part is checked pixel-equal to the pre-K tab renders), "after" the current panel and SHOGUN's look-and-feel.
+  if (const char* kdir = std::getenv("SHOGUN_K_SHOTS")) {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    pn.setCaptureMenus(true);
+    const juce::File dir(juce::String::fromUTF8(kdir));
+    auto save = [&](const juce::Image& img, const juce::String& name) {
+      const juce::File f = dir.getChildFile(name);
+      f.getParentDirectory().createDirectory();
+      f.deleteFile();
+      juce::FileOutputStream os(f);
+      juce::PNGImageFormat png;
+      png.writeImageToStream(img, os);
+      std::printf("K shot %s\n", f.getFullPathName().toRawUTF8());
+    };
+    auto panelImage = [&]() {
+      juce::Image img(juce::Image::RGB, 1200, 672, true);
+      juce::Graphics pg(img);
+      pn.paintEntireComponent(pg, true);
+      return img;
+    };
+    struct Shot { int tab; const char* bind; const char* name; };
+    for (const Shot& s : {Shot{3, "disp:CLOCK:TEMPO", "k_mod_tempo_menu"}, Shot{7, "src", "k_global_src_menu"}}) {
+      pn.setTab(s.tab);
+      pn.setLegacyTextForTest(true);
+      const juce::Image before = panelImage();
+      save(before, juce::String("before/") + s.name + "_panel.png");
+      pn.setLegacyTextForTest(false);
+      if (s.tab == 7) {  // a help line held under the mouse past 0.5 s: its zoom bubble (after only)
+        const int hop = pn.helpOpAt({60.0f, 556.0f});
+        pn.setTestClockMs(0.0);
+        if (hop >= 0) pn.hoverAt(pn.helpRect(hop).getCentre());
+        pn.setTestClockMs(600.0);
+        pn.tickForTest();
+      }
+      const juce::Image after = panelImage();
+      pn.hoverAt({600.0f, 2.0f});
+      pn.setTestClockMs(-1.0);
+      pn.pressBind(s.bind, true);  // right-click: the full list as a menu
+      const auto m = pn.lastMenu();
+      pn.releaseAt({});
+      juce::Rectangle<float> anchor;
+      pn.bindRect(s.bind, anchor);
+      for (int phase = 0; phase < 2; ++phase) {
+        juce::LookAndFeel& lf = phase == 0 ? juce::LookAndFeel::getDefaultLookAndFeel() : pn.getLookAndFeel();
+        juce::Image img(juce::Image::RGB, 1366, 768, true);
+        juce::Graphics g(img);
+        g.fillAll(juce::Colour(0xFF3A3D42));
+        const int ox = (1366 - 1200) / 2, oy = 48;
+        g.drawImageAt(phase == 0 ? before : after, ox, oy);
+        int w = 0, total = 0;
+        std::vector<int> hs;
+        for (const auto& it : m.items) {
+          int iw = 0, ih = 0;
+          lf.getIdealPopupMenuItemSize(it, false, -1, iw, ih);
+          w = std::max(w, iw);
+          hs.push_back(ih);
+          total += ih;
+        }
+        w += 24;
+        g.saveState();
+        g.setOrigin(ox + static_cast<int>(anchor.getX()), oy + static_cast<int>(anchor.getBottom()) + 2);
+        g.reduceClipRegion(0, 0, w, total + 8);  // the look-and-feel fills its whole clip, as in a real menu window
+        lf.drawPopupMenuBackground(g, w, total + 8);
+        int y = 4;
+        for (int k = 0; k < m.items.size(); ++k) {
+          const auto ks = static_cast<size_t>(k);
+          lf.drawPopupMenuItem(g, {0, y, w, hs[ks]}, false, true, k == 2, m.ticked[ks], false, m.items[k], {}, nullptr, nullptr);
+          y += hs[ks];
+        }
+        g.restoreState();
+        save(img, juce::String(phase == 0 ? "before/" : "after/") + s.name + ".png");
+      }
+    }
   }
 
   // ---- MIDI out (item 2b): every played step leaves on the plugin's MIDI out at its exact sample (drums ch 10 note

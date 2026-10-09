@@ -8,6 +8,12 @@
 
 #include "PluginProcessor.h"
 
+// Item K: popup menus, dropdowns and lists use a plain readable face (the LCD face stays on the hardware displays).
+class ShogunLookAndFeel : public juce::LookAndFeel_V4 {
+ public:
+  juce::Font getPopupMenuFont() override;
+};
+
 struct LayoutOp {
   int kind, tab, flags;
   float x, y, w, h, r, z, v;
@@ -87,6 +93,21 @@ class ShogunPanel : public juce::Component, public juce::TooltipClient, private 
   void setTestClockMs(double ms) { testClockMs_ = ms; }
   bool flashActive() const { return !flashes_.empty(); }
   bool timerOn() const { return isTimerRunning(); }
+  // item K: help text hover zoom (and probe hooks)
+  void mouseMove(const juce::MouseEvent& e) override;
+  void mouseExit(const juce::MouseEvent& e) override;
+  void hoverAt(juce::Point<float> p);
+  int zoomOp() const { return zoomOp_; }
+  void setLegacyTextForTest(bool on) {  // probe: draw help text at its old laid-out size (the 'before' shots)
+    legacyText_ = on;
+    for (auto& c : cache_) c = juce::Image();
+  }
+  juce::Rectangle<float> helpRect(int op, bool asLaidOut = false) const;
+  std::vector<std::pair<int, juce::Rectangle<float>>> helpAreas() const;
+  juce::Rectangle<float> zoomRect(int op) const;
+  juce::Rectangle<int> zoomDirtyRect(int op) const;
+  int helpOpAt(juce::Point<float> p) const;
+  std::vector<juce::String> helpAudit(int& lines, float& minPt) const;
   juce::File exportPatternMidi();  // the current pattern as a .mid in the temp folder (drag-out, probe)
   // Probe: record menus instead of showing them; the last one's items / ticks; pick an item by its text; answer the
   // pending "Type …" prompt.
@@ -187,6 +208,12 @@ class ShogunPanel : public juce::Component, public juce::TooltipClient, private 
   int clipLen_ = 0;
   int armedSrc_ = 0;   // ASSIGN: the armed mod source (mod::SRC_*), 0 = none
   bool captureMenus_ = false;
+  int hoverOp_ = -1, zoomOp_ = -1;
+  bool legacyText_ = false;
+  double hoverSince_ = 0.0;
+  void paintZoom(juce::Graphics& g);
+  std::unique_ptr<juce::BubbleMessageComponent> dragBubble_;
+  void dragHint(const Bound& b);
   MenuCapture lastMenu_;
   int menusOpened_ = 0;
   int menuOpen_ = 0;   // async popup menus still open (their callbacks settle the undo step)
@@ -237,6 +264,7 @@ class ShogunAudioProcessorEditor : public juce::AudioProcessorEditor, private ju
   bool keyPressed(const juce::KeyPress& key, juce::Component*) override { return handleKey(key); }
   juce::Component* keyTop_ = nullptr;
   bool anchoring_ = false;
+  ShogunLookAndFeel lnf_;  // before the panel: outlives it
   ShogunPanel panel_;
   juce::TooltipWindow tips_{this, 500};
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ShogunAudioProcessorEditor)

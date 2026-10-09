@@ -699,7 +699,7 @@ def bind_global(ops):
             o["x"] = 24
             o["text"] = {497: "KNOBS: drag up / down  ·  shift = fine  ·  wheel = nudge",
                          527: "DOUBLE-CLICK a knob = its default (the noon kit value)",
-                         557: "KEYS and LCDs: click = next choice  ·  right-click = previous",
+                         557: "KEYS and LCDs: click = next  ·  shift-click = previous  ·  right-click = list",
                          587: "UI SCALE resizes this window; the corner drag works too"}[int(round(y))]
             o["fill"] = colour(mm.DIM)
         elif k == "KEY" and t == "SAVE AS DEFAULT":
@@ -758,6 +758,17 @@ def cstr(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+HELP_NOT = {"OVERSAMPLING (offline render)", "VOICES (14 drums)"}  # section labels, not help
+
+
+def is_help(o):
+    """Item K: paragraph help, hint lines, tab notes, the matrix footer and the text under graphs: unbound plain text
+    with lower-case words (3 or more). Knob, jack, key and value labels never match (caps, short, or bound)."""
+    t = o.get("text", "")
+    return (o["kind"] == "TEXT" and not o.get("bind") and t not in HELP_NOT and re.search("[a-z]", t) is not None
+            and len(t.split()) >= 3)
+
+
 def fnum(v):
     if isinstance(v, bool):
         return "1" if v else "0"
@@ -788,6 +799,8 @@ def main():
             flags = (o.get("anchor", 0) & 3) | (4 if o.get("on") else 0) | (8 if o.get("out") else 0) | (16 if o.get("round") else 0)
             if o.get("weight", 700) >= 700:
                 flags |= 32
+            if is_help(o):
+                flags |= 64
             out.append("  {%d, %d, %d, %s, %s, %s, %s, %s, %s, %s, 0x%08Xu, 0x%08Xu, %s, %s, %s, %s, %s, %d, %d},"
                        % (k, ti, flags, fnum(float(o.get("x", 0))), fnum(float(o.get("y", 0))), fnum(float(o.get("w", 0))),
                           fnum(float(o.get("h", 0))), fnum(float(o.get("r", 0))), fnum(float(o.get("z", 0))),

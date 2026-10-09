@@ -29,7 +29,10 @@ const LayoutOp kOps[] = {
 constexpr int kOpCount = static_cast<int>(sizeof kOps / sizeof kOps[0]);
 
 enum OpKind { TEXT, RTEXT, RULE, BOX, KNOB, LED, KEY, LCD, TOGGLE, JACK, RECT, CIRCLE, LINE, PATH };
-enum Flag { kAnchor = 3, kOn = 4, kOut = 8, kRound = 16, kBold = 32 };
+enum Flag { kAnchor = 3, kOn = 4, kOut = 8, kRound = 16, kBold = 32, kHelp = 64 };
+// Item K: help / description lines (flag kHelp from export_layout.py) draw at 9 pt at least and zoom on a 0.5 s hover.
+constexpr float kHelpPt = 9.0f, kZoomPt = 13.0f;
+constexpr double kZoomDelayMs = 500.0;
 
 const juce::Colour INK(0xFFF2F1EA), DIM(0xFF9A9A90), GRN(0xFF4AA862), RED(0xFFE0402E), AMB(0xFFF0B030);
 const juce::Colour LCDGRN(0xFF7EE08C), METERGRN(0xFF37C25A);
@@ -360,6 +363,7 @@ bool ShogunPanel::jackPosition(int port, juce::Point<float>& out) const {
 
 void ShogunPanel::setTab(int t) {
   tab_ = juce::jlimit(0, 7, t);
+  hoverOp_ = zoomOp_ = -1;
   repaint();
 }
 
@@ -451,6 +455,10 @@ juce::RectangleList<int> ShogunPanel::collectDirty() {
     sigR_.assign(n, {});
     sigOk_.assign(n, 0);
   }
+  if (hoverOp_ >= 0 && zoomOp_ < 0 && nowMs() - hoverSince_ >= kZoomDelayMs) {  // item K: the 0.5 s hover zoom
+    zoomOp_ = hoverOp_;
+    out.add(zoomRect(zoomOp_).transformedBy(panelTransform()).getSmallestIntegerContainer().expanded(2));
+  }
   const bool fresh = sigTab_ != tab_;  // a tab change repainted everything already
   if (fresh) std::fill(sigOk_.begin(), sigOk_.end(), 0);
   sigTab_ = tab_;
@@ -534,6 +542,119 @@ void ShogunPanel::releaseAt(juce::Point<float>) {
 }
 
 
+// ---------------------------------------------------------------- item K: menus and help text
+
+juce::Font ShogunLookAndFeel::getPopupMenuFont() { return font(15.0f, false); }  // plain sans, not the LCD face
+
+juce::Rectangle<float> ShogunPanel::helpRect(int op, bool asLaidOut) const {  // the line as drawn (at least kHelpPt)
+  const LayoutOp& o = kOps[op];
+  const float z = asLaidOut ? o.z : std::max(o.z, kHelpPt);
+  juce::GlyphArrangement ga;
+  ga.addLineOfText(font(z, (o.flags & kBold) != 0, false, o.v), u8(o.text), 0.0f, 0.0f);
+  const float w = ga.getBoundingBox(0, -1, true).getRight();
+  const int anchor = o.flags & kAnchor;
+  const float x0 = anchor == 0 ? o.x : (anchor == 2 ? o.x - w : o.x - 0.5f * w);
+  return {x0, o.y - z * 1.0f, w, z * 1.3f};
+}
+
+juce::Rectangle<float> ShogunPanel::zoomRect(int op) const {  // the hover bubble: kZoomPt text above the line
+  const LayoutOp& o = kOps[op];
+  juce::GlyphArrangement ga;
+  ga.addLineOfText(font(kZoomPt, false), u8(o.text), 0.0f, 0.0f);
+  const float w = ga.getBoundingBox(0, -1, true).getRight() + 20.0f, h = kZoomPt * 1.9f;
+  const juce::Rectangle<float> line = helpRect(op);
+  float y = line.getY() - h - 4.0f;
+  if (y < 4.0f) y = line.getBottom() + 4.0f;
+  const float x = juce::jlimit(8.0f, static_cast<float>(kW) - 8.0f - w, line.getCentreX() - 0.5f * w);
+  return {x, y, w, h};
+}
+
+juce::Rectangle<int> ShogunPanel::zoomDirtyRect(int op) const {
+  return zoomRect(op).transformedBy(panelTransform()).getSmallestIntegerContainer().expanded(2);
+}
+
+int ShogunPanel::helpOpAt(juce::Point<float> p) const {
+  for (int i : tabStaticOps_[tab_])
+    if ((kOps[i].flags & kHelp) && kOps[i].kind == TEXT && helpRect(i).expanded(2.0f).contains(p)) return i;
+  return -1;
+}
+
+void ShogunPanel::hoverAt(juce::Point<float> p) {
+  const int op = helpOpAt(p);
+  if (op == hoverOp_) return;
+  if (zoomOp_ >= 0) {  // leaving the line: the bubble goes at once
+    repaint(zoomRect(zoomOp_).transformedBy(panelTransform()).getSmallestIntegerContainer().expanded(2));
+    zoomOp_ = -1;
+  }
+  hoverOp_ = op;
+  hoverSince_ = nowMs();
+}
+
+void ShogunPanel::mouseMove(const juce::MouseEvent& e) { hoverAt(e.position.transformedBy(panelTransform().inverted())); }
+void ShogunPanel::mouseExit(const juce::MouseEvent&) { hoverAt({-100.0f, -100.0f}); }
+
+void ShogunPanel::paintZoom(juce::Graphics& g) {
+  if (zoomOp_ < 0 || kOps[zoomOp_].tab != tab_) return;
+  const juce::Rectangle<float> r = zoomRect(zoomOp_);
+  g.setColour(juce::Colour(0xF2101210));
+  g.fillRoundedRectangle(r, 4.0f);
+  g.setColour(GRN);
+  g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
+  text(g, r.getX() + 10.0f, r.getY() + kZoomPt * 1.35f, u8(kOps[zoomOp_].text), kZoomPt, 0, INK, false, 0.0f);
+}
+
+std::vector<std::pair<int, juce::Rectangle<float>>> ShogunPanel::helpAreas() const {  // probe: old and new extents
+  std::vector<std::pair<int, juce::Rectangle<float>>> out;
+  for (int i = 0; i < kOpCount; ++i)
+    if ((kOps[i].flags & kHelp) && kOps[i].kind == TEXT) out.emplace_back(kOps[i].tab, helpRect(i).getUnion(helpRect(i, true)));
+  return out;
+}
+
+std::vector<juce::String> ShogunPanel::helpAudit(int& lines, float& minPt) const {
+  std::vector<juce::String> bad;
+  lines = 0;
+  minPt = 99.0f;
+  const juce::Rectangle<float> front(6.0f, 0.0f, static_cast<float>(kW) - 12.0f, static_cast<float>(kH));  // op units: the face
+  for (int tab = 0; tab < 8; ++tab) {
+    for (int i = 0; i < kOpCount; ++i) {
+      const LayoutOp& o = kOps[i];
+      if (o.tab != tab || !(o.flags & kHelp) || o.kind != TEXT) continue;
+      ++lines;
+      minPt = std::min(minPt, std::max(o.z, kHelpPt));
+      const juce::Rectangle<float> r = helpRect(i);
+      if (!front.contains(r)) bad.push_back(u8(o.text).substring(0, 24) + " " + r.toString() + ": off the front");
+      for (int j = 0; j < kOpCount; ++j) {
+        const LayoutOp& q = kOps[j];
+        if (j == i || q.tab != tab) continue;
+        juce::Rectangle<float> qr;
+        switch (q.kind) {
+          case TEXT: {
+            if (!u8(q.text).trim().isNotEmpty()) continue;
+            if (q.flags & kHelp) { qr = helpRect(j); break; }
+            juce::GlyphArrangement ga;
+            ga.addLineOfText(font(q.z, (q.flags & kBold) != 0, false, q.v), u8(q.text), 0.0f, 0.0f);
+            const float w = ga.getBoundingBox(0, -1, true).getRight();
+            const int a = q.flags & kAnchor;
+            qr = {a == 0 ? q.x : (a == 2 ? q.x - w : q.x - 0.5f * w), q.y - q.z, w, q.z * 1.3f};
+            break;
+          }
+          case KEY: case LCD: case TOGGLE: qr = {q.x, q.y, q.w, q.h}; break;
+          case KNOB: case JACK: case LED: qr = juce::Rectangle<float>(q.x, q.y, 0, 0).expanded(std::max(q.r, 3.0f)); break;
+          case BOX: {  // a section frame: the line must sit wholly inside or wholly outside it
+            const juce::Rectangle<float> b(q.x, q.y, q.w, q.h);
+            if (b.intersects(r) && !b.contains(r))
+              bad.push_back(u8(o.text).substring(0, 24) + " " + r.toString() + ": crosses frame '" + u8(q.text) + "' " + b.toString());
+            continue;
+          }
+          default: continue;
+        }
+        if (qr.intersects(r)) bad.push_back(u8(o.text).substring(0, 24) + " " + r.toString() + " overlaps '" + u8(q.text).substring(0, 16) + "' " + qr.toString());
+      }
+    }
+  }
+  return bad;
+}
+
 // ---------------------------------------------------------------- painting
 
 void ShogunPanel::paintStatic(juce::Graphics& g, int tab) {
@@ -574,6 +695,7 @@ void ShogunPanel::paint(juce::Graphics& g) {
   }
   for (int bi : tabBounds_[tab_])
     if (bounds_[static_cast<size_t>(bi)].kind == B_CABLES) paintCables(g);
+  paintZoom(g);
   g.restoreState();
 }
 
@@ -946,7 +1068,7 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
   }
   lastText_ = t;
   switch (o.kind) {
-    case TEXT: text(g, x, y, t, o.z, anchor, juce::Colour(fill), bold, v); break;
+    case TEXT: text(g, x, y, t, (o.flags & kHelp) && !legacyText_ ? std::max(o.z, kHelpPt) : o.z, anchor, juce::Colour(fill), bold, v); break;
     case RTEXT: drawRtext(g, x, y, t, o.z); break;
     case RULE: line(g, x, y, w, h, juce::Colour(stroke), o.sw); break;
     case BOX: drawBox(g, x, y, w, h, t, o.z); break;
@@ -1454,6 +1576,23 @@ juce::File ShogunPanel::exportPatternMidi() {
   return midiexport::writePatternFile(pat, bpm, swing, scale, f) ? f : juce::File();
 }
 
+void ShogunPanel::dragHint(const Bound& b) {
+  if (captureMenus_) {  // probe: counted like a menu
+    ++menusOpened_;
+    return;
+  }
+  if (dragBubble_ == nullptr) {
+    dragBubble_ = std::make_unique<juce::BubbleMessageComponent>();
+    addChildComponent(*dragBubble_);
+  }
+  const LayoutOp& o = kOps[b.op];
+  juce::AttributedString s("Drag this key to your DAW or desktop for a MIDI file of the pattern");
+  s.setColour(INK);
+  s.setFont(font(kHelpPt + 2.0f, false));
+  dragBubble_->showAt(juce::Rectangle<float>(o.x, o.y, o.w, o.h).transformedBy(panelTransform()).getSmallestIntegerContainer(), s, 2500,
+                      true, false);
+}
+
 void ShogunPanel::showSearch() {
   if (captureMenus_) {  // probe: count it, as for menus
     ++menusOpened_;
@@ -1939,6 +2078,7 @@ void ShogunPanel::click(int bi, juce::ModifierKeys mods, juce::Point<float> p) {
     case B_KIT:
     case B_PATTERN: showProgramMenu(); break;  // the factory bank browser: INIT and the kits, each with its pattern
     case B_BROWSE: showSearch(); break;          // item J: the search popup
+    case B_MIDIDRAG: dragHint(b); break;       // a plain click: how to use the handle (the drag itself is mouseDrag)
     case B_PROG: proc_.stepProgram(b.a); break;
     case B_AB:
       if (mods.isRightButtonDown() || mods.isShiftDown()) proc_.copyAB(1 - b.a, b.a);  // right-click B = copy A → B
@@ -2150,6 +2290,7 @@ void ShogunPanel::wheelAt(juce::Point<float> p, float deltaY) {
 // ================================================================ editor
 
 ShogunAudioProcessorEditor::ShogunAudioProcessorEditor(ShogunAudioProcessor& p) : AudioProcessorEditor(p), panel_(p) {
+  setLookAndFeel(&lnf_);  // item K: menus and lists in the plain face
   addAndMakeVisible(panel_);
   // Item G: a click never takes keyboard focus, so the host keeps its keys (space); SHOGUN hears keys through a
   // listener on itself and its top-level window (handleKey) and passes on everything it does not use.
@@ -2165,6 +2306,7 @@ ShogunAudioProcessorEditor::ShogunAudioProcessorEditor(ShogunAudioProcessor& p) 
 }
 
 ShogunAudioProcessorEditor::~ShogunAudioProcessorEditor() {
+  setLookAndFeel(nullptr);
   if (keyTop_ != nullptr) keyTop_->removeKeyListener(this);
   removeKeyListener(this);
 }
