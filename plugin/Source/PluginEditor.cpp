@@ -779,10 +779,10 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
     case B_ACT: on = b->a >= 0 && vPeak_[b->a] > 1e-3f; break;
     case B_VMUTE: {  // steady green while the group is muted, else the red activity light
       bool groupMuted = b->a != 0, groupActive = false;
-      for (int v = 0; v < kVoices; ++v)
-        if ((b->a >> v) & 1) {
-          groupMuted = groupMuted && voiceMuted(v);
-          groupActive = groupActive || vPeak_[v] > 1e-3f;
+      for (int vi = 0; vi < kVoices; ++vi)
+        if ((b->a >> vi) & 1) {
+          groupMuted = groupMuted && voiceMuted(vi);
+          groupActive = groupActive || vPeak_[vi] > 1e-3f;
         }
       fill = groupMuted ? GRN.getARGB() : o.fill;
       on = groupMuted || groupActive;

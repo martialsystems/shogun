@@ -612,7 +612,7 @@ int main(int argc, char** argv) {
     check(maxCh <= 3 && timerOff && flashOk && flashFrames >= 3, "editor repaint",
           juce::String(frames) + " ticks on 8 tabs: incremental vs full repaint max " + juce::String(worst) +
               " px off by at most " + juce::String(maxCh) + "/255" + (worst ? " (" + where + ")" : juce::String()) + ", mean dirty area " +
-              juce::String(100.0 * area / frames / (1200.0 * 672.0), 1) + "% of the panel; timer off while hidden " +
+              juce::String(100.0 * static_cast<double>(area) / static_cast<double>(frames) / (1200.0 * 672.0), 1) + "% of the panel; timer off while hidden " +
               (timerOff ? "yes" : "NO") + "; step key press/flash repaints only its rect " + (flashOk ? "yes" : "NO") +
               outside + ", flash frames " + juce::String(flashFrames));
   }
@@ -762,7 +762,7 @@ int main(int argc, char** argv) {
     std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
     auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
     pn.setCaptureMenus(true);
-    int lists = 0, bad = 0, longs = 0, readouts = 0;
+    int lists = 0, bad = 0, longs = 0;
     juce::String firstBad, perTab;
     for (int tab = 0; tab < 8; ++tab) {
       pn.setTab(tab);
@@ -786,7 +786,6 @@ int main(int argc, char** argv) {
           const bool named = pi.choices != nullptr && pi.choices[0] != 0 && std::strcmp(pi.choices, "OFF|ON") != 0;
           isList = pi.kind == ParamKind::Stepped || (pi.kind == ParamKind::Toggle && named);
           n = pi.steps;
-          if (pi.kind == ParamKind::Continuous && !bind.startsWith("p:")) ++readouts;
           if (pi.kind == ParamKind::Continuous && (bind.startsWith("disp:") || pid == P_CLOCK_TEMPO || pid == P_GLOBAL_A4)) {
             const int m0 = pn.menusOpened();
             const float u0 = p->paramU(pid);
