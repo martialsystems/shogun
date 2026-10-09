@@ -25,9 +25,13 @@ inline int findParam(const char* id) {
 }
 
 // Stepped controls: index = min(N−1, floor(N·u)) (§3.2, §8.4).
+// No libm floor (this runs ~90 times a sample): for x = N·u in (0, N−1) truncation is floor; at or above N−1 the
+// clamp gives N−1 and at or below 0 (or NaN) it gives 0, the same index as min(N−1, max(0, floor(x))) for every x.
 inline int stepIndex(double u, int n) {
-  int i = static_cast<int>(std::floor(u * n));
-  return i < 0 ? 0 : (i > n - 1 ? n - 1 : i);
+  const double x = u * n;
+  if (!(x > 0.0)) return 0;
+  if (x >= static_cast<double>(n - 1)) return n - 1;
+  return static_cast<int>(x);
 }
 inline double stepU(int index, int n) { return (index + 0.5) / n; }
 inline double bip(double u) { return 2.0 * u - 1.0; }

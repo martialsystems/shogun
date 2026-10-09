@@ -164,6 +164,9 @@ void Engine::drawTolerances() {
 }
 
 void Engine::prepare(double fs, int os) {
+  invalidateCaches();
+  nInPorts_ = 0;
+  for (int i = 0; i < kPorts; ++i) if (kPortTable[i].dir == PortDir::In) inPorts_[nInPorts_++] = i;
   fs_ = fs;
   M_ = (os >= 4) ? 4 : (os == 2 ? 2 : 1);
   fsE_ = fs_ * M_;
@@ -226,6 +229,7 @@ void Engine::reset() {
   for (auto& e : events_) e.live = false;
   sample_ = 0;
   running_ = wasRunning_ = false;
+  previewing_ = false;
   ppq_ = intPpq_ = 0.0;
   hostOffset_ = 0;
   for (int t = 0; t < 16; ++t) {
@@ -247,6 +251,7 @@ void Engine::reset() {
   for (double& a : outAux_) a = 0.0;
   for (float& x : values_) x = 0.0f;
   for (int i = 0; i < kVoices; ++i) pending_[i] = Pending{};
+  sleepVerified_ = asleep_ = false;
 }
 
 void Engine::setParam(int id, double u) {
@@ -395,11 +400,29 @@ void Engine::clockSample(const float* in, const bool* con) {
 
   bool run = running_;
   double ppq = 0.0;
-  if (hostMode) {
+  if (hostMode && running_ && !host_.playing) {
+    // ▶ with the host stopped: an internal preview at the host's tempo (the INT clock from the press), until the host
+    // starts and takes over.
+    previewing_ = true;
+    if (!dsp::exactEq(bpm, intAnchorBpm_)) {
+      intAnchorPpq_ = intPpq_;
+      intAnchorSample_ = sample_;
+      intAnchorBpm_ = bpm;
+    }
+    ppq = intAnchorPpq_ + static_cast<double>(sample_ - intAnchorSample_) * bpm / (60.0 * fs_);
+    intPpq_ = ppq;
+    ++hostOffset_;
+  } else if (hostMode) {
+    if (previewing_ && host_.playing) {  // the host started: the preview ends, the host's transport drives
+      running_ = false;
+      wasRunning_ = false;
+    }
+    previewing_ = false;  // (or ▶ stopped it: the stop below runs as usual)
     run = host_.playing;
     ppq = host_.ppq + hostOffset_ * bpm / (60.0 * fs_);
     ++hostOffset_;
   } else if (src == SRC_EXT) {
+    previewing_ = false;
     if (run && clkEdge) {
       if (lastClkEdge_ >= 0) extPeriod_ = static_cast<double>(sample_ - lastClkEdge_);
       lastClkEdge_ = sample_;
@@ -409,6 +432,7 @@ void Engine::clockSample(const float* in, const bool* con) {
     const double perQ = mode == 0 ? spqG : kPpqn[mode];
     ppq = extCount_ > 0 ? static_cast<double>(extCount_ - 1) / perQ : -1.0;
   } else {
+    previewing_ = false;
     if (!dsp::exactEq(bpm, intAnchorBpm_)) {
       intAnchorPpq_ = intPpq_;
       intAnchorSample_ = sample_;
@@ -572,6 +596,7 @@ void Engine::fireDue(const float* in, const bool* con) {
       }
       continue;
     }
+    if (tapPlayed_ && e.pattern && nPlayed_ < kPlayedMax) played_[nPlayed_++] = {sample_, e.voice, e.kind, e.acc, static_cast<int>(std::lround(e.note)), e.tie};
     fireEvent(e, in, con);
   }
   nEvents_ = top;
@@ -696,8 +721,8 @@ void Engine::processSample(float* extValues, const bool* extCon) {
     in = extValues;
     con = extCon;
   } else {
-    for (int i = 0; i < kPorts; ++i) {
-      if (kPortTable[i].dir != PortDir::In) continue;
+    for (int k = 0; k < nInPorts_; ++k) {
+      const int i = inPorts_[k];
       inBuf_[i] = extConnected_[i] ? extValue_[i] : kPortTable[i].rest;
       connected_[i] = extConnected_[i];
     }
@@ -883,8 +908,7 @@ void Engine::processSample(float* extValues, const bool* extCon) {
   writeControlOutputs(out);
   if (!extValues) {
     // Mirror inputs too, so the bay can show every jack's voltage.
-    for (int i = 0; i < kPorts; ++i)
-      if (kPortTable[i].dir == PortDir::In) values_[i] = inBuf_[i];
+    for (int k = 0; k < nInPorts_; ++k) values_[inPorts_[k]] = inBuf_[inPorts_[k]];
   }
   ++sample_;
 }
@@ -936,9 +960,14 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   for (int v = 0; v < kVoices; ++v) {
     const VoiceParams& vp = vparams_[v];
     route[v] = stepIndex(target_[vp.output], 14);
-    const double p = bip(ue_[vp.pan]);
-    panLg[v] = panL(p);
-    panRg[v] = panR(p);
+    if (!dsp::exactEq(ue_[vp.pan], panKey_[v])) {
+      panKey_[v] = ue_[vp.pan];
+      const double p = bip(ue_[vp.pan]);
+      panLc_[v] = panL(p);
+      panRc_[v] = panR(p);
+    }
+    panLg[v] = panLc_[v];
+    panRg[v] = panRc_[v];
     send[v] = ue_[vp.send];
     level[v] = gLevel(ue_[vp.level]) * calib_[v];
     const bool muted = stepIndex(target_[vp.mute], 2) == 1;
@@ -953,28 +982,45 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   for (int b = 0; b < 4; ++b) {
     mix::Bus& bus = bus_[b];
     const int base = P_BUS_A_DRIVE + b * (P_BUS_B_DRIVE - P_BUS_A_DRIVE);
-    bus.drive.set(ue_[base + 0]);
-    bus.tilt.set(ue_[base + 1]);
-    bus.level = masterVolume(ue_[base + 2]);
-    bus.comp.set(-40.0 + 40.0 * ue_[base + 3], 1.0 + 19.0 * ue_[base + 4], 0.0001 * std::pow(1000.0, ue_[base + 5]),
-                 0.010 * std::pow(100.0, ue_[base + 6]), 24.0 * ue_[base + 7], fsE_);
+    bool same = true;
+    for (int k = 0; k < 8; ++k) same = same && dsp::exactEq(busKey_[b][k], ue_[base + k]);
+    if (!same) {
+      for (int k = 0; k < 8; ++k) busKey_[b][k] = ue_[base + k];
+      bus.drive.set(ue_[base + 0]);
+      bus.tilt.set(ue_[base + 1]);
+      bus.level = masterVolume(ue_[base + 2]);
+      bus.comp.set(-40.0 + 40.0 * ue_[base + 3], 1.0 + 19.0 * ue_[base + 4], 0.0001 * std::pow(1000.0, ue_[base + 5]),
+                   0.010 * std::pow(100.0, ue_[base + 6]), 24.0 * ue_[base + 7], fsE_);
+    }
     bus.mix = ue_[base + 8];
     bus.compOn = stepIndex(target_[base + 9], 2) == 1;
     busSc_[b] = stepIndex(target_[base + 10], 17) - 1;
   }
-  masterDrive_.set(ue_[P_MASTER_DRIVE]);
+  if (!dsp::exactEq(mDriveKey_, ue_[P_MASTER_DRIVE])) { mDriveKey_ = ue_[P_MASTER_DRIVE]; masterDrive_.set(ue_[P_MASTER_DRIVE]); }
   glueOn_ = ue_[P_MASTER_GLUE] > 0.0;
-  glue_.set(-20.0 * ue_[P_MASTER_GLUE], 2.0, 0.010, 0.100, 0.0, fsE_);
+  if (!dsp::exactEq(glueKey_, ue_[P_MASTER_GLUE])) { glueKey_ = ue_[P_MASTER_GLUE]; glue_.set(-20.0 * ue_[P_MASTER_GLUE], 2.0, 0.010, 0.100, 0.0, fsE_); }
   width_.w = 2.0 * ue_[P_MASTER_WIDTH];
   if (std::fabs(width_.w - 1.0) < 1e-9) width_.w = 1.0;
   volume_ = masterVolume(ue_[P_MASTER_VOLUME]);
   clip_.on = stepIndex(target_[P_MASTER_CLIP], 2) == 1;
-  clip_.C = std::pow(10.0, (-6.0 + 6.0 * ue_[P_MASTER_CEILING]) / 20.0);
+  if (!dsp::exactEq(ceilKey_, ue_[P_MASTER_CEILING])) { ceilKey_ = ue_[P_MASTER_CEILING]; clip_.C = std::pow(10.0, (-6.0 + 6.0 * ue_[P_MASTER_CEILING]) / 20.0); }
   const bool delayWas = delayActive_;
   delayActive_ = sendUsed || delayEnergy_ > 1e-14;
   if (delayActive_ && !delayWas) {
     for (auto& d : decSend_) d.reset();
   }
+  asleep_ = canSleep(retOn, busUsed, con);
+  if (asleep_) {
+    // The skipped pass would have left every state at +0 and written only the bus comp's gain readout.
+    for (int b = 0; b < 4; ++b) {
+      mix::Bus& bus = bus_[b];
+      if ((busUsed[b] || bus.compOn) && bus.compOn)
+        bus.lastGain = sleepGain_[b](bus.comp.yL + bus.comp.makeup, mix::dbToGain);
+    }
+    ++sleptSamples_;
+    return;
+  }
+  sleepVerified_ = false;
 
   double sendDec[2] = {0.0, 0.0};
   for (int sub = 0; sub < M_; ++sub) {
@@ -1102,8 +1148,12 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   if (delayActive_) {
     const int div = stepIndex(target_[P_FX_DELAY_TIME], 12);
     const double comp = 2.0 * latencySamples() + 1.0;
-    delay_.set(kDelayBeats[div] * 60.0 / tempo() * fs_ - comp, 0.9 * ue_[P_FX_DELAY_FB],
-               2000.0 * std::pow(6.0, ue_[P_FX_DELAY_LP]), fs_);
+    const double tp = tempo();
+    if (!(dsp::exactEq(dlyKey_[0], (double)div) && dsp::exactEq(dlyKey_[1], tp) && dsp::exactEq(dlyKey_[2], comp) && dsp::exactEq(dlyKey_[3], ue_[P_FX_DELAY_FB]) && dsp::exactEq(dlyKey_[4], ue_[P_FX_DELAY_LP]))) {
+      dlyKey_[0] = div; dlyKey_[1] = tp; dlyKey_[2] = comp; dlyKey_[3] = ue_[P_FX_DELAY_FB]; dlyKey_[4] = ue_[P_FX_DELAY_LP];
+      delay_.set(kDelayBeats[div] * 60.0 / tp * fs_ - comp, 0.9 * ue_[P_FX_DELAY_FB],
+                 2000.0 * std::pow(6.0, ue_[P_FX_DELAY_LP]), fs_);
+    }
     double dl, dr;
     delay_.process(sendDec[0], sendDec[1], dl, dr);
     delayEnergy_ = 0.999 * delayEnergy_ + dl * dl + dr * dr;
@@ -1114,6 +1164,44 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
     for (auto& c : fxBuf_)
       for (double& x : c) x = 0.0;
   }
+}
+
+// Exact-silence check (see shogun.h). The signature holds what decides which states the pass would touch (processed
+// buses, used aux pairs, connected OUT taps, glue on); a change re-runs the bit check before sleeping on.
+bool Engine::canSleep(const bool* retOn, const bool* busUsed, const bool* con) {
+  if (!sleepEnabled_ || delayActive_) return false;
+  for (int v = 0; v < kVoices; ++v)
+    if (active_[v] || retOn[v]) return false;
+  std::uint64_t sig = glueOn_ ? 1u : 0u;
+  for (int b = 0; b < 4; ++b)
+    if (busUsed[b] || bus_[b].compOn) sig |= std::uint64_t{2} << b;
+  for (int a = 0; a < 8; ++a)
+    if (auxUsed_[a]) sig |= std::uint64_t{1} << (5 + a);
+  for (int v = 0; v < kVoices; ++v) {
+    const int op = isDrum(v) ? drumPort(v, DJ_OUT) : synthPort(v - LEAD, SJ_OUT);
+    if (con && con[op]) sig |= std::uint64_t{1} << (13 + v);
+  }
+  if (sleepVerified_ && sig == sleepSig_) return true;
+  using dsp::bitsOf;
+  auto z = [](double x) { return bitsOf(x) == 0; };
+  bool ok = z(outMainL_) && z(outMainR_) && decMain_[0].silent() && decMain_[1].silent();
+  for (int c = 0; c < 2 && ok; ++c)
+    for (double x : fxBuf_[c]) ok = ok && z(x);
+  for (int v = 0; v < kVoices && ok; ++v) ok = z(voiceOut_[v]) && z(coreOut_[v]);
+  ok = ok && z(masterDrive_.l.xp) && z(masterDrive_.r.xp) && z(width_.sLp.s) && z(clip_.l.xp) && z(clip_.r.xp);
+  if (glueOn_) ok = ok && z(glue_.yL);
+  for (int b = 0; b < 4 && ok; ++b) {
+    if (!(sig & (std::uint64_t{2} << b))) continue;
+    const mix::Bus& bus = bus_[b];
+    ok = z(bus.drive.l.xp) && z(bus.drive.r.xp) && z(bus.tilt.l.s) && z(bus.tilt.r.s) && (!bus.compOn || z(bus.comp.yL));
+  }
+  for (int a = 0; a < 8 && ok; ++a)
+    if (auxUsed_[a]) ok = z(outAux_[2 * a]) && z(outAux_[2 * a + 1]) && decAux_[2 * a].silent() && decAux_[2 * a + 1].silent();
+  for (int v = 0; v < kVoices && ok; ++v)
+    if (sig & (std::uint64_t{1} << (13 + v))) ok = z(outTap_[v]) && decOut_[v].silent();
+  sleepVerified_ = ok;
+  sleepSig_ = sig;
+  return ok;
 }
 
 void Engine::writeControlOutputs(float* out) {
