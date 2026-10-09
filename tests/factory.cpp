@@ -351,10 +351,126 @@ static void testPatchWriterNoLibc() {
   truth(T, "documents = patchToJson (sparse and full)", docs);
 }
 
+
+// Exact-silence sleep (shogun.h): an engine that sleeps renders the same bits as one that never does, through stops,
+// long silences, routing/bus/glue/delay/width changes while asleep, wakes by hit, note, RET and OUT jacks, at 1/2/4x.
+static void testSleepBitExact() {
+  const char* T = "testSleepBitExact";
+  long samples = 0, diffs = 0, slept = 0;
+  auto pid = [](const char* n) { return findParam(n); };
+  for (int os : {1, 2, 4})
+    for (int prog : {0, 3, 17}) {
+      Engine a, b;
+      for (Engine* e : {&a, &b}) {
+        e->prepare(44100.0, os);
+        Patch pt;
+        factory::loadProgram(prog, pt);
+        applyPatch(pt, *e);
+        e->setParamNow(P_CLOCK_SOURCE, stepU(1, 3));
+      }
+      b.setSleepEnabled(false);
+      auto both = [&](auto f) { f(a); f(b); };
+      auto run = [&](long n) {
+        for (long i = 0; i < n; ++i) {
+          a.processSample();
+          b.processSample();
+          ++samples;
+          std::uint64_t x, y;
+          double la = a.mainL(), lb = b.mainL(), ra = a.mainR(), rb = b.mainR();
+          std::memcpy(&x, &la, 8);
+          std::memcpy(&y, &lb, 8);
+          bool same = x == y;
+          std::memcpy(&x, &ra, 8);
+          std::memcpy(&y, &rb, 8);
+          same = same && x == y;
+          for (int k = 0; k < 16; ++k) {
+            double ua = a.aux()[k], ub = b.aux()[k];
+            std::memcpy(&x, &ua, 8);
+            std::memcpy(&y, &ub, 8);
+            same = same && x == y;
+          }
+          diffs += !same;
+        }
+      };
+      const long s = 44100;
+      both([](Engine& e) { e.setRunning(true); });
+      run(2 * s);
+      both([](Engine& e) { e.setRunning(false); });
+      run(12 * s);
+      both([&](Engine& e) { e.setParam(pid("BD1:OUTPUT"), stepU(6, 14)); e.setParam(pid("SD:OUTPUT"), stepU(2, 14)); });
+      run(2 * s);
+      both([&](Engine& e) { e.setParam(pid("BUS B:COMP"), stepU(1, 2)); e.setParam(pid("MASTER:GLUE"), 0.5);
+                            e.setParam(pid("MASTER:WIDTH"), 0.8); e.setParam(pid("MASTER:DRIVE"), 0.4);
+                            e.setParam(pid("MASTER:CLIP"), stepU(1, 2)); });
+      run(2 * s);
+      both([](Engine& e) { e.trigger(BD1); e.trigger(SD); });
+      run(8 * s);
+      both([&](Engine& e) { e.setParam(pid("CH:SEND"), 0.6); e.trigger(CH); });
+      run(10 * s);
+      both([](Engine& e) { e.noteOn(LEAD, 62); });
+      run(s / 10);
+      both([](Engine& e) { e.noteOff(LEAD); });
+      run(6 * s);
+      both([](Engine& e) { e.setExternalInput(drumPort(CP, DJ_OUT), 0.0f, true); });
+      run(2 * s);
+      both([](Engine& e) { e.trigger(CP); });
+      run(4 * s);
+      both([](Engine& e) { e.setExternalInput(drumPort(RS, DJ_RET), 1.5f, true); });
+      run(s);
+      both([](Engine& e) { e.setExternalInput(drumPort(RS, DJ_RET), 0.0f, false); });
+      run(6 * s);
+      both([](Engine& e) { e.setRunning(true); });
+      run(2 * s);
+      both([](Engine& e) { e.setRunning(false); });
+      run(6 * s);
+      slept += a.sleptSamples();
+      if (b.sleptSamples() != 0) ++diffs;
+    }
+  std::printf("%s: %ld samples, %ld slept (%.0f %%), %ld differing\n", T, samples, slept,
+              100.0 * static_cast<double>(slept) / static_cast<double>(samples), diffs);
+  truth(T, "sleeping engine is bit-identical to a non-sleeping one", diffs == 0);
+  truth(T, "the engine sleeps in silence", slept > samples / 4);
+}
+
+// BD1 DRIVE gliding to 0 (and tiny drive with the TONE jack moving) stays bounded: the tanh ADAA difference quotient
+// used to cancel to noise for drive in (0, 1e-2) and peak at +191 dBFS.
+static void testBd1DriveToZeroBounded() {
+  const char* T = "testBd1DriveToZeroBounded";
+  double voicePk = 0.0, mainPk = 0.0;
+  bool finite = true;
+  for (double from : {1.0, 0.5, 0.2, 0.05, 0.01}) {
+    Engine e;
+    e.prepare(48000.0, 2);
+    e.loadInit();
+    e.setParamNow(P_BD1_DRIVE, from);
+    for (int h = 0; h < 6; ++h) {
+      if (h == 1) e.setParam(P_BD1_DRIVE, 0.0);
+      if (h == 3) e.setParam(P_BD1_DRIVE, from);
+      if (h == 4) e.setParam(P_BD1_DRIVE, 0.0005);
+      e.trigger(BD1, 5.0, 0.0, 3);
+      for (long i = 0; i < 24000; ++i) {
+        if (h >= 4) e.setExternalInput(drumPort(BD1, DJ_TONE), static_cast<float>(5.0 * std::sin(i * 0.001)), true);
+        e.processSample();
+        const double v = std::fabs(e.voiceOut(BD1)), m = std::fmax(std::fabs(e.mainL()), std::fabs(e.mainR()));
+        finite = finite && std::isfinite(v) && std::isfinite(m);
+        voicePk = std::fmax(voicePk, v);
+        mainPk = std::fmax(mainPk, m);
+      }
+    }
+  }
+  std::printf("%s: BD1 voice peak %.2f dBFS, main peak %.2f dBFS over drive glides to 0 and tiny drive + TONE jack\n", T,
+              20.0 * std::log10(voicePk), 20.0 * std::log10(mainPk));
+  truth(T, "finite", finite);
+  atMost(T, "BD1 voice peak (linear) at or below 4 (+12 dBFS)", voicePk, 4.0);
+  atMost(T, "main peak (linear) at or below 2 (+6 dBFS)", mainPk, 2.0);
+}
+
 void runFactoryTests() {
   testFactoryPresetsLoad();
   testFactoryRoundTrip();
   testPatchWriterNoLibc();
   testFactoryRenderLevels();
   testFactoryNames();
+  testSleepBitExact();
+  testBd1DriveToZeroBounded();
 }

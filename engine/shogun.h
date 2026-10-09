@@ -129,6 +129,17 @@ class Engine {
   mod::ModSystem& modulation() { return mod_; }
   const mod::ModSystem& modulation() const { return mod_; }
 
+  // ---------------------------------------------------------------- exact-silence sleep
+  // With no voice, RET or delay active and every mixer, bus and decimator state exactly +0, a base sample's voice and
+  // mix pass would only write +0 again: it is skipped (the clock, sequencer, modulation and outputs still run). The
+  // output is bit-identical to running it (tests/engine.cpp testSleepBitExact compares the two).
+  void setSleepEnabled(bool on) {
+    sleepEnabled_ = on;
+    sleepVerified_ = false;
+  }
+  bool asleep() const { return asleep_; }
+  long sleptSamples() const { return sleptSamples_; }
+
   // ---------------------------------------------------------------- probes (tests, UI meters)
   bool voiceActive(int v) const { return active_[v]; }
   Voice& voice(int v) { return *voices_[v]; }
@@ -265,6 +276,11 @@ class Engine {
   mix::Clip clip_;
   mix::Delay delay_;
   bool glueOn_ = false, delayActive_ = false;
+  bool sleepEnabled_ = true, sleepVerified_ = false, asleep_ = false;
+  std::uint64_t sleepSig_ = 0;
+  long sleptSamples_ = 0;
+  dsp::Memo1 sleepGain_[4];
+  bool canSleep(const bool* retOn, const bool* busUsed, const bool* con);
   int busSc_[4] = {-1, -1, -1, -1};
   double delayEnergy_ = 0.0;
   double outMainL_ = 0.0, outMainR_ = 0.0, outAux_[16] = {};
@@ -282,6 +298,7 @@ class Engine {
     for (auto& b : busKey_) for (double& k : b) k = nan;
     mDriveKey_ = glueKey_ = ceilKey_ = nan;
     for (double& k : dlyKey_) k = nan;
+    sleepVerified_ = false;
   }
 
   // modulation

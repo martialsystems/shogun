@@ -338,7 +338,12 @@ struct TanhAdaa {
     const double td = std::tanh(d);
     const double diff = x - xp;
     double y;
-    if (std::fabs(diff) < 1e-5) {
+    if (d < 1e-2) {
+      // Tiny drive: the ADAA difference quotient (logCosh(d·x) − logCosh(d·xp)) / (d·tanh d·Δx) cancels to noise
+      // over ~d² and blew up (+191 dBFS on a BD1 DRIVE glide to 0). Here the curve is a straight line to 1e-4, so
+      // the plain tanh(d·x)/tanh(d) needs no anti-aliasing.
+      y = std::tanh(d * x) / td;
+    } else if (std::fabs(diff) < 1e-5) {
       y = std::tanh(d * 0.5 * (x + xp)) / td;
     } else {
       y = (logCosh(d * x) - logCosh(d * xp)) / (d * td * diff);
@@ -449,11 +454,22 @@ class Decimator {
     phase2_ = 0;
     u0_ = 0.0;
     out_ = 0.0;
+    zeroRun_ = kSilentRun;
   }
+  // Every stored sample is +0 (bit pattern 0): the last kSilentRun pushes were +0, enough to refill both stages
+  // (2 × 92 stage-1 entries at 4x, after the 25-tap stage 2), or nothing non-zero was pushed since reset(). Pushing
+  // +0 into a silent decimator returns +0 and leaves it silent; only the ring positions move (the engine's sleep).
+  static constexpr int kSilentRun = 2 * 92 + hb::kStage2Taps + 4;
+  bool silent() const { return zeroRun_ >= kSilentRun && bitsOf(out_) == 0 && bitsOf(u0_) == 0; }
   // Push one sample at M·fs. Returns true (and sets out) on the push that completes a base-rate output: the last
   // sub-sample of the base sample. The output is y[n] = Σ h[k]·u[2n−k] (centred on the FIRST sub-sample of base
   // sample n − latency), so the delay is an integer number of base samples.
   bool push(double x, double& out) {
+    if (bitsOf(x) == 0) {
+      if (zeroRun_ < kSilentRun) ++zeroRun_;
+    } else {
+      zeroRun_ = 0;
+    }
     if (M_ == 1) {
       out = x;
       return true;
@@ -485,6 +501,7 @@ class Decimator {
   int phase2_ = 0;
   double u0_ = 0.0;
   double out_ = 0.0;
+  int zeroRun_ = kSilentRun;
 };
 
 // RET-style upsampler: base rate in, M samples out. +23 (2×) / +26 (4×).

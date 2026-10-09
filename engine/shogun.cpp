@@ -250,6 +250,7 @@ void Engine::reset() {
   for (double& a : outAux_) a = 0.0;
   for (float& x : values_) x = 0.0f;
   for (int i = 0; i < kVoices; ++i) pending_[i] = Pending{};
+  sleepVerified_ = asleep_ = false;
 }
 
 void Engine::setParam(int id, double u) {
@@ -987,6 +988,18 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
   if (delayActive_ && !delayWas) {
     for (auto& d : decSend_) d.reset();
   }
+  asleep_ = canSleep(retOn, busUsed, con);
+  if (asleep_) {
+    // The skipped pass would have left every state at +0 and written only the bus comp's gain readout.
+    for (int b = 0; b < 4; ++b) {
+      mix::Bus& bus = bus_[b];
+      if ((busUsed[b] || bus.compOn) && bus.compOn)
+        bus.lastGain = sleepGain_[b](bus.comp.yL + bus.comp.makeup, mix::dbToGain);
+    }
+    ++sleptSamples_;
+    return;
+  }
+  sleepVerified_ = false;
 
   double sendDec[2] = {0.0, 0.0};
   for (int sub = 0; sub < M_; ++sub) {
@@ -1130,6 +1143,44 @@ void Engine::renderSubSamples(const float* in, const bool* con) {
     for (auto& c : fxBuf_)
       for (double& x : c) x = 0.0;
   }
+}
+
+// Exact-silence check (see shogun.h). The signature holds what decides which states the pass would touch (processed
+// buses, used aux pairs, connected OUT taps, glue on); a change re-runs the bit check before sleeping on.
+bool Engine::canSleep(const bool* retOn, const bool* busUsed, const bool* con) {
+  if (!sleepEnabled_ || delayActive_) return false;
+  for (int v = 0; v < kVoices; ++v)
+    if (active_[v] || retOn[v]) return false;
+  std::uint64_t sig = glueOn_ ? 1u : 0u;
+  for (int b = 0; b < 4; ++b)
+    if (busUsed[b] || bus_[b].compOn) sig |= std::uint64_t{2} << b;
+  for (int a = 0; a < 8; ++a)
+    if (auxUsed_[a]) sig |= std::uint64_t{1} << (5 + a);
+  for (int v = 0; v < kVoices; ++v) {
+    const int op = isDrum(v) ? drumPort(v, DJ_OUT) : synthPort(v - LEAD, SJ_OUT);
+    if (con && con[op]) sig |= std::uint64_t{1} << (13 + v);
+  }
+  if (sleepVerified_ && sig == sleepSig_) return true;
+  using dsp::bitsOf;
+  auto z = [](double x) { return bitsOf(x) == 0; };
+  bool ok = z(outMainL_) && z(outMainR_) && decMain_[0].silent() && decMain_[1].silent();
+  for (int c = 0; c < 2 && ok; ++c)
+    for (double x : fxBuf_[c]) ok = ok && z(x);
+  for (int v = 0; v < kVoices && ok; ++v) ok = z(voiceOut_[v]) && z(coreOut_[v]);
+  ok = ok && z(masterDrive_.l.xp) && z(masterDrive_.r.xp) && z(width_.sLp.s) && z(clip_.l.xp) && z(clip_.r.xp);
+  if (glueOn_) ok = ok && z(glue_.yL);
+  for (int b = 0; b < 4 && ok; ++b) {
+    if (!(sig & (std::uint64_t{2} << b))) continue;
+    const mix::Bus& bus = bus_[b];
+    ok = z(bus.drive.l.xp) && z(bus.drive.r.xp) && z(bus.tilt.l.s) && z(bus.tilt.r.s) && (!bus.compOn || z(bus.comp.yL));
+  }
+  for (int a = 0; a < 8 && ok; ++a)
+    if (auxUsed_[a]) ok = z(outAux_[2 * a]) && z(outAux_[2 * a + 1]) && decAux_[2 * a].silent() && decAux_[2 * a + 1].silent();
+  for (int v = 0; v < kVoices && ok; ++v)
+    if (sig & (std::uint64_t{1} << (13 + v))) ok = z(outTap_[v]) && decOut_[v].silent();
+  sleepVerified_ = ok;
+  sleepSig_ = sig;
+  return ok;
 }
 
 void Engine::writeControlOutputs(float* out) {
