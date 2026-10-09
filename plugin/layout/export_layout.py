@@ -369,14 +369,16 @@ def bind_grid(ops):
         if SY + 14 <= y < SY + 16 + rh * 16:
             ri = int((y - (SY + 16) + 1) // rh)
             ri = max(0, min(15, ri))
-            if k == "RECT" and o["x"] >= gx0 and o["w"] < cw:
+            # The playhead column (over step 5, the full grid height) first: it also starts at x >= gx0 and is
+            # narrower than a cell, and the step-cell rule used to bind it as one giant step-5 cell of row 1.
+            if k == "RECT" and abs(o["x"] - (gx0 + cw * 4)) < 0.1 and o.get("h", 0) > rh:
+                o["bind"] = "playhead"
+            elif k == "RECT" and o["x"] >= gx0 and o["w"] < cw and o.get("h", 0) < rh:
                 o["bind"] = "grid:%d:%d" % (ri, int((o["x"] - gx0) // cw))
                 o["fill"] = colour("#0b0c0b")
                 o["opacity"] = 1.0
             elif k == "RECT" and o["x"] == 12:
                 o["bind"] = "gridsel:%d" % ri
-            elif k == "RECT" and abs(o["x"] - (gx0 + cw * 4)) < 0.1:
-                o["bind"] = "playhead"
             elif k == "KEY" and o["x"] == 80:
                 o["bind"] = "p:%s:MUTE" % rows[ri]
                 o["lit"] = 0

@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
 
+#include <limits>
+
 #include <jidai/CableStandard.h>
 
 #include <cmath>
@@ -249,6 +251,7 @@ ShogunAudioProcessor::Snapshot ShogunAudioProcessor::captureState() const {
 
 void ShogunAudioProcessor::restoreState(const Snapshot& s, bool keepSource) {
   if (s.empty()) return;
+  const LoadGuard guard(*this);
   resetParams(keepSource);
   patchFromJson(juce::JSON::parse(s.json), !keepSource);
   currentProgram_ = juce::jlimit(0, factory::kPrograms - 1, s.program);
@@ -351,17 +354,20 @@ double ShogunAudioProcessor::velCurve(int mode, double x) {
   }
 }
 
-void ShogunAudioProcessor::loadProgram(int program) {
+void ShogunAudioProcessor::loadProgramWith(int program, const std::function<void()>& midway) {
   if (program < 0 || program >= factory::kPrograms) return;
+  const LoadGuard guard(*this);
   currentProgram_ = program;
   if (program == 0) {
     initPatch();
+    if (midway) midway();
     snapParams_.store(true, std::memory_order_release);
     return;
   }
   // The bank documents are sparse: INIT first, then the document as a saved state loads, except that SRC (an instance
   // setting) is neither reset nor taken from the document.
   resetParams(true);
+  if (midway) midway();
   patchFromJson(juce::JSON::parse(juce::String::fromUTF8(factory::programJson(program))), false);
   snapParams_.store(true, std::memory_order_release);  // the kit's values, not a glide from INIT's
 }
@@ -443,9 +449,15 @@ void ShogunAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     }
   }
   engine_->setHostTransport(ht);
-  applyParams(snapParams_.exchange(false, std::memory_order_acq_rel));  // a program change lands at once
+  // A program load in progress (reset done, values not yet): apply nothing this block. After it, every parameter is
+  // set at once (a program change lands at once, nothing glides from INIT values).
+  if (loading_.load(std::memory_order_acquire) == 0) {
+    if (applyAll_.exchange(false, std::memory_order_acq_rel))
+      for (float& l : last_) l = std::numeric_limits<float>::quiet_NaN();
+    applyParams(snapParams_.exchange(false, std::memory_order_acq_rel));
+    pickUpEdits();
+  }
   if (const std::uint32_t s = serialReq_.exchange(0, std::memory_order_acq_rel)) engine_->setSerial(s);  // RE-ROLL
-  pickUpEdits();
 
   const int rq = runReq_.exchange(-1);
   if (rq >= 0) engine_->setRunning(rq == 1);
@@ -748,6 +760,7 @@ void ShogunAudioProcessor::setStateInformation(const void* data, int sizeInBytes
   if (xml == nullptr || !xml->hasTagName("SHOGUN")) return;
   if (xml->getIntAttribute("version", 1) < 2) return;  // v1 plugin states (old AudioParameterInt ids) are not migrated
   const juce::var doc = juce::JSON::parse(xml->getAllSubText());
+  const LoadGuard guard(*this);
   patchFromJson(doc);
   const juce::String unit = doc["unit"].toString();  // the unit serial travels with the plugin state
   if (unit.startsWithIgnoreCase("0x")) requestSerial(static_cast<std::uint32_t>(unit.substring(2).getHexValue64()));

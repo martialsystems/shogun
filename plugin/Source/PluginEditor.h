@@ -43,6 +43,10 @@ class ShogunPanel : public juce::Component, private juce::Timer {
   juce::String boundText(const char* bind);
   // Click / wheel at a panel point as the mouse would (probe), and a DEPTH drag of dx panel units on a matrix row.
   bool clickAt(juce::Point<float> p, bool right = false);
+  // Probe: the rect of the nth op on the current tab bound to `bind`, and the binding the hit test finds at a point
+  // ("" when none).
+  bool bindRect(const char* bind, juce::Rectangle<float>& r, int nth = 0) const;
+  juce::String bindAt(juce::Point<float> p) const;
   void wheelAt(juce::Point<float> p, float deltaY);
   void dragMatrixDepth(juce::Point<float> p, float dx);
   // MOD tab matrix view: entries in the list (used rows + "+ add"), the first one in view, and scrolling by rows.

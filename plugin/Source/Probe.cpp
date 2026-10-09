@@ -1,5 +1,6 @@
 // ShogunProbe: headless checks of the plugin shell (spec v2.2 §15.0 step 4) and the 8 tab renders.
 //   ShogunProbe <out-dir>   writes tab_0_main.png … tab_7_global.png and prints one line per check.
+#include <cstring>
 #include <cmath>
 #include <iostream>
 
@@ -30,6 +31,7 @@ struct FakeHead : juce::AudioPlayHead {
 
 struct Render {
   float peakMain = 0.0f, peakAux = 0.0f;
+  std::uint64_t hash = 1469598103934665603ull;  // FNV-1a over the main pair's sample bits
 };
 
 Render render(ShogunAudioProcessor& proc, int samples, juce::MidiBuffer* midi = nullptr, FakeHead* head = nullptr) {
@@ -46,6 +48,13 @@ Render render(ShogunAudioProcessor& proc, int samples, juce::MidiBuffer* midi = 
     proc.processBlock(buf, m);
     if (head) head->ppq += head->bpm / 60.0 * block / proc.getSampleRate();
     r.peakMain = std::fmax(r.peakMain, std::fmax(buf.getMagnitude(0, 0, block), buf.getMagnitude(1, 0, block)));
+    for (int c = 0; c < std::min(2, ch); ++c)
+      for (int i = 0; i < block; ++i) {
+        std::uint32_t u;
+        const float s = buf.getSample(c, i);
+        std::memcpy(&u, &s, 4);
+        r.hash = (r.hash ^ u) * 1099511628211ull;
+      }
     for (int c = 2; c < ch; ++c) r.peakAux = std::fmax(r.peakAux, buf.getMagnitude(c, 0, block));
   }
   return r;
@@ -219,6 +228,58 @@ int main(int argc, char** argv) {
                                                          " programs save and reload to the same state");
   }
 
+  // ---- program load is atomic for the audio thread (B): a host block landing between the INIT reset and the
+  // program's values (here: right in the middle of loadProgram) applies nothing, and the next block sets the whole new
+  // kit at once. Switching from the kit with the most BD1 DRIVE to a kit without, with that block in between, renders
+  // bit-identically to the same switch with no block mid-load, and peaks within the kits' own levels (the switch's
+  // overlap of old tails and new hits included) + 1 dB.
+  {
+    int a = -1, b = -1;
+    double most = 0.0;
+    for (int i = 1; i < factory::kPrograms; ++i) {
+      Patch pt;
+      factory::loadProgram(i, pt);
+      if (pt.u[P_BD1_DRIVE] > most) { most = pt.u[P_BD1_DRIVE]; a = i; }
+      if (b < 0 && dsp::exactEq(pt.u[P_BD1_DRIVE], 0.0)) b = i;
+    }
+    auto start = [&](int prog) {
+      auto q = fresh();
+      q->setCurrentProgram(prog);
+      setU(*q, "CLOCK:SOURCE", 0.5f);
+      q->requestRun(true);
+      return q;
+    };
+    const float pa = render(*start(a), 96000).peakMain, pb = render(*start(b), 96000).peakMain;
+    float worst = 0.0f, ref = 0.0f;
+    bool skipped = true, same = true;
+    for (int offs : {3072, 12288, 24064, 47104}) {
+      auto q = start(a);
+      render(*q, offs);
+      const double before = q->engine().param(P_BD1_DRIVE);
+      q->loadProgramWith(b, [&] {
+        render(*q, 512);  // the host block in the middle of the load
+        skipped = skipped && dsp::exactEq(q->engine().param(P_BD1_DRIVE), before);
+      });
+      const Render mid = render(*q, 48000);
+      skipped = skipped && dsp::exactEq(q->engine().param(P_BD1_DRIVE), 0.0);
+      auto r = start(a);  // reference: the same switch after the same blocks, nothing mid-load
+      render(*r, offs + 512);
+      r->loadProgram(b);
+      const Render plain = render(*r, 48000);
+      same = same && mid.hash == plain.hash;
+      worst = std::fmax(worst, mid.peakMain);
+      ref = std::fmax(ref, plain.peakMain);
+    }
+    auto db = [](float v) { return juce::String(20.0 * std::log10(static_cast<double>(v)), 2); };
+    const float lim = std::fmax(std::fmax(pa, pb), ref) * 1.122f;  // +1 dB
+    check(a > 0 && b > 0 && skipped && same && worst <= lim, "program load race",
+          juce::String::fromUTF8(factory::programName(a)) + " (BD1 DRIVE " + juce::String(most, 3) + ") -> " +
+              juce::String::fromUTF8(factory::programName(b)) + ", block mid-load at 4 offsets: peak " + db(worst) +
+              " dBFS (same switch without the mid-load block " + db(ref) + ", kits alone " + db(pa) + " / " + db(pb) +
+              "); bit-identical to the plain switch " + (same ? "yes" : "NO") + "; mid-load block applied nothing " +
+              (skipped ? "yes" : "NO"));
+  }
+
   // ---- state: XML SHOGUN version=2 with the JSON patch; alias resolution on load
   {
     auto p = fresh();
@@ -363,6 +424,39 @@ int main(int argc, char** argv) {
     check(written == 8, "tab renders", juce::String(written) + " PNGs in " + outDir.getFullPathName());
   }
 
+
+  // ---- GRID tab cells (C): every one of the 16 x 32 cells is a row-high rect whose centre hits that cell, the
+  // playhead column over step 5 is not a cell, and clicking column 5 of row 2 edits row 2 only (BD1 untouched).
+  {
+    auto p = fresh();
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+    auto& pn = dynamic_cast<ShogunAudioProcessorEditor*>(ed.get())->panel();
+    pn.setTab(2);
+    int cells = 0, bad = 0;
+    juce::String firstBad;
+    for (int r = 0; r < 16; ++r)
+      for (int c = 0; c < 32; ++c) {
+        const juce::String name = "grid:" + juce::String(r) + ":" + juce::String(c);
+        juce::Rectangle<float> rc;
+        const bool found = pn.bindRect(name.toRawUTF8(), rc), second = pn.bindRect(name.toRawUTF8(), rc, 1);
+        const bool ok = found && !second && rc.getHeight() > 15.0f && rc.getHeight() < 26.5f &&
+                        pn.bindAt(rc.getCentre()) == name;
+        cells += found ? 1 : 0;
+        if (!ok && bad++ == 0) firstBad = name + " h=" + juce::String(rc.getHeight(), 1);
+      }
+    Pattern& pat = p->editPattern();
+    const bool bd1Before = pat.tracks[0].steps[4].on, r2Before = pat.tracks[1].steps[4].on;
+    juce::Rectangle<float> c14;
+    pn.bindRect("grid:1:4", c14);
+    pn.clickAt(c14.getCentre());
+    const bool clickOk = pat.tracks[0].steps[4].on == bd1Before && pat.tracks[1].steps[4].on != r2Before;
+    juce::Rectangle<float> ph;
+    const bool playhead = pn.bindRect("playhead", ph) && ph.getHeight() > 26.5f * 15.0f;
+    check(cells == 512 && bad == 0 && clickOk && playhead, "GRID cells",
+          juce::String(cells) + " cells, " + juce::String(bad) + " bad" + (bad ? " (first " + firstBad + ")" : juce::String()) +
+              "; row 2 col 5 click edits row 2 only " + (clickOk ? "yes" : "NO") + "; playhead column separate " +
+              (playhead ? "yes" : "NO"));
+  }
 
   // ---- MOD tab matrix past ten rows: all 32 slots in use; the view shows 10 and scrolls (▲ ▼ keys = a page, wheel =
   // a row). Every slot is reached by scrolling and edited through the panel (CURVE, ON, DEPTH drag), then rows are

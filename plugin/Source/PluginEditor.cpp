@@ -30,7 +30,7 @@ enum B {
   B_LFORATE, B_LFOSCOPE, B_MATRIX, B_CABLES, B_JACK, B_TITLE, B_STEPINFO, B_TRACKINFO, B_TRACKSCALE, B_LOCKINFO,
   B_TRK, B_PAGE, B_COPY, B_PASTE, B_CLEAR, B_RANDOM, B_SHIFTL, B_SHIFTR, B_CLEARLOCKS, B_IDEAL, B_INITPATCH, B_PANIC,
   B_REROLL, B_SERIAL, B_LATENCY, B_RATE, B_OSBADGE, B_SP, B_WP, B_OFF, B_PROG, B_BROWSE, B_AB, B_UNDO, B_REDO, B_SRC,
-  B_ASSIGN, B_UISCALE, B_STATIC
+  B_ASSIGN, B_UISCALE, B_PLAYHEAD, B_STATIC
 };
 
 int voiceIndex(const juce::String& s) {
@@ -277,7 +277,7 @@ void ShogunPanel::buildBindings() {
       {"clearlocks", B_CLEARLOCKS}, {"ideal", B_IDEAL}, {"initpatch", B_INITPATCH}, {"panic", B_PANIC},
       {"reroll", B_REROLL}, {"serial", B_SERIAL}, {"latency", B_LATENCY}, {"rate", B_RATE}, {"osbadge", B_OSBADGE},
       {"sp", B_SP}, {"wp", B_WP}, {"off", B_OFF}, {"prog", B_PROG}, {"browse", B_BROWSE}, {"ab", B_AB},
-      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE},
+      {"undo", B_UNDO}, {"redo", B_REDO}, {"src", B_SRC}, {"assign", B_ASSIGN}, {"uiscale", B_UISCALE}, {"playhead", B_PLAYHEAD},
   };
   for (int i = 0; i < kOpCount; ++i) {
     const LayoutOp& o = kOps[i];
@@ -503,6 +503,11 @@ void ShogunPanel::paintOp(juce::Graphics& g, const LayoutOp& o, const Bound* b) 
       if (st.on) fill = st.acc >= 3 ? 0xFFF0B030u : (st.acc == 2 ? 0xFF4AA862u : 0xFF2F6B3Fu);
       if (running && b->b == curStep % juce::jmax(1, tr.len)) stroke = 0xFFF2F1EAu;
       if (b->a == selVoice_ && b->b == selStep_) stroke = 0xFFF0B030u;
+      break;
+    }
+    case B_PLAYHEAD: {  // GRID column highlight: follows the step while running, gone when stopped
+      if (!running || curStep < 0) return;
+      x += (1200.0f - 12.0f - 150.0f) / 32.0f * static_cast<float>(curStep % 32 - 4);  // layout column 5 + n
       break;
     }
     case B_GRIDSEL: {
@@ -1049,6 +1054,21 @@ bool ShogunPanel::pressBind(const char* bind, bool right, bool shift, int nth) {
     return true;
   }
   return false;
+}
+
+bool ShogunPanel::bindRect(const char* bind, juce::Rectangle<float>& r, int nth) const {
+  for (int bi : tabBounds_[tab_]) {
+    const LayoutOp& o = kOps[bounds_[static_cast<size_t>(bi)].op];
+    if (std::strcmp(o.bind, bind) != 0 || nth-- > 0) continue;
+    r = {o.x, o.y, o.w, o.h};
+    return true;
+  }
+  return false;
+}
+
+juce::String ShogunPanel::bindAt(juce::Point<float> p) const {
+  const int bi = findBound(p);
+  return bi < 0 ? juce::String() : u8(kOps[bounds_[static_cast<size_t>(bi)].op].bind);
 }
 
 bool ShogunPanel::clickAt(juce::Point<float> p, bool right) {

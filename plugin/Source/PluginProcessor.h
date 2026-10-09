@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 // SHOGUN plugin shell (spec v2.2 §15.0 step 4): the engine at the host rate (no resampler), host lock, float
 // parameters with SECTION:LABEL ids, latency 0/23/26, main + 8 aux stereo outputs, state XML SHOGUN v2 with the
 // JSON patch (§14) embedded.
@@ -68,7 +69,11 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::Timer {
   void requestRestart();
   void requestIdeal();
   void initPatch();
-  void loadProgram(int program);  // INIT, then the bank document through patchFromJson; keeps CLOCK:SOURCE
+  void loadProgram(int program) { loadProgramWith(program, nullptr); }
+  // The load itself; midway (probe only) runs between the INIT reset and the program's values, where a host block can
+  // land. A load is atomic for the audio thread: while one is in progress a block applies no parameters or edits, and
+  // the first block after it sets every parameter at once (none glides from INIT values or is marked applied early).
+  void loadProgramWith(int program, const std::function<void()>& midway);  // INIT, then the bank document through patchFromJson; keeps CLOCK:SOURCE
   void stepProgram(int delta);    // header ◀ ▶: the next / previous program, wrapping INIT ↔ the last kit
 
   // Full-state snapshots (message thread): the patch document of patchToJson() plus the program number.
@@ -147,6 +152,23 @@ class ShogunAudioProcessor : public juce::AudioProcessor, private juce::Timer {
   std::vector<float> last_;
   int currentProgram_ = 0;
   std::atomic<bool> snapParams_{false};  // next block sets parameters without smoothing (program change)
+  std::atomic<int> loading_{0};          // a program load / state recall is between its reset and its values
+  std::atomic<bool> applyAll_{false};    // next block re-applies every parameter (program change)
+  struct LoadGuard {
+    explicit LoadGuard(ShogunAudioProcessor& p) : p_(p) {
+      p_.loading_.fetch_add(1, std::memory_order_acq_rel);
+      p_.markLoad();
+    }
+    ~LoadGuard() {
+      p_.markLoad();
+      p_.loading_.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    ShogunAudioProcessor& p_;
+  };
+  void markLoad() {
+    applyAll_.store(true, std::memory_order_release);
+    snapParams_.store(true, std::memory_order_release);
+  }
   std::vector<int> ccToParam_[128];
 
   double sr_ = 48000.0;
