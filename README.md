@@ -15,6 +15,8 @@ SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every
 
 **Found a bug?** Please [open a GitHub issue](https://github.com/martialsystems/shogun/issues/new/choose) and fill in the bug report form.
 
+**Download the Manual** [Here.](https://github.com/martialsystems/shogun/blob/main/docs/manual/SHOGUN_Manual.pdf)
+
 ## Features
 
 ### Voices
