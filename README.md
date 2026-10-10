@@ -1,3 +1,5 @@
+Download: [Mac](https://github.com/martialsystems/shogun/releases/latest/download/SHOGUN-macOS.zip), [Windows](https://github.com/martialsystems/shogun/releases/latest/download/SHOGUN-Windows.zip).
+
 > **Found a bug?** Please [open a GitHub issue](https://github.com/martialsystems/shogun/issues/new/choose) and fill in the bug report form.
 
 # SHOGUN
