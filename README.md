@@ -1,3 +1,11 @@
+
+
+# Shogun
+
+**A sixteen-voice analog-style drum machine with a full patch bay, from Martial Systems.**
+
+SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every voice, and a 151-jack patch bay that cables to the other instruments in the Jidai Collection. It runs as a VST3 instrument in your DAW and as a playable web page built from the same engine.
+
 ## Download:
 
 - [Mac](https://github.com/martialsystems/shogun/releases/latest/download/SHOGUN-macOS.zip)
@@ -5,13 +13,7 @@
   
 - [Jidai Collection](https://github.com/martialsystems/jidai-collection)
 
-> **Found a bug?** Please [open a GitHub issue](https://github.com/martialsystems/shogun/issues/new/choose) and fill in the bug report form.
-
-# SHOGUN
-
-**A sixteen-voice analog-style drum machine with a full patch bay, from Martial Systems.**
-
-SHOGUN has fourteen drum voices and two synth voices, a step sequencer for every voice, and a 151-jack patch bay that cables to the other instruments in the Jidai Collection. It runs as a VST3 instrument in your DAW and as a playable web page built from the same engine.
+**Found a bug?** Please [open a GitHub issue](https://github.com/martialsystems/shogun/issues/new/choose) and fill in the bug report form.
 
 ## Features
 
